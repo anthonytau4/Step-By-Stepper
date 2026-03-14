@@ -1,0 +1,1 @@
+Open index.html or index.single.html after unzipping. For direct offline use on PC/Android, use index.html in the single-file ZIP.\n
