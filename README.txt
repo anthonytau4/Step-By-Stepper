@@ -9,4 +9,4 @@ Files to keep together after unzipping:
 - open-right-click.mp3
 - delete.mp3
 
-This build updates the What's New tab so it reads more naturally, in a web-dev voice, instead of sounding like AI release filler.
+This build updates the What's New tab so it reads more naturally, in a web-dev voice.
