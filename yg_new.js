@@ -1,0 +1,245 @@
+const W={useState:(x)=>[x,()=>{}]};
+const u={jsx:()=>null,jsxs:()=>null};
+const Ll={};
+function Sg(){return "";}
+function yg({meta:e,sections:t,tags:r,dark:o}){
+  const [n,i]=W.useState(!1);
+
+  const l=()=>{
+    try{
+      if(typeof window<"u"&&typeof document<"u"){
+        const c=document.getElementById("print-sheet");
+        const h=document.getElementById("print-sheet-wrap");
+        if(c&&h){
+          const v=c.style.transform;
+          const L=c.style.width;
+          const N=h.style.minHeight;
+          const z=h.style.padding;
+          const j=()=>{
+            c.style.transform=v;
+            c.style.width=L;
+            h.style.minHeight=N;
+            h.style.padding=z;
+            window.removeEventListener("afterprint",j);
+          };
+          h.style.padding="0";
+          c.style.transform="scale(1)";
+          c.style.width="100%";
+          h.style.minHeight="auto";
+          requestAnimationFrame(()=>{
+            requestAnimationFrame(()=>{
+              const V=96;
+              const D=210/25.4*V;
+              const ye=297/25.4*V;
+              const Mt=12/25.4*V;
+              const Wt=D-Mt*2;
+              const No=ye-Mt*2;
+              const Fr=c.getBoundingClientRect();
+              const Er=Math.max(1,Fr.width);
+              const ti=Math.max(1,c.scrollHeight,Fr.height);
+              const Dr=Math.min(1,Wt/Er,No/ti);
+              c.style.transformOrigin="top center";
+              c.style.transform=`scale(${Dr})`;
+              c.style.width=`${Er/Dr}px`;
+              h.style.minHeight=`${ti*Dr}px`;
+              window.addEventListener("afterprint",j,{once:!0});
+              window.print();
+              setTimeout(j,1500);
+            });
+          });
+          return;
+        }
+      }
+      window.print();
+    }catch{}
+  };
+
+  const s=(c)=>{
+    if(c.type==="marker"){
+      const h=c.markerType==="restart";
+      return `*** ${h?"RESTART":"TAG"} HERE ON WALL ${c.wall||"_"} ***`;
+    }
+    const v=(c.name||"").trim();
+    const L=(c.description||"").trim();
+    const N=(c.foot||"").trim();
+    const z=(c.note||"").trim();
+    const j=[];
+    if(c.count) j.push(`${c.count}:`);
+    if(v&&L) j.push(`${v}: ${L}`);
+    else if(v) j.push(v);
+    else if(L) j.push(L);
+    if(N) j.push(`[${N}]`);
+    if(c.showNote&&z) j.push(`(Note: ${z})`);
+    return j.join(" ").replace(/\s+/g," ").trim();
+  };
+
+  const a=(c,h)=>{
+    const v=[];
+    let L=0;
+    for(const N of c||[]){
+      L+=1;
+      const z=(N?.name)||`${h} ${L}`;
+      const j=(N?.steps)||[];
+      v.push(z);
+      for(const V of j) v.push(s(V));
+      v.push("");
+    }
+    return v;
+  };
+
+  const d=async()=>{
+    const c=[];
+    const h=(e.title||"Untitled Dance").trim();
+    c.push(h);
+
+    const v=[];
+    if(e.counts) v.push(`Count: ${e.counts}`);
+    if(e.walls) v.push(`Wall: ${e.walls}`);
+    if(e.level) v.push(`Level: ${e.level}`);
+    if(v.length) c.push(v.join(" | "));
+
+    const L=Sg(e);
+    if(L) c.push(`Choreographer: ${L}`);
+    if(e.music) c.push(`Music: ${e.music}`);
+    c.push("");
+
+    c.push(...a(t,"Section"));
+
+    if(r&&r.length){
+      c.push("Tags & Bridges","");
+      for(const N of r){
+        c.push(N?.name||"Untitled Tag");
+        for(const z of (N?.sections)||[]){
+          if(z?.name) c.push(z.name);
+          for(const j of (z?.steps)||[]) c.push(s(j));
+          c.push("");
+        }
+      }
+    }
+
+    const N=c.join("\n").replace(/\n{3,}/g,"\n\n").trim();
+    let z=!1;
+
+    try{
+      if(navigator.clipboard&&navigator.clipboard.writeText){
+        await navigator.clipboard.writeText(N);
+        z=!0;
+      }
+    }catch{}
+
+    if(!z){
+      try{
+        const j=document.createElement("textarea");
+        j.value=N;
+        j.setAttribute("readonly","");
+        j.style.position="fixed";
+        j.style.opacity="0";
+        document.body.appendChild(j);
+        j.focus();
+        j.select();
+        z=document.execCommand("copy");
+        document.body.removeChild(j);
+      }catch{}
+    }
+
+    i(!0);
+    window.setTimeout(()=>i(!1),1600);
+    if(!z) window.prompt("Copy this text:",N);
+  };
+
+  const m=(c)=>{
+    if(c.type==="marker"){
+      const h=c.markerType==="restart";
+      return u.jsxs("div",{
+        className:`py-3 my-4 text-center font-black uppercase tracking-widest text-sm border-y-2 print:border-y-2 print:py-2 print:my-2 ${h?"text-red-500 border-red-500/20 print:text-black print:border-black":"text-orange-500 border-orange-500/20 print:text-black print:border-black"}`,
+        children:["*** ",h?"RESTART":"TAG"," HERE ON WALL ",c.wall||"_"," ***"]
+      },c.id);
+    }
+    return u.jsxs("div",{
+      className:"flex gap-4 sm:gap-8 group items-start",
+      children:[
+        u.jsx("div",{className:"w-12 text-right font-black text-lg sm:text-xl shrink-0 print:text-black",children:c.count}),
+        u.jsxs("div",{
+          className:"flex-1 text-base sm:text-lg leading-tight print:text-black",
+          children:[
+            u.jsxs("span",{className:"font-bold",children:[c.name,":"]}),
+            " ",
+            c.description,
+            u.jsxs("span",{className:"text-[10px] ml-4 font-mono opacity-30 print:opacity-100 print:text-gray-500",children:["[",c.foot,"]"]}),
+            c.showNote&&u.jsxs("div",{className:"mt-1 text-sm italic text-indigo-500 opacity-80 print:text-gray-700",children:["Note: ",c.note]})
+          ]
+        })
+      ]
+    },c.id);
+  };
+
+  return u.jsxs("div",{
+    id:"print-sheet-wrap",
+    className:"relative",
+    children:[
+      u.jsx("div",{
+        className:"absolute top-4 right-4 print:hidden z-10",
+        children:u.jsxs("div",{
+          className:"flex flex-col items-end gap-2",
+          children:[
+            u.jsxs("button",{
+              onClick:l,
+              className:"flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold text-sm shadow-md hover:bg-indigo-700 transition-colors",
+              children:[u.jsx(Ll,{size:16})," Save PDF / Print (1 Page)"]
+            }),
+            u.jsx("button",{
+              onClick:d,
+              className:"px-4 py-2 bg-white/95 dark:bg-neutral-900/95 border border-neutral-300 dark:border-neutral-700 rounded-xl font-bold text-sm shadow-md hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors",
+              children:n?"Copied for Docs":"Copy in Docs Format"
+            })
+          ]
+        })
+      }),
+      u.jsxs("div",{
+        id:"print-sheet",
+        className:`p-6 sm:p-10 rounded-3xl shadow-2xl min-h-[800px] font-serif print:shadow-none print:border-none print:p-0 print:bg-white print:text-black ${o?"bg-neutral-900 border border-neutral-800":"bg-white border border-neutral-200"}`,
+        children:[
+          u.jsx("h1",{className:"text-4xl font-black text-center mb-10 tracking-tighter uppercase leading-tight print:text-black",children:e.title||"Untitled Dance"}),
+          u.jsxs("div",{
+            className:"flex flex-wrap gap-4 sm:gap-10 justify-center border-y py-6 mb-12 uppercase text-[10px] font-black tracking-widest opacity-60 print:opacity-100 print:text-black print:border-black",
+            children:[
+              u.jsxs("div",{children:["Count: ",u.jsx("span",{className:"text-sm font-bold opacity-100 print:text-black",children:e.counts})]}),
+              u.jsxs("div",{children:["Wall: ",u.jsx("span",{className:"text-sm font-bold opacity-100 print:text-black",children:e.walls})]}),
+              u.jsxs("div",{children:["Level: ",u.jsx("span",{className:"text-sm font-bold opacity-100 print:text-black",children:e.level})]}),
+              u.jsxs("div",{className:"w-full text-center mt-2",children:["Choreographer: ",u.jsx("span",{className:"text-sm font-bold opacity-100 print:text-black",children:Sg(e)})]}),
+              u.jsxs("div",{className:"w-full text-center",children:["Music: ",u.jsx("span",{className:"text-sm font-bold italic opacity-100 print:text-black",children:e.music||"-"})]})
+            ]
+          }),
+          u.jsx("div",{
+            className:"space-y-12 print:space-y-8",
+            children:(t||[]).map((c,h)=>u.jsxs("div",{
+              className:"print:break-inside-avoid",
+              children:[
+                u.jsx("h2",{className:"text-lg font-black italic border-b-2 border-current pb-1 mb-6 uppercase tracking-widest print:text-black print:border-black",children:c.name||`Section ${h+1}`}),
+                u.jsx("div",{className:"space-y-4 print:space-y-3",children:(c.steps||[]).map(v=>m(v))})
+              ]
+            },h))
+          }),
+          r&&r.length>0&&u.jsxs("div",{
+            className:"mt-16 space-y-12 print:mt-10 print:space-y-8",
+            children:[
+              u.jsx("div",{className:`border-b-4 pb-2 print:border-black print:border-b-2 ${o?"border-white":"border-neutral-900"}`,children:u.jsx("h1",{className:"text-3xl font-black tracking-tighter uppercase print:text-2xl print:text-black",children:"Tags & Bridges"})}),
+              r.map(c=>u.jsxs("div",{
+                className:"space-y-8 print:space-y-6 print:break-inside-avoid",
+                children:[
+                  u.jsx("h2",{className:"text-2xl font-black uppercase text-orange-500 print:text-black",children:c.name||"Untitled Tag"}),
+                  (c.sections||[]).map(h=>u.jsxs("div",{
+                    children:[
+                      h.name&&u.jsx("h3",{className:"text-sm font-black italic border-b border-current pb-1 mb-4 uppercase tracking-widest opacity-60 print:opacity-100 print:text-black",children:h.name}),
+                      u.jsx("div",{className:"space-y-4 print:space-y-3",children:(h.steps||[]).map(v=>m(v))})
+                    ]
+                  },h.id))
+                ]
+              },c.id))
+            ]
+          })
+        ]
+      })
+    ]
+  });
+}
