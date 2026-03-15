@@ -1,6 +1,6 @@
-Step by Stepper — Android fit + menu tap fix
+Step by Stepper
 
-Files to keep together:
+Files to keep together after unzipping:
 - index.html
 - light-mode.mp3
 - dark-mode.mp3
@@ -9,9 +9,4 @@ Files to keep together:
 - open-right-click.mp3
 - delete.mp3
 
-Open index.html after unzipping.
-
-Changes in this build:
-- tightened the Android layout so the editor fits narrow screens better
-- added a ghost-tap blocker so context-menu actions do not press buttons behind the menu
-- added both changes to the What's New page
+This build updates the What's New tab so it reads more naturally, in a web-dev voice, instead of sounding like AI release filler.
