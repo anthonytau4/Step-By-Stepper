@@ -678,15 +678,14 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   const DATA_KEY = 'linedance_builder_data_v13';
   const FEATURED_KEY = 'stepper_featured_dances_v1';
   const SETTINGS_KEY = 'stepper_sound_settings_v1';
+  const FEATURED_PAGE_ID = 'stepper-featured-page';
+  const SETTINGS_PAGE_ID = 'stepper-settings-page';
   const WHATSNEW_PAGE_ID = 'stepper-whatsnew-page';
-  const INLINE_HOST_ID = 'stepper-editor-inline-host';
-  const CHOREO_PANEL_ID = 'stepper-inline-choreography';
-  const SETTINGS_PANEL_ID = 'stepper-inline-settings';
   const EXTRA_NOTES = [
     'Fix: the page switch GIF now loads properly on Android without the blank image nonsense.',
-    'New: Settings and Choreography now sit right above the editor instead of being shoved into extra page-strip tabs.',
-    'New: Choreography shows the dances you build with the app on this device, so the saved work is easier to reach.',
-    'New: Settings still includes SFX and Thinking Music toggles, now tucked into the editor where they belong.'
+    'New: What\'s New and Settings are both proper standalone pages in the page strip now.',
+    'New: Featured Dances has its own tab now, and dances you build in the app are saved there on this device.',
+    'New: Settings is back with SFX and Thinking Music toggles.'
   ];
   const sfxFiles = ['light-mode.mp3','dark-mode.mp3','tab-change.wav','ui-action.mp3','open-right-click.mp3','delete.mp3'];
   let activeExtraPage = null;
@@ -700,7 +699,6 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   let mainEl = null;
   let footerWrap = null;
   let host = null;
-  let inlineHost = null;
   let thinkingAudio = null;
   let lastSyncedSignature = '';
 
@@ -856,28 +854,13 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     host.id = 'stepper-extra-page-host';
     host.hidden = true;
     host.className = 'max-w-4xl mx-auto px-3 sm:px-4 py-6 sm:py-8 pb-28 sm:pb-32 print:hidden';
-    host.innerHTML = `<section id="${WHATSNEW_PAGE_ID}" hidden></section>`;
+    host.innerHTML = `<section id="${WHATSNEW_PAGE_ID}" hidden></section><section id="${FEATURED_PAGE_ID}" hidden></section><section id="${SETTINGS_PAGE_ID}" hidden></section>`;
     if (mainEl && mainEl.parentNode) {
       mainEl.parentNode.insertBefore(host, footerWrap || mainEl.nextSibling);
     } else {
       document.body.appendChild(host);
     }
     return host;
-  }
-
-  function ensureInlineHost(){
-    if (inlineHost) return inlineHost;
-    inlineHost = document.createElement('div');
-    inlineHost.id = INLINE_HOST_ID;
-    inlineHost.hidden = true;
-    inlineHost.className = 'max-w-4xl mx-auto px-3 sm:px-4 pt-4 sm:pt-6 pb-0 print:hidden';
-    inlineHost.innerHTML = `<div class="space-y-5"><section id="${CHOREO_PANEL_ID}"></section><section id="${SETTINGS_PANEL_ID}"></section></div>`;
-    if (mainEl && mainEl.parentNode) {
-      mainEl.parentNode.insertBefore(inlineHost, mainEl);
-    } else {
-      document.body.appendChild(inlineHost);
-    }
-    return inlineHost;
   }
 
   function themeClasses(){
@@ -926,8 +909,8 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     `;
   }
 
-  function renderChoreographyPanel(targetId){
-    const page = document.getElementById(targetId);
+  function renderFeaturedPage(){
+    const page = document.getElementById(FEATURED_PAGE_ID);
     if (!page) return;
     const featured = getFeaturedDances();
     const theme = themeClasses();
@@ -951,26 +934,26 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       </article>
     `).join('') : `
       <div class="rounded-3xl border p-6 sm:p-8 text-center ${theme.soft}">
-        <p class="text-lg font-bold">No choreography saved yet.</p>
+        <p class="text-lg font-bold">No featured dances yet.</p>
         <p class="mt-2 ${theme.subtle}">Start building a dance, give it a title, and it will appear here on this device.</p>
       </div>
     `;
     page.className = `rounded-3xl border shadow-sm overflow-hidden ${theme.shell}`;
     page.innerHTML = `
       <div class="px-6 py-5 border-b ${theme.panel}">
-        <h2 class="text-2xl font-black tracking-tight uppercase flex items-center gap-2"><span class="stepper-extra-tab-icon">${iconSparkles()}</span> Choreography</h2>
+        <h2 class="text-2xl font-black tracking-tight uppercase flex items-center gap-2"><span class="stepper-extra-tab-icon">${iconSparkles()}</span> Featured Dances</h2>
       </div>
       <div class="p-6 sm:p-8 space-y-5">
         <div class="rounded-2xl border p-5 ${theme.panel}">
-          <p class="text-base sm:text-lg font-bold leading-relaxed">Dances you make with Step by Stepper are collected here automatically on this device, so your choreography sits right above the editor instead of hiding off in another tab.</p>
+          <p class="text-base sm:text-lg font-bold leading-relaxed">Any dances you build with Step by Stepper are collected here automatically on this device, so you can jump back to the ones worth showing off.</p>
         </div>
         ${cards}
       </div>
     `;
   }
 
-  function renderSettingsPanel(targetId){
-    const page = document.getElementById(targetId);
+  function renderSettingsPage(){
+    const page = document.getElementById(SETTINGS_PAGE_ID);
     if (!page) return;
     const theme = themeClasses();
     const settings = getSettings();
@@ -1006,62 +989,49 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       const current = getSettings();
       current.sfxEnabled = !current.sfxEnabled;
       saveSettings(current);
-      renderSettingsPanel(targetId);
+      renderSettingsPage();
     });
     page.querySelector('[data-stepper-setting="thinking"]').addEventListener('click', () => {
       const current = getSettings();
       current.thinkingMusicEnabled = !current.thinkingMusicEnabled;
       saveSettings(current);
       applyThinkingMusic();
-      renderSettingsPanel(targetId);
+      renderSettingsPage();
     });
-  }
-
-  function isEditorSurfaceVisible(){
-    if (!mainEl || activeExtraPage) return false;
-    if (mainEl.style.display === 'none') return false;
-    const text = (mainEl.textContent || '').replace(/\s+/g, ' ');
-    return text.includes('Dance Title') && text.includes('Choreographer') && text.includes('Country');
-  }
-
-  function syncInlineHostVisibility(){
-    ensureInlineHost();
-    inlineHost.hidden = !isEditorSurfaceVisible();
-  }
-
-  function renderInlineEditorPanels(){
-    ensureInlineHost();
-    renderChoreographyPanel(CHOREO_PANEL_ID);
-    renderSettingsPanel(SETTINGS_PANEL_ID);
-    syncInlineHostVisibility();
   }
 
   function renderExtraPages(){
     if (!mainEl || !tabStrip) return;
     ensureHost();
     renderWhatsNewPage();
-    renderInlineEditorPanels();
+    renderFeaturedPage();
+    renderSettingsPage();
     updateButtonState();
   }
 
   function setActiveExtra(pageName){
-    activeExtraPage = pageName === 'whatsnew' ? 'whatsnew' : null;
+    activeExtraPage = pageName;
     ensureHost();
     const whatsNewPage = document.getElementById(WHATSNEW_PAGE_ID);
-    if (!activeExtraPage) {
+    const featuredPage = document.getElementById(FEATURED_PAGE_ID);
+    const settingsPage = document.getElementById(SETTINGS_PAGE_ID);
+    if (!pageName) {
       host.hidden = true;
       if (mainEl) mainEl.style.display = '';
       if (footerWrap) footerWrap.style.display = '';
       if (whatsNewPage) whatsNewPage.hidden = true;
+      if (featuredPage) featuredPage.hidden = true;
+      if (settingsPage) settingsPage.hidden = true;
     } else {
       renderExtraPages();
       host.hidden = false;
       if (mainEl) mainEl.style.display = 'none';
       if (footerWrap) footerWrap.style.display = 'none';
-      if (whatsNewPage) whatsNewPage.hidden = false;
+      if (whatsNewPage) whatsNewPage.hidden = pageName !== 'whatsnew';
+      if (featuredPage) featuredPage.hidden = pageName !== 'featured';
+      if (settingsPage) settingsPage.hidden = pageName !== 'settings';
       host.scrollIntoView({ block: 'start', behavior: 'smooth' });
     }
-    syncInlineHostVisibility();
     updateButtonState();
   }
 
@@ -1101,6 +1071,16 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
 
   function updateButtonState(){
     const dark = isDarkMode();
+    const inactive = 'opacity-50 hover:opacity-100';
+    const active = dark ? 'bg-white dark:bg-neutral-700 shadow-sm text-indigo-600 opacity-100' : 'bg-white shadow-sm text-indigo-600 opacity-100';
+    [featuredBtn, settingsBtn].forEach((btn) => {
+      if (!btn) return;
+      btn.className = btn.className.replace(/bg-white|dark:bg-neutral-700|shadow-sm|text-indigo-600|opacity-100/g, '').replace(/\s+/g, ' ').trim();
+      btn.classList.add('stepper-extra-tab','shrink-0','px-2.5','sm:px-4','py-2','rounded-lg','flex','items-center','gap-1.5','sm:gap-2','text-[11px]','sm:text-sm','font-bold','transition-all','whitespace-nowrap');
+      const isActive = (btn === featuredBtn && activeExtraPage === 'featured') || (btn === settingsBtn && activeExtraPage === 'settings');
+      if (isActive) active.split(' ').forEach(cls => cls && btn.classList.add(cls));
+      else inactive.split(' ').forEach(cls => cls && btn.classList.add(cls));
+    });
     if (whatsNewBtn) {
       whatsNewBtn.dataset.stepperOwnPage = 'true';
       whatsNewBtn.style.opacity = activeExtraPage === 'whatsnew' ? '1' : '';
@@ -1124,9 +1104,20 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       .stepper-setting-icon.is-off { color:#737373; }
       .stepper-setting-toggle { transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease; }
       .stepper-setting-toggle:hover { transform: translateY(-1px); box-shadow: 0 12px 30px rgba(0,0,0,.08); }
-      #stepper-extra-page-host,
-      #${INLINE_HOST_ID} { width: 100%; }
-      #${INLINE_HOST_ID} section + section { margin-top: 1.25rem; }
+      #stepper-extra-page-host { width: 100%; }
+      .stepper-tab-strip-scroll {
+        display: flex !important;
+        flex-wrap: nowrap !important;
+        overflow-x: auto !important;
+        overflow-y: hidden !important;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+        scroll-behavior: smooth;
+        touch-action: pan-x !important;
+        overscroll-behavior-x: contain;
+      }
+      .stepper-tab-strip-scroll > * { flex: 0 0 auto !important; }
+      .stepper-tab-strip-scroll::-webkit-scrollbar { display: none; }
     `;
     document.head.appendChild(style);
   }
@@ -1183,6 +1174,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     tabStrip.addEventListener('click', (event) => {
       const button = event.target.closest('button');
       if (!button) return;
+      if (button === featuredBtn || button === settingsBtn) return;
       const text = (button.textContent || '').trim();
       if (/^Build$|^Sheet$/.test(text) && activeExtraPage) {
         setActiveExtra(null);
@@ -1198,12 +1190,13 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     mainEl = document.querySelector('main');
     footerWrap = mainEl && mainEl.parentElement ? mainEl.parentElement.querySelector('div.max-w-4xl.mx-auto.px-3.sm\:px-4.pb-10') : null;
     if (!tabStrip || !mainEl) return false;
-    tabStrip.classList.remove('stepper-tab-strip-scroll');
-    tabStrip.style.maxWidth = '';
-    tabStrip.style.width = '';
-    tabStrip.style.paddingRight = '';
-    tabStrip.style.gap = '';
+    tabStrip.classList.add('stepper-tab-strip-scroll');
+    tabStrip.style.maxWidth = 'min(82vw, calc(100vw - 118px))';
+    tabStrip.style.width = 'min(82vw, calc(100vw - 118px))';
+    tabStrip.style.paddingRight = '6px';
+    tabStrip.style.gap = '4px';
     if (tabStrip.parentElement) tabStrip.parentElement.style.minWidth = '0';
+    wireStripDragScroll();
     if (buildBtn && !buildBtn.__stepperScrollWired) {
       buildBtn.__stepperScrollWired = true;
       buildBtn.addEventListener('click', () => scrollButtonIntoView(buildBtn));
@@ -1221,12 +1214,15 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
         openExtraPage('whatsnew', whatsNewBtn);
       }, true);
     }
-    if (featuredBtn && featuredBtn.parentNode) featuredBtn.remove();
-    if (settingsBtn && settingsBtn.parentNode) settingsBtn.remove();
-    featuredBtn = null;
-    settingsBtn = null;
+    if (!featuredBtn) {
+      featuredBtn = makeExtraButton('Featured Dances', iconSparkles(), 'featured');
+      tabStrip.appendChild(featuredBtn);
+    }
+    if (!settingsBtn) {
+      settingsBtn = makeExtraButton('Settings', iconCog(), 'settings');
+      tabStrip.appendChild(settingsBtn);
+    }
     ensureHost();
-    ensureInlineHost();
     wireNativeTabClose();
     renderExtraPages();
     return true;
@@ -1242,7 +1238,6 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       tries += 1;
       const ready = locateUi();
       injectWhatsNewNotes();
-      syncInlineHostVisibility();
       if (ready && tries > 2) clearInterval(timer);
       if (tries > 40) clearInterval(timer);
     }, 500);
@@ -1251,14 +1246,12 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       applyThinkingMusic();
       renderExtraPages();
       injectWhatsNewNotes();
-      syncInlineHostVisibility();
     }, 1800);
     window.addEventListener('storage', () => {
       saveFeaturedSnapshot();
       applyThinkingMusic();
       renderExtraPages();
       injectWhatsNewNotes();
-      syncInlineHostVisibility();
     });
   }
 
