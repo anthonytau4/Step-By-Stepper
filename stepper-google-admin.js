@@ -180,10 +180,7 @@
   }
 
   function scrollButtonIntoView(button){
-    if (!button || typeof button.scrollIntoView !== 'function') return;
-    try {
-      button.scrollIntoView({ behavior:'smooth', block:'nearest', inline:'center' });
-    } catch {}
+    return;
   }
 
   function applyTabStyles(button, isActive, accentColor){
@@ -244,7 +241,9 @@
       .stepper-google-danger { border-color:rgba(239,68,68,.22); }
       .stepper-google-muted-list { display:grid; gap:.85rem; }
       .stepper-google-member-item { display:flex; align-items:center; justify-content:space-between; gap:1rem; }
-      .stepper-google-google-btn > div { display:flex; justify-content:flex-start; }
+      .stepper-google-google-btn > div { display:flex; justify-content:center; }
+      .stepper-extra-tab { min-width: 114px; justify-content:center; }
+      @media (max-width: 640px) { .stepper-extra-tab { min-width: 104px; } }
     `;
     document.head.appendChild(style);
   }
@@ -409,17 +408,35 @@
     if (state.busy.config) return state.config;
     state.busy.config = true;
     try {
-      state.config = await fetchJson('/api/auth/config');
-      if (state.config && state.config.adminEmail) {
-        // purely informational, not authoritative on the client.
+      const candidates = [];
+      const pushCandidate = (value) => {
+        const normalized = normalizeApiBase(value);
+        if (!normalized) return;
+        if (!candidates.includes(normalized)) candidates.push(normalized);
+      };
+      pushCandidate(state.apiBase);
+      pushCandidate(window.STEPPER_API_BASE || '');
+      if (location.protocol === 'http:' || location.protocol === 'https:') pushCandidate(location.origin);
+      let lastError = null;
+      for (const candidate of candidates) {
+        try {
+          const previous = state.apiBase;
+          state.apiBase = candidate;
+          const config = await fetchJson('/api/auth/config');
+          state.config = config;
+          saveApiBase(candidate);
+          return state.config;
+        } catch (error) {
+          lastError = error;
+        }
       }
-      return state.config;
+      throw lastError || new Error('Could not reach backend.');
     } catch (error) {
       state.config = {
         ok: false,
         googleEnabled: !!FALLBACK_GOOGLE_CLIENT_ID,
         googleClientId: FALLBACK_GOOGLE_CLIENT_ID,
-        error: error.message || 'Could not reach backend.',
+        error: error && error.message ? error.message : 'Could not reach backend.',
         source: 'frontend-fallback'
       };
       return state.config;
@@ -539,17 +556,17 @@
     const theme = themeClasses();
     container.innerHTML = '';
     const effectiveClientId = (state.config && state.config.googleClientId) || FALLBACK_GOOGLE_CLIENT_ID;
-    if (!state.config || !(state.config.googleEnabled || effectiveClientId) || !effectiveClientId) {
+    if (!effectiveClientId) {
       container.innerHTML = `
         <button type="button" disabled class="stepper-google-cta ${theme.button}" style="width:280px;max-width:100%;opacity:.65;cursor:not-allowed">Sign in with Google</button>
-        <p class="mt-3 text-sm ${theme.subtle}">Google sign-in is not configured yet.</p>
       `;
       return;
     }
     try {
+      saveApiBase(window.STEPPER_API_BASE || state.apiBase || location.origin);
       await ensureGsiLoaded();
       if (!(window.google && window.google.accounts && window.google.accounts.id)) {
-        container.innerHTML = `<p class="text-sm ${theme.subtle}">Google sign-in could not load right now. Check that the Google script is allowed on this device.</p>`;
+        container.innerHTML = `<button type="button" disabled class="stepper-google-cta ${theme.button}" style="width:280px;max-width:100%;opacity:.65;cursor:not-allowed">Sign in with Google</button><p class="mt-3 text-sm ${theme.subtle}">Google sign-in script could not load on this device.</p>`;
         return;
       }
       if (state.gisClientId !== effectiveClientId) {
@@ -570,8 +587,14 @@
         shape: 'pill',
         width: 280
       });
+      const helper = document.createElement('div');
+      helper.className = `mt-3 text-xs ${theme.subtle}`;
+      helper.textContent = state.config && state.config.source === 'frontend-fallback'
+        ? 'Using the built-in Google sign-in fallback while the site checks the backend.'
+        : 'Google sign-in is ready.';
+      container.appendChild(helper);
     } catch (error) {
-      container.innerHTML = `<p class="text-sm ${theme.subtle}">${escapeHtml(error.message || 'Google button could not load.')}</p>`;
+      container.innerHTML = `<button type="button" disabled class="stepper-google-cta ${theme.button}" style="width:280px;max-width:100%;opacity:.65;cursor:not-allowed">Sign in with Google</button><p class="mt-3 text-sm ${theme.subtle}">${escapeHtml(error.message || 'Google button could not load.')}</p>`;
     }
   }
 
@@ -1052,15 +1075,21 @@
       return;
     }
     const messages = state.chatMessages.slice(-8).map(msg => `<div style="align-self:${msg.role==='user'?'flex-end':'stretch'};max-width:100%;background:${msg.role==='user'?'#4f46e5':'#ffffff'};color:${msg.role==='user'?'#ffffff':'#111827'};border:1px solid rgba(79,70,229,.12);padding:.75rem .85rem;border-radius:18px;font-size:14px;line-height:1.45;box-shadow:0 8px 24px rgba(0,0,0,.08);">${escapeHtml(msg.text)}</div>`).join('');
-    host.innerHTML = `<div style="width:min(360px, calc(100vw - 24px));background:#f8fafc;border:1px solid rgba(99,102,241,.16);border-radius:24px;box-shadow:0 18px 40px rgba(0,0,0,.18);overflow:hidden;"><div style="padding:.9rem 1rem;background:#4f46e5;color:#fff;display:flex;align-items:center;gap:.6rem;"><div style="font-weight:900;">Site helper</div><button type="button" data-chat-close="1" style="margin-left:auto;border:none;background:rgba(255,255,255,.18);color:#fff;border-radius:999px;padding:.35rem .65rem;font-weight:900;">Close</button></div><div style="padding:1rem;display:flex;flex-direction:column;gap:.7rem;max-height:320px;overflow:auto;">${messages}${state.chatBusy ? '<div style="font-size:13px;color:#6b7280;">Thinking…</div>' : ''}</div><form data-chat-form="1" style="padding:0 1rem 1rem;display:flex;gap:.6rem;"><input data-chat-input="1" type="text" placeholder="Ask where to go or what to press" style="flex:1;border:1px solid rgba(99,102,241,.18);border-radius:999px;padding:.8rem 1rem;background:#fff;" /><button type="submit" style="border:none;background:#4f46e5;color:#fff;border-radius:999px;padding:.8rem 1rem;font-weight:900;">Send</button></form></div>`;
+    host.innerHTML = `<div style="width:min(360px, calc(100vw - 24px));background:#f8fafc;border:1px solid rgba(99,102,241,.16);border-radius:24px;box-shadow:0 18px 40px rgba(0,0,0,.18);overflow:hidden;"><div style="padding:.9rem 1rem;background:#4f46e5;color:#fff;display:flex;align-items:center;gap:.6rem;"><div style="font-weight:900;">Site helper</div><button type="button" data-chat-close="1" style="margin-left:auto;border:none;background:rgba(255,255,255,.18);color:#fff;border-radius:999px;padding:.35rem .65rem;font-weight:900;">Close</button></div><div data-chat-messages="1" style="padding:1rem;display:flex;flex-direction:column;gap:.7rem;max-height:320px;overflow:auto;">${messages}${state.chatBusy ? '<div style="font-size:13px;color:#6b7280;">Thinking…</div>' : ''}</div><form data-chat-form="1" style="padding:0 1rem 1rem;display:flex;gap:.6rem;"><input data-chat-input="1" type="text" placeholder="Ask where to go or what to press" value="${escapeHtml(state.chatDraft || '')}" style="flex:1;border:1px solid rgba(99,102,241,.18);border-radius:999px;padding:.8rem 1rem;background:#fff;" /><button type="submit" style="border:none;background:#4f46e5;color:#fff;border-radius:999px;padding:.8rem 1rem;font-weight:900;">Send</button></form></div>`;
+    const list = host.querySelector('[data-chat-messages="1"]');
+    if (list) list.scrollTop = list.scrollHeight;
     host.querySelector('[data-chat-close="1"]').addEventListener('click', ()=>{ state.chatOpen = false; renderSiteHelper(); });
+    const input = host.querySelector('[data-chat-input="1"]');
+    if (input) {
+      input.addEventListener('input', ()=>{ state.chatDraft = input.value; });
+      try { input.focus({ preventScroll:true }); } catch {}
+    }
     host.querySelector('[data-chat-form="1"]').addEventListener('submit', (event)=>{
       event.preventDefault();
-      const input = host.querySelector('[data-chat-input="1"]');
-      const value = String(input && input.value || '').trim();
+      const value = String(state.chatDraft || '').trim();
       if (!value) return;
       state.chatMessages.push({ role:'user', text:value });
-      input.value = '';
+      state.chatDraft = '';
       renderSiteHelper();
       askSiteHelper(value);
     });
@@ -1324,6 +1353,11 @@
 
   async function prime(){
     ensureStyles();
+    if (location.protocol === 'http:' || location.protocol === 'https:') {
+      const currentOrigin = normalizeApiBase(location.origin);
+      const savedBase = normalizeApiBase(localStorage.getItem(API_BASE_KEY) || '');
+      if (!savedBase || savedBase === 'http://localhost:3000' || savedBase === 'https://localhost:3000') saveApiBase(currentOrigin);
+    }
     if (!locateUi()) return;
     ensureHost();
     await refreshConfig();
