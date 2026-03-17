@@ -518,21 +518,70 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   if (window.__stepperFaviconTransitionInstalled) return;
   window.__stepperFaviconTransitionInstalled = true;
 
-  const GIF_PLAY_MS = 1830;
-  const HOLD_MS = 180;
-  const FADE_MS = 160;
+  const GIF_PLAY_MS = 1300;
+  const HOLD_MS = 220;
+  const FADE_MS = 180;
   const TOTAL_MS = GIF_PLAY_MS + HOLD_MS + FADE_MS;
   const CHANGE_MS = GIF_PLAY_MS;
   const STARTUP_AUDIO_MS = 4064;
-  const STARTUP_MS = Math.max(GIF_PLAY_MS + 220, STARTUP_AUDIO_MS + 260);
+  const STARTUP_BASE_MS = 1830;
+  const STARTUP_MS = Math.max(STARTUP_BASE_MS + 220, STARTUP_AUDIO_MS + 260);
   const overlayId = 'stepper-snake-transition-overlay';
-  const transitionGifSrc = './1000035328.gif';
+  const transitionGifSrc = './stepper_loading_bar_dark_preview.gif';
+  const transitionEndFrameSrc = './stepper_loading_bar_dark_end.png';
   const startupSongSrc = './startup-song.m4a';
+  const TRANSITION_MESSAGE_SETS = {
+    editor: [
+      'Recalculating glossary',
+      'Refreshing dance tools',
+      'Rebuilding section flow',
+      'Loading editor surface'
+    ],
+    preview: [
+      'Updating assets',
+      'Updating step preview',
+      'Configuring counts',
+      'Rebuilding print layout'
+    ],
+    whatsnew: [
+      'Loading whats new',
+      'Checking whats new updates',
+      'Rebuilding release notes',
+      'Syncing update feed'
+    ],
+    featured: [
+      'Finding choreographers',
+      'Checking for updates',
+      'Getting up to date',
+      'Contacting choreographer sheets'
+    ],
+    saveddances: [
+      'Whats a dino?',
+      'Counting leprechauns',
+      'Eating cereal',
+      'Business business'
+    ]
+  };
+  const TRANSITION_LABELS = {
+    editor: 'Editor',
+    preview: 'Sheet',
+    whatsnew: 'Whats New',
+    featured: 'Featured Choreography',
+    saveddances: 'My Saved Dances'
+  };
   let overlay = null;
   let burstHost = null;
+  let statusWrap = null;
+  let statusCard = null;
+  let statusKicker = null;
+  let statusLine = null;
+  let statusTimer = 0;
+  let transitionTimers = [];
   let running = false;
   let startupShown = false;
   let warmGif = null;
+  let warmEndFrame = null;
+  let transitionVisual = null;
   let startupAudio = null;
 
   function ensureOverlay(){
@@ -551,23 +600,88 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
         opacity: 0;
       }
       .stepper-favicon-transition {
-        background: #000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background:
+          radial-gradient(circle at 50% 18%, rgba(129,140,248,.18), transparent 34%),
+          radial-gradient(circle at 50% 82%, rgba(29,78,216,.16), transparent 34%),
+          linear-gradient(180deg, #0d153a 0%, #0a1330 42%, #09102a 100%);
       }
       .stepper-favicon-burst-host {
         position: absolute;
         inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 18px;
+      }
+      .stepper-favicon-status {
+        position: absolute;
+        left: 50%;
+        top: calc(50% + min(22vw, 112px));
+        transform: translateX(-50%);
+        width: min(92vw, 640px);
+        display: flex;
+        justify-content: center;
+        padding: 0 12px;
+      }
+      .stepper-favicon-status-card {
+        min-width: min(82vw, 320px);
+        max-width: min(92vw, 540px);
+        border-radius: 24px;
+        padding: 14px 18px 14px;
+        background: linear-gradient(180deg, rgba(14,18,40,.78), rgba(8,11,28,.9));
+        border: 1px solid rgba(186,194,255,.18);
+        box-shadow: 0 24px 68px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.05);
+        backdrop-filter: blur(10px);
+        text-align: center;
+        color: #fff;
+      }
+      .stepper-favicon-status-kicker {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0 auto 10px;
+        padding: 7px 12px;
+        border-radius: 999px;
+        border: 1px solid rgba(165,180,252,.26);
+        background: rgba(99,102,241,.16);
+        color: rgba(224,231,255,.95);
+        font-size: 11px;
+        font-weight: 900;
+        letter-spacing: .16em;
+        text-transform: uppercase;
+      }
+      .stepper-favicon-status-line {
+        margin: 0;
+        font-size: clamp(17px, 2.8vw, 24px);
+        line-height: 1.18;
+        font-weight: 900;
+        letter-spacing: -.02em;
+        color: #fff;
+        text-wrap: balance;
+        transition: opacity 160ms ease, transform 240ms cubic-bezier(.22, 1, .36, 1);
+      }
+      .stepper-favicon-status-line.is-swapping {
+        opacity: .18;
+        transform: translateY(8px) scale(.985);
+      }
+      .stepper-favicon-transition.is-running .stepper-favicon-status-card {
+        animation: stepperStatusCard ${TOTAL_MS}ms ease forwards;
       }
       .stepper-favicon-burst {
         position: absolute;
         left: 50%;
         top: 50%;
-        width: min(92vmin, 620px);
-        height: min(92vmin, 620px);
+        width: min(92vw, 700px);
+        height: auto;
         object-fit: contain;
-        transform: translate(-50%, -50%);
+        transform: translate(-50%, calc(-50% - min(10vw, 46px)));
         opacity: 0;
-        filter: drop-shadow(0 0 34px rgba(255,170,65,.22));
-        will-change: opacity, filter;
+        filter: drop-shadow(0 20px 36px rgba(0,0,0,.26));
+        will-change: opacity, transform, filter;
+        image-rendering: auto;
       }
       .stepper-favicon-transition.is-running {
         animation: stepperSnakeOverlay ${TOTAL_MS}ms linear forwards;
@@ -821,16 +935,22 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
         100% { opacity: 0; }
       }
       @keyframes stepperSnakePresence {
-        0% { opacity: 0; filter: drop-shadow(0 0 16px rgba(255,168,64,.16)) brightness(.98) saturate(.98); }
-        2% { opacity: 1; filter: drop-shadow(0 0 28px rgba(255,175,70,.24)) brightness(1.02) saturate(1.02); }
-        89% { opacity: 1; filter: drop-shadow(0 0 30px rgba(255,175,70,.22)) brightness(1.03) saturate(1.03); }
-        100% { opacity: 0; filter: drop-shadow(0 0 16px rgba(255,160,60,.14)) brightness(.96) saturate(.96); }
+        0% { opacity: 0; transform: translate(-50%, calc(-50% - min(10vw, 34px))) scale(.985); filter: drop-shadow(0 14px 28px rgba(0,0,0,.18)); }
+        8% { opacity: 1; transform: translate(-50%, calc(-50% - min(10vw, 42px))) scale(1); filter: drop-shadow(0 20px 40px rgba(0,0,0,.26)); }
+        84% { opacity: 1; transform: translate(-50%, calc(-50% - min(10vw, 42px))) scale(1); filter: drop-shadow(0 20px 40px rgba(0,0,0,.26)); }
+        100% { opacity: 0; transform: translate(-50%, calc(-50% - min(10vw, 48px))) scale(.992); filter: drop-shadow(0 10px 18px rgba(0,0,0,.14)); }
       }
       @keyframes stepperStartupOverlay {
         0% { opacity: 0; }
         10% { opacity: 1; }
         82% { opacity: 1; }
         100% { opacity: 0; }
+      }
+      @keyframes stepperStatusCard {
+        0% { opacity: 0; transform: translateY(16px) scale(.985); }
+        12% { opacity: 1; transform: translateY(0) scale(1); }
+        86% { opacity: 1; transform: translateY(0) scale(1); }
+        100% { opacity: 0; transform: translateY(10px) scale(.988); }
       }
       @keyframes stepperStartupLogo {
         0% { opacity: 0; transform: scale(.78); filter: drop-shadow(0 10px 24px rgba(0,0,0,.32)); }
@@ -851,6 +971,20 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     burstHost.className = 'stepper-favicon-burst-host';
     overlay.appendChild(burstHost);
 
+    statusWrap = document.createElement('div');
+    statusWrap.className = 'stepper-favicon-status';
+    statusWrap.setAttribute('aria-hidden', 'true');
+    statusCard = document.createElement('div');
+    statusCard.className = 'stepper-favicon-status-card';
+    statusKicker = document.createElement('div');
+    statusKicker.className = 'stepper-favicon-status-kicker';
+    statusLine = document.createElement('p');
+    statusLine.className = 'stepper-favicon-status-line';
+    statusCard.appendChild(statusKicker);
+    statusCard.appendChild(statusLine);
+    statusWrap.appendChild(statusCard);
+    overlay.appendChild(statusWrap);
+
     document.body.appendChild(overlay);
     return overlay;
   }
@@ -865,6 +999,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     img.decoding = 'sync';
     img.src = transitionGifSrc;
     burstHost.appendChild(img);
+    transitionVisual = img;
     return img;
   }
 
@@ -872,14 +1007,78 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     ensureOverlay();
     overlay.classList.remove('is-running');
     burstHost.innerHTML = '';
+    transitionVisual = null;
+    clearTransitionStatus();
     void overlay.offsetWidth;
   }
 
+  function getTransitionKey(target){
+    const key = String(target || 'editor').toLowerCase();
+    return Object.prototype.hasOwnProperty.call(TRANSITION_MESSAGE_SETS, key) ? key : 'editor';
+  }
+
+  function clearTransitionTimers(){
+    if (!transitionTimers.length) return;
+    transitionTimers.forEach(timer => window.clearTimeout(timer));
+    transitionTimers = [];
+  }
+
+  function swapStatusText(nextText){
+    if (!statusLine) return;
+    statusLine.classList.add('is-swapping');
+    const swapTimer = window.setTimeout(() => {
+      if (!statusLine) return;
+      statusLine.textContent = nextText;
+      statusLine.classList.remove('is-swapping');
+    }, 110);
+    transitionTimers.push(swapTimer);
+  }
+
+  function getStatusMoments(messageCount){
+    if (messageCount <= 1) return [0];
+    if (messageCount === 2) return [0, 760];
+    if (messageCount === 3) return [0, 310, 910];
+    return [0, 170, 520, 980];
+  }
+
+  function clearTransitionStatus(){
+    if (statusTimer) {
+      window.clearInterval(statusTimer);
+      statusTimer = 0;
+    }
+    clearTransitionTimers();
+    if (statusLine) statusLine.classList.remove('is-swapping');
+    if (statusKicker) statusKicker.textContent = '';
+    if (statusLine) statusLine.textContent = '';
+  }
+
+  function applyTransitionStatus(target){
+    ensureOverlay();
+    clearTransitionStatus();
+    const key = getTransitionKey(target);
+    const messages = (TRANSITION_MESSAGE_SETS[key] || TRANSITION_MESSAGE_SETS.editor).slice();
+    const label = TRANSITION_LABELS[key] || 'Loading';
+    if (statusKicker) statusKicker.textContent = label;
+    if (!messages.length) return;
+    if (statusLine) statusLine.textContent = messages[0];
+    const moments = getStatusMoments(messages.length);
+    messages.slice(1).forEach((message, index) => {
+      const timer = window.setTimeout(() => swapStatusText(message), moments[index + 1] || 0);
+      transitionTimers.push(timer);
+    });
+  }
+
   function prepareTransitionAssets(){
-    if (warmGif) return warmGif;
-    warmGif = new Image();
-    warmGif.decoding = 'async';
-    warmGif.src = transitionGifSrc;
+    if (!warmGif) {
+      warmGif = new Image();
+      warmGif.decoding = 'async';
+      warmGif.src = transitionGifSrc;
+    }
+    if (!warmEndFrame) {
+      warmEndFrame = new Image();
+      warmEndFrame.decoding = 'async';
+      warmEndFrame.src = transitionEndFrameSrc;
+    }
     return warmGif;
   }
 
@@ -895,26 +1094,41 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
 
   function runStartupSplash(){ return; }
 
-  window.__stepperRunFaviconTransition = function(changePage){
+  window.__stepperRunFaviconTransition = function(changePage, options){
     ensureOverlay();
     if (running) return;
     running = true;
 
+    const target = typeof options === 'string'
+      ? options
+      : options && typeof options === 'object'
+        ? (options.target || options.page || 'editor')
+        : 'editor';
+
     prepareTransitionAssets();
     resetTransitionAnimation();
     createBurstImage();
+    applyTransitionStatus(target);
     overlay.hidden = false;
     requestAnimationFrame(() => {
       overlay.classList.add('is-running');
       try { if (typeof changePage === 'function') changePage(); } catch (error) { console.error(error); }
     });
 
-    window.setTimeout(() => {
+    const freezeTimer = window.setTimeout(() => {
+      if (transitionVisual) transitionVisual.src = transitionEndFrameSrc;
+    }, Math.max(0, GIF_PLAY_MS - 36));
+    transitionTimers.push(freezeTimer);
+
+    const hideTimer = window.setTimeout(() => {
       overlay.hidden = true;
       overlay.classList.remove('is-running');
       burstHost.innerHTML = '';
+      transitionVisual = null;
+      clearTransitionStatus();
       running = false;
     }, TOTAL_MS + 34);
+    transitionTimers.push(hideTimer);
   };
 
   if (document.readyState === 'loading') {
@@ -1010,6 +1224,8 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   const CHOREO_PANEL_ID = 'stepper-inline-choreography';
   const SETTINGS_PANEL_ID = 'stepper-inline-settings';
   const EXTRA_NOTES = [
+    'New: tab switches now use a single loading pass with smoother pacing, awkward hold beats, and a proper finish right as the loading bar lands.',
+    'New: tab changes now run destination-based loading states, so Editor, Sheet, Whats New, Featured Choreo, and My Saved Dances each show their own status pass during the switch.',
     'New Featured choreography! Check it out in the Featured Choreography tab!',
     'New: Counts and Walls can stay on Auto now, and the Sheet view shows the real detected numbers instead of printing AUTO.',
     'New: counts now auto-sync from the built step content, and tags are left out of that total on purpose.',
@@ -1955,7 +2171,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   function openExtraPage(pageName, button){
     scrollButtonIntoView(button);
     const openPage = () => setActiveExtra(pageName);
-    if (window.__stepperRunFaviconTransition) window.__stepperRunFaviconTransition(openPage);
+    if (window.__stepperRunFaviconTransition) window.__stepperRunFaviconTransition(openPage, { target: pageName });
     else openPage();
   }
 
@@ -2119,9 +2335,15 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       buildBtn.__stepperScrollWired = true;
       buildBtn.addEventListener('click', () => scrollButtonIntoView(buildBtn));
     }
+    if (buildBtn && !buildBtn.__stepperTransitionWired) {
+      buildBtn.__stepperTransitionWired = true;
+    }
     if (sheetBtn && !sheetBtn.__stepperScrollWired) {
       sheetBtn.__stepperScrollWired = true;
       sheetBtn.addEventListener('click', () => scrollButtonIntoView(sheetBtn));
+    }
+    if (sheetBtn && !sheetBtn.__stepperTransitionWired) {
+      sheetBtn.__stepperTransitionWired = true;
     }
     if (whatsNewBtn && !whatsNewBtn.__stepperOwnPageWired) {
       whatsNewBtn.__stepperOwnPageWired = true;
@@ -2291,6 +2513,8 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     elegant: 'Georgia, "Times New Roman", serif'
   };
   const EXTRA_NOTES = [
+    'New: tab switches now use a single loading pass with smoother pacing, awkward hold beats, and a proper finish right as the loading bar lands.',
+    'New: tab changes now run destination-based loading states, so Editor, Sheet, Whats New, Featured Choreo, and My Saved Dances each show their own status pass during the switch.',
     'New Featured choreography! Check it out in the Featured Choreography tab!',
     'New: Counts and Walls can stay on Auto now, and the Sheet view shows the real detected numbers instead of printing AUTO.',
     'New: counts now auto-sync from the built step content, and tags are left out of that total on purpose.',
