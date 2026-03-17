@@ -4,40 +4,73 @@
 
   const DATA_KEY = 'linedance_builder_data_v13';
   const PHR_TOOLS_KEY = 'stepper_current_phrased_tools_v1';
-  const GOOGLE_FRONTEND_KEY = 'stepper_google_frontend_profile_v1';
   const FEATURED_CHOREO_KEY = 'stepper_featured_choreo_v1';
+  const SESSION_KEY = 'stepper_google_auth_session_v2';
   const API_BASE_KEY = 'stepper_api_base_v1';
-  const TOKEN_KEY = 'stepper_google_id_token_v1';
-  const PROFILE_KEY = 'stepper_google_backend_profile_v1';
-  const ONLINE_COUNT_KEY = 'stepper_online_members_v1';
-  const SIGN_IN_PAGE_ID = 'stepper-google-signin-page';
+  const SIGNIN_PAGE_ID = 'stepper-google-signin-page';
   const ADMIN_PAGE_ID = 'stepper-google-admin-page';
-  const SIGN_IN_TAB_ID = 'stepper-google-signin-tab';
+  const HOST_ID = 'stepper-google-admin-host';
+  const SIGNIN_TAB_ID = 'stepper-google-signin-tab';
   const ADMIN_TAB_ID = 'stepper-google-admin-tab';
   const ADMIN_EMAIL = 'anthonytau4@gmail.com';
+  const DEFAULT_RENDER_SERVICE_ID = 'srv-d6ss4295pdvs73e1iifg';
+  const SYNC_INTERVAL_MS = 6000;
+  const PRESENCE_INTERVAL_MS = 30000;
+  const FEATURED_SYNC_INTERVAL_MS = 18000;
 
-  let activeOwnPage = null;
-  let host = null;
-  let hostStack = null;
-  let signInPage = null;
-  let adminPage = null;
-  let tabStrip = null;
-  let buildBtn = null;
-  let sheetBtn = null;
-  let whatsNewBtn = null;
-  let savedBtn = null;
-  let featuredBtn = null;
-  let signInBtn = null;
-  let adminBtn = null;
-  let mainEl = null;
-  let footerWrap = null;
-  let configCache = null;
-  let configPromise = null;
-  let adminDanceCache = [];
-  let authMessage = '';
-  let onlineMembers = Number(localStorage.getItem(ONLINE_COUNT_KEY) || '0') || 0;
-  let lastSyncSignature = '';
-  let syncBusy = false;
+  const state = {
+    activePage: null,
+    apiBase: readApiBase(),
+    config: null,
+    presence: { onlineCount: 0, members: [] },
+    session: readJson(SESSION_KEY, null),
+    adminDances: [],
+    featured: [],
+    lastSyncedSignature: '',
+    ui: {
+      buildBtn: null,
+      sheetBtn: null,
+      tabStrip: null,
+      mainEl: null,
+      footerWrap: null,
+      host: null,
+      signInBtn: null,
+      adminBtn: null
+    },
+    gisReady: false,
+    gisPromise: null,
+    gisClientId: '',
+    busy: {
+      config: false,
+      session: false,
+      admin: false,
+      feature: false,
+      sync: false
+    }
+  };
+
+  function normalizeEmail(value){
+    return String(value || '').trim().toLowerCase();
+  }
+
+  function normalizeApiBase(value){
+    return String(value || '').trim().replace(/\/+$/, '');
+  }
+
+  function readApiBase(){
+    const explicit = normalizeApiBase(window.STEPPER_API_BASE || '');
+    if (explicit) return explicit;
+    const saved = normalizeApiBase(localStorage.getItem(API_BASE_KEY) || '');
+    if (saved) return saved;
+    if (location.protocol === 'http:' || location.protocol === 'https:') return normalizeApiBase(location.origin);
+    return 'http://localhost:3000';
+  }
+
+  function saveApiBase(value){
+    const normalized = normalizeApiBase(value);
+    state.apiBase = normalized || 'http://localhost:3000';
+    localStorage.setItem(API_BASE_KEY, state.apiBase);
+  }
 
   function readJson(key, fallback){
     try {
@@ -52,16 +85,33 @@
     localStorage.setItem(key, JSON.stringify(value));
   }
 
-  function readAppData(){
-    return readJson(DATA_KEY, null);
+  function saveSession(session){
+    state.session = session && typeof session === 'object' ? session : null;
+    if (state.session) writeJson(SESSION_KEY, state.session);
+    else localStorage.removeItem(SESSION_KEY);
+    updateAdminTabVisibility();
+  }
+
+  function clearSession(){
+    saveSession(null);
+    try {
+      if (window.google && window.google.accounts && window.google.accounts.id) {
+        window.google.accounts.id.disableAutoSelect();
+      }
+    } catch {}
+  }
+
+  function isAdminSession(){
+    return normalizeEmail(state.session && state.session.profile && state.session.profile.email) === normalizeEmail(ADMIN_EMAIL)
+      || !!(state.session && state.session.isAdmin);
   }
 
   function isDarkMode(){
-    const data = readAppData();
+    const data = readJson(DATA_KEY, null);
     return !!(data && data.isDarkMode);
   }
 
-  function theme(){
+  function themeClasses(){
     const dark = isDarkMode();
     return {
       dark,
@@ -70,8 +120,7 @@
       soft: dark ? 'bg-neutral-900/80 border-neutral-800 text-neutral-300' : 'bg-white border-neutral-200 text-neutral-700',
       subtle: dark ? 'text-neutral-400' : 'text-neutral-500',
       button: dark ? 'bg-neutral-900 border-neutral-700 text-neutral-100' : 'bg-white border-neutral-200 text-neutral-900',
-      accent: dark ? 'bg-indigo-900/40 text-indigo-200 border border-indigo-700/70' : 'bg-indigo-50 text-indigo-700 border border-indigo-200',
-      orange: dark ? 'bg-orange-500/15 text-orange-200 border border-orange-400/30' : 'bg-orange-50 text-orange-700 border border-orange-200'
+      orange: dark ? 'bg-orange-500/10 border-orange-400/30 text-orange-200' : 'bg-orange-50 border-orange-200 text-orange-700'
     };
   }
 
@@ -84,829 +133,843 @@
       .replace(/'/g, '&#39;');
   }
 
-  function formatDate(iso){
-    try { return new Date(iso).toLocaleString(); } catch { return 'Recently'; }
+  function formatDate(value){
+    if (!value) return 'Recently';
+    try {
+      return new Date(value).toLocaleString();
+    } catch {
+      return 'Recently';
+    }
   }
 
-  function iconGoogle(){
-    return '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="24" height="24"><path fill="#ff808c" stroke="#191919" stroke-linecap="round" stroke-linejoin="round" d="m20.0157 4.47237 -2.7835 2.62086c-0.7631 -0.81506 -1.7062 -1.44047 -2.754 -1.82632 -1.0477 -0.38585 -2.1712 -0.52146 -3.2807 -0.39602 -1.1095 0.12544 -2.17428 0.50848 -3.10944 1.11853 -0.93517 0.61005 -1.7148 1.43024 -2.27669 2.39511l-3.01303 -2.3913c0.90798 -1.39584 2.12153 -2.56691 3.54884 -3.42459 1.4273 -0.85768 3.03097 -1.37953 4.68972 -1.52605 1.6587 -0.146517 3.329 0.08612 4.8846 0.68032 1.5555 0.5942 2.9556 1.5344 4.0942 2.74946Z" stroke-width="1"></path><path fill="#ffef5e" stroke="#191919" stroke-linecap="round" stroke-linejoin="round" d="m5.8496 15.6732 -2.87912 2.5922c-1.2527 -1.7938 -1.93871 -3.922 -1.9694 -6.1097 -0.030695 -2.18766 0.59534 -4.33427 1.79723 -6.16247l3.01303 2.39129c-0.65148 1.10544 -0.99188 2.36648 -0.98514 3.64958 0.00674 1.2831 0.36035 2.5406 1.0234 3.6391Z" stroke-width="1"></path><path fill="#78eb7b" stroke="#191919" stroke-linecap="round" stroke-linejoin="round" d="M18.8298 20.6376c-1.1798 0.9299 -2.5374 1.6084 -3.9893 1.9939 -1.4519 0.3854 -2.9673 0.4696 -4.4529 0.2474 -1.48566 -0.2222 -2.9101 -0.7462 -4.18565 -1.5396 -1.27554 -0.7934 -2.37519 -1.8395 -3.23125 -3.0739l2.87912 -2.5921c0.51308 0.8604 1.20068 1.6039 2.01853 2.1825 0.81785 0.5785 1.74782 0.9794 2.73005 1.1767 0.9821 0.1974 1.9948 0.1868 2.9726 -0.031 0.9779 -0.2178 1.8993 -0.6379 2.7049 -1.2334l2.5539 2.8695Z" stroke-width="1"></path><path fill="#66e1ff" stroke="#191919" stroke-linecap="round" stroke-linejoin="round" d="M22.9998 10.5654v2.0087c-0.0814 1.5634 -0.4954 3.0915 -1.2146 4.482 -0.7192 1.3906 -1.727 2.6116 -2.9559 3.5815l-2.5539 -2.8696c1.1579 -0.8459 2.0317 -2.0233 2.5061 -3.3765h-5.3469v-3.8261h9.5652Z" stroke-width="1"></path></svg>';
-  }
   function iconUser(){
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21a8 8 0 0 0-16 0"></path><circle cx="12" cy="8" r="4"></circle></svg>';
   }
-  function iconUsers(){
-    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>';
-  }
+
   function iconShield(){
-    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"></path><path d="M9 12l2 2 4-4"></path></svg>';
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>';
   }
 
-  function injectStyles(){
+  function iconMembers(){
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>';
+  }
+
+  function iconMedal(){
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="14" r="6"></circle><path d="M12 8V2"></path><path d="M8 2h8"></path></svg>';
+  }
+
+  function scrollButtonIntoView(button){
+    if (!button || typeof button.scrollIntoView !== 'function') return;
+    try {
+      button.scrollIntoView({ behavior:'smooth', block:'nearest', inline:'center' });
+    } catch {}
+  }
+
+  function applyTabStyles(button, isActive, accentColor){
+    if (!button) return;
+    const dark = isDarkMode();
+    button.style.color = dark ? '#ffffff' : '';
+    button.style.opacity = isActive ? '1' : (dark ? '.92' : '');
+    button.style.transform = isActive ? 'translateY(-1px)' : '';
+    button.style.boxShadow = isActive ? '0 8px 24px rgba(79,70,229,.18)' : '';
+    button.style.background = isActive ? (dark ? '#2f2f2f' : '#ffffff') : '';
+    button.style.borderColor = isActive ? (dark ? '#525252' : '#d4d4d8') : '';
+    if (!dark && isActive && accentColor) button.style.color = accentColor;
+  }
+
+  function updateTabButtons(){
+    applyTabStyles(state.ui.signInBtn, state.activePage === 'signin', '#4f46e5');
+    applyTabStyles(state.ui.adminBtn, state.activePage === 'admin', '#4f46e5');
+  }
+
+  function makeTabButton(label, iconSvg, pageName, id){
+    let button = document.getElementById(id);
+    if (button) return button;
+    button = document.createElement('button');
+    button.type = 'button';
+    button.id = id;
+    button.className = 'stepper-extra-tab shrink-0 px-2.5 sm:px-4 py-2 rounded-lg flex items-center gap-1.5 sm:gap-2 text-[11px] sm:text-sm font-bold transition-all whitespace-nowrap opacity-50 hover:opacity-100';
+    button.innerHTML = `<span class="stepper-extra-tab-icon">${iconSvg}</span><span>${escapeHtml(label)}</span>`;
+    button.addEventListener('click', () => {
+      scrollButtonIntoView(button);
+      const open = () => openPage(pageName);
+      if (window.__stepperRunFaviconTransition) window.__stepperRunFaviconTransition(open, { target: pageName });
+      else open();
+    });
+    return button;
+  }
+
+  function ensureStyles(){
     if (document.getElementById('stepper-google-admin-style')) return;
     const style = document.createElement('style');
     style.id = 'stepper-google-admin-style';
     style.textContent = `
-      .stepper-google-admin-icon { display:inline-flex; align-items:center; justify-content:center; width:1.4rem; height:1.4rem; }
-      .stepper-google-admin-icon svg { width:100%; height:100%; }
-      .stepper-google-admin-tab { flex-shrink:0; }
-      .stepper-google-admin-actions button,
-      .stepper-google-admin-actions a,
-      .stepper-google-admin-btn,
-      .stepper-google-admin-danger {
-        display:inline-flex;
-        align-items:center;
-        justify-content:center;
-        gap:.5rem;
-        min-height:2.75rem;
-        border-radius:1rem;
-        padding:.7rem 1rem;
-        font-weight:800;
-        line-height:1;
-        transition:transform .18s ease, box-shadow .18s ease, opacity .18s ease;
-      }
-      .stepper-google-admin-btn:hover,
-      .stepper-google-admin-danger:hover { transform:translateY(-1px); }
-      .stepper-google-admin-google-slot > div { display:flex; justify-content:flex-start; }
+      #${HOST_ID} { width: 100%; }
+      #${HOST_ID}[hidden] { display: none !important; }
+      .stepper-google-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; }
+      .stepper-google-pill { display:inline-flex; align-items:center; gap:.45rem; border-radius:999px; padding:.5rem .85rem; font-size:.72rem; font-weight:900; letter-spacing:.16em; text-transform:uppercase; }
+      .stepper-google-stat { border-radius:1rem; border:1px solid rgba(99,102,241,.16); padding:1rem; }
+      .stepper-google-badge-row { display:flex; flex-wrap:wrap; gap:.65rem; }
+      .stepper-google-badge-btn { border-radius:999px; padding:.6rem .95rem; font-weight:900; letter-spacing:.08em; text-transform:uppercase; border:1px solid transparent; transition:transform .18s ease, box-shadow .18s ease, opacity .18s ease; }
+      .stepper-google-badge-btn:hover { transform:translateY(-1px); box-shadow:0 10px 24px rgba(0,0,0,.12); }
+      .stepper-google-badge-btn[data-tone="bronze"] { background:#f7eadf; color:#8a4b25; border-color:#e4c4ad; }
+      .stepper-google-badge-btn[data-tone="silver"] { background:#eef2f7; color:#4b5563; border-color:#d5dbe4; }
+      .stepper-google-badge-btn[data-tone="gold"] { background:#fff3c4; color:#8a5800; border-color:#f1d36a; }
+      .dark .stepper-google-badge-btn[data-tone="bronze"] { background:rgba(180,83,9,.16); color:#fed7aa; border-color:rgba(251,146,60,.28); }
+      .dark .stepper-google-badge-btn[data-tone="silver"] { background:rgba(148,163,184,.12); color:#e5e7eb; border-color:rgba(148,163,184,.25); }
+      .dark .stepper-google-badge-btn[data-tone="gold"] { background:rgba(250,204,21,.16); color:#fde68a; border-color:rgba(250,204,21,.3); }
+      .stepper-google-input { width:100%; border-radius:1rem; border:1px solid rgba(148,163,184,.28); padding:.9rem 1rem; background:transparent; }
+      .stepper-google-cta { display:inline-flex; align-items:center; justify-content:center; gap:.65rem; border-radius:1rem; padding:.85rem 1.1rem; font-weight:900; border:1px solid rgba(99,102,241,.18); }
+      .stepper-google-danger { border-color:rgba(239,68,68,.22); }
+      .stepper-google-muted-list { display:grid; gap:.85rem; }
+      .stepper-google-member-item { display:flex; align-items:center; justify-content:space-between; gap:1rem; }
+      .stepper-google-google-btn > div { display:flex; justify-content:flex-start; }
     `;
     document.head.appendChild(style);
   }
 
-  function getApiBase(){
-    const local = String(localStorage.getItem(API_BASE_KEY) || '').trim();
-    const global = String(window.STEPPER_API_BASE || '').trim();
-    return (global || local).replace(/\/+$/, '');
-  }
+  function locateUi(){
+    const buildBtn = Array.from(document.querySelectorAll('button')).find(btn => (btn.textContent || '').trim() === 'Build') || null;
+    const sheetBtn = Array.from(document.querySelectorAll('button')).find(btn => (btn.textContent || '').trim() === 'Sheet') || null;
+    const featuredBtn = document.getElementById('stepper-featured-choreo-tab');
+    const tabStrip = buildBtn ? buildBtn.parentElement : null;
+    const mainEl = document.querySelector('main');
+    const footerWrap = mainEl && mainEl.parentElement
+      ? Array.from(mainEl.parentElement.querySelectorAll('div')).find(node => {
+          const cls = node.className || '';
+          return typeof cls === 'string' && cls.includes('max-w-4xl') && cls.includes('mx-auto') && cls.includes('px-3') && cls.includes('pb-10');
+        }) || null
+      : null;
 
-  function setApiBase(value){
-    const safe = String(value || '').trim().replace(/\/+$/, '');
-    if (safe) localStorage.setItem(API_BASE_KEY, safe);
-    else localStorage.removeItem(API_BASE_KEY);
-    configCache = null;
-  }
+    if (!tabStrip || !mainEl) return false;
 
-  function getToken(){ return String(localStorage.getItem(TOKEN_KEY) || '').trim(); }
-  function setToken(value){
-    const safe = String(value || '').trim();
-    if (safe) localStorage.setItem(TOKEN_KEY, safe);
-    else localStorage.removeItem(TOKEN_KEY);
-  }
+    state.ui.buildBtn = buildBtn;
+    state.ui.sheetBtn = sheetBtn;
+    state.ui.tabStrip = tabStrip;
+    state.ui.mainEl = mainEl;
+    state.ui.footerWrap = footerWrap;
 
-  function getProfile(){
-    const profile = readJson(PROFILE_KEY, null);
-    if (!profile || typeof profile !== 'object') return null;
-    const email = String(profile.email || '').trim();
-    if (!email) return null;
-    return {
-      name: String(profile.name || email.split('@')[0] || 'Member').trim(),
-      email,
-      picture: String(profile.picture || '').trim(),
-      isAdmin: String(email).toLowerCase() === ADMIN_EMAIL || !!profile.isAdmin
-    };
-  }
-
-  function saveFrontendProfile(profile){
-    if (!profile || !profile.email) return;
-    writeJson(GOOGLE_FRONTEND_KEY, {
-      name: String(profile.name || '').trim(),
-      email: String(profile.email || '').trim(),
-      updatedAt: new Date().toISOString()
-    });
-  }
-
-  function setProfile(profile){
-    const safe = profile && profile.email ? {
-      name: String(profile.name || '').trim(),
-      email: String(profile.email || '').trim(),
-      picture: String(profile.picture || '').trim(),
-      isAdmin: String(profile.email || '').trim().toLowerCase() === ADMIN_EMAIL || !!profile.isAdmin
-    } : null;
-    if (!safe) {
-      localStorage.removeItem(PROFILE_KEY);
-      localStorage.removeItem(GOOGLE_FRONTEND_KEY);
-      return null;
+    state.ui.signInBtn = makeTabButton('Sign In', iconUser(), 'signin', SIGNIN_TAB_ID);
+    if (!state.ui.signInBtn.parentNode) {
+      if (featuredBtn && featuredBtn.parentNode === tabStrip) featuredBtn.insertAdjacentElement('afterend', state.ui.signInBtn);
+      else tabStrip.appendChild(state.ui.signInBtn);
     }
-    writeJson(PROFILE_KEY, safe);
-    saveFrontendProfile(safe);
-    return safe;
+
+    state.ui.adminBtn = makeTabButton('Admin', iconShield(), 'admin', ADMIN_TAB_ID);
+    if (!state.ui.adminBtn.parentNode) {
+      if (state.ui.signInBtn && state.ui.signInBtn.parentNode === tabStrip) state.ui.signInBtn.insertAdjacentElement('afterend', state.ui.adminBtn);
+      else tabStrip.appendChild(state.ui.adminBtn);
+    }
+
+    if (!tabStrip.__stepperGoogleAdminCloseWired) {
+      tabStrip.__stepperGoogleAdminCloseWired = true;
+      tabStrip.addEventListener('click', (event) => {
+        const button = event.target.closest('button');
+        if (!button) return;
+        const own = button.id === SIGNIN_TAB_ID || button.id === ADMIN_TAB_ID;
+        if (!own && state.activePage) closePages();
+      }, true);
+    }
+
+    updateAdminTabVisibility();
+    updateTabButtons();
+    return true;
   }
 
-  function clearSession(){
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(PROFILE_KEY);
-    localStorage.removeItem(GOOGLE_FRONTEND_KEY);
-    adminDanceCache = [];
-    if (window.google && window.google.accounts && window.google.accounts.id) {
-      try { window.google.accounts.id.disableAutoSelect(); } catch {}
+  function ensureHost(){
+    if (state.ui.host && document.body.contains(state.ui.host)) return state.ui.host;
+    const host = document.createElement('div');
+    host.id = HOST_ID;
+    host.hidden = true;
+    host.className = 'max-w-4xl mx-auto px-3 sm:px-4 py-6 sm:py-8 pb-28 sm:pb-32 print:hidden';
+    host.innerHTML = `<div class="space-y-5"><section id="${SIGNIN_PAGE_ID}" hidden style="display:none"></section><section id="${ADMIN_PAGE_ID}" hidden style="display:none"></section></div>`;
+    const root = document.getElementById('root');
+    if (root && root.parentNode) root.insertAdjacentElement('afterend', host);
+    else document.body.appendChild(host);
+    state.ui.host = host;
+    return host;
+  }
+
+  function setVisibility(el, visible){
+    if (!el) return;
+    el.hidden = !visible;
+    el.style.display = visible ? '' : 'none';
+    el.setAttribute('aria-hidden', visible ? 'false' : 'true');
+  }
+
+  function hideNativeExtraHost(){
+    const nativeHost = document.getElementById('stepper-extra-page-host');
+    if (!nativeHost) return;
+    nativeHost.hidden = true;
+    nativeHost.style.display = 'none';
+  }
+
+  function closePages(){
+    state.activePage = null;
+    const host = ensureHost();
+    host.hidden = true;
+    host.style.display = 'none';
+    if (state.ui.mainEl) state.ui.mainEl.style.display = '';
+    if (state.ui.footerWrap) state.ui.footerWrap.style.display = '';
+    updateTabButtons();
+  }
+
+  function openPage(pageName){
+    state.activePage = pageName === 'admin' ? 'admin' : 'signin';
+    const host = ensureHost();
+    host.hidden = false;
+    host.style.display = '';
+    hideNativeExtraHost();
+    if (state.ui.mainEl) state.ui.mainEl.style.display = 'none';
+    if (state.ui.footerWrap) state.ui.footerWrap.style.display = 'none';
+    renderPages();
+    updateTabButtons();
+    host.scrollIntoView({ block:'start', behavior:'smooth' });
+  }
+
+  function updateAdminTabVisibility(){
+    if (!state.ui.adminBtn) return;
+    const visible = isAdminSession();
+    state.ui.adminBtn.style.display = visible ? '' : 'none';
+    state.ui.adminBtn.hidden = !visible;
+    if (!visible && state.activePage === 'admin') {
+      state.activePage = 'signin';
     }
   }
 
-  function setOnlineCount(value){
-    onlineMembers = Math.max(0, Number(value) || 0);
-    localStorage.setItem(ONLINE_COUNT_KEY, String(onlineMembers));
-  }
-
-  function getOnlineCount(){
-    return Math.max(0, Number(localStorage.getItem(ONLINE_COUNT_KEY) || String(onlineMembers)) || 0);
-  }
-
-  async function fetchJson(path, { method = 'GET', auth = false, body, headers = {} } = {}){
-    const base = getApiBase();
-    if (!base) throw new Error('Add your backend URL first.');
-    const requestHeaders = Object.assign({}, headers);
-    if (body !== undefined) requestHeaders['Content-Type'] = 'application/json';
-    if (auth) {
-      const token = getToken();
-      if (!token) throw new Error('You are not signed in yet.');
-      requestHeaders.Authorization = `Bearer ${token}`;
-    }
-    const response = await fetch(base + path, {
-      method,
-      headers: requestHeaders,
-      body: body !== undefined ? JSON.stringify(body) : undefined
-    });
+  async function fetchJson(path, options){
+    const url = `${normalizeApiBase(state.apiBase)}${path}`;
+    const response = await fetch(url, options || {});
     let data = null;
-    try { data = await response.json(); } catch { data = null; }
+    try {
+      data = await response.json();
+    } catch {
+      data = null;
+    }
     if (!response.ok || !data || data.ok === false) {
-      throw new Error((data && data.error) || `Request failed (${response.status})`);
+      const message = data && data.error ? data.error : `Request failed (${response.status})`;
+      const error = new Error(message);
+      error.status = response.status;
+      throw error;
     }
     return data;
   }
 
-  async function getConfig(force = false){
-    if (configCache && !force) return configCache;
-    if (configPromise && !force) return configPromise;
-    configPromise = (async () => {
-      const base = getApiBase();
-      if (!base) {
-        configCache = { ok: false, googleEnabled: false, googleClientId: '', adminEmail: ADMIN_EMAIL };
-        return configCache;
-      }
-      try {
-        configCache = await fetchJson('/api/auth/config');
-      } catch {
-        configCache = { ok: false, googleEnabled: false, googleClientId: '', adminEmail: ADMIN_EMAIL };
-      }
-      return configCache;
-    })();
-    const result = await configPromise;
-    configPromise = null;
-    return result;
-  }
-
-  async function loadGoogleScript(){
-    if (window.google && window.google.accounts && window.google.accounts.id) return true;
-    const existing = document.getElementById('stepper-google-gsi-script');
-    if (existing) {
-      return await new Promise((resolve) => {
-        const started = Date.now();
-        const check = () => {
-          if (window.google && window.google.accounts && window.google.accounts.id) return resolve(true);
-          if (Date.now() - started > 7000) return resolve(false);
-          setTimeout(check, 120);
-        };
-        check();
-      });
+  async function authFetch(path, options){
+    const session = state.session;
+    if (!session || !session.credential) {
+      const error = new Error('Please sign in with Google first.');
+      error.status = 401;
+      throw error;
     }
-    return await new Promise((resolve) => {
-      const script = document.createElement('script');
-      script.id = 'stepper-google-gsi-script';
-      script.src = 'https://accounts.google.com/gsi/client';
-      script.async = true;
-      script.defer = true;
-      script.onload = () => resolve(true);
-      script.onerror = () => resolve(false);
-      document.head.appendChild(script);
+    const headers = Object.assign({}, options && options.headers ? options.headers : {}, {
+      Authorization: `Bearer ${session.credential}`
     });
-  }
-
-  async function ensureGoogleReady(){
-    const config = await getConfig();
-    if (!config.googleEnabled || !config.googleClientId) return false;
-    const ready = await loadGoogleScript();
-    if (!ready || !(window.google && window.google.accounts && window.google.accounts.id)) return false;
-    if (window.__stepperGoogleAdminClientId !== config.googleClientId) {
-      window.__stepperGoogleAdminClientId = config.googleClientId;
-      window.google.accounts.id.initialize({
-        client_id: config.googleClientId,
-        callback: async (response) => {
-          const credential = String(response && response.credential || '').trim();
-          if (!credential) return;
-          try {
-            const result = await fetchJson('/api/auth/google', { method: 'POST', body: { credential } });
-            setToken(credential);
-            const profile = setProfile(result.profile || {});
-            authMessage = profile ? `Signed in as ${profile.email}.` : 'Signed in.';
-            await pingPresence();
-            await refreshFeatured(true);
-            if (profile && profile.isAdmin) await fetchAdminDances(true);
-            renderOwnPages();
-            ensureTabs();
-          } catch (error) {
-            authMessage = error && error.message ? error.message : 'Google sign-in failed.';
-            renderOwnPages();
-          }
-        }
-      });
-    }
-    return true;
-  }
-
-  async function renderGoogleButton(slot){
-    if (!slot) return;
-    const ready = await ensureGoogleReady();
-    if (!ready) {
-      slot.innerHTML = `<p class="text-sm font-semibold ${theme().subtle}">Google sign-in will appear here once your backend URL is set and GOOGLE_CLIENT_ID is live on Render.</p>`;
-      return;
-    }
-    slot.innerHTML = '';
-    window.google.accounts.id.renderButton(slot, {
-      theme: isDarkMode() ? 'filled_black' : 'outline',
-      size: 'large',
-      shape: 'pill',
-      text: 'signin_with',
-      logo_alignment: 'left'
-    });
-  }
-
-  async function tryRestoreSession(){
-    const token = getToken();
-    if (!token || !getApiBase()) return null;
     try {
-      const data = await fetchJson('/api/auth/me', { auth: true });
-      return setProfile(data.profile || {});
-    } catch {
-      clearSession();
-      return null;
+      return await fetchJson(path, Object.assign({}, options || {}, { headers }));
+    } catch (error) {
+      if (error && error.status === 401) {
+        clearSession();
+        renderPages();
+      }
+      throw error;
+    }
+  }
+
+  async function refreshConfig(){
+    if (state.busy.config) return state.config;
+    state.busy.config = true;
+    try {
+      state.config = await fetchJson('/api/auth/config');
+      if (state.config && state.config.adminEmail) {
+        // purely informational, not authoritative on the client.
+      }
+      return state.config;
+    } catch (error) {
+      state.config = {
+        ok: false,
+        googleEnabled: false,
+        googleClientId: '',
+        error: error.message || 'Could not reach backend.'
+      };
+      return state.config;
+    } finally {
+      state.busy.config = false;
     }
   }
 
   async function refreshPresence(){
-    if (!getApiBase()) return getOnlineCount();
     try {
-      const data = await fetchJson('/api/presence');
-      setOnlineCount(data.count || data.membersOnline || 0);
-    } catch {}
-    return getOnlineCount();
+      state.presence = await fetchJson('/api/presence');
+    } catch {
+      state.presence = { ok:false, onlineCount: 0, members: [] };
+    }
+    renderPresenceOnly();
+    return state.presence;
   }
 
-  async function pingPresence(){
-    if (!getToken() || !getApiBase()) return refreshPresence();
+  async function refreshSession(){
+    if (!state.session || !state.session.credential || state.busy.session) return null;
+    state.busy.session = true;
     try {
-      const data = await fetchJson('/api/presence/ping', { method: 'POST', auth: true, body: {} });
-      setOnlineCount(data.count || data.membersOnline || 0);
-    } catch (error) {
-      const message = String(error && error.message || '');
-      if (/signed in|credential|auth|401|403/i.test(message)) clearSession();
+      const data = await authFetch('/api/auth/me');
+      saveSession({
+        credential: state.session.credential,
+        profile: data.profile,
+        isAdmin: !!data.isAdmin,
+        updatedAt: new Date().toISOString()
+      });
+      return data;
+    } catch {
+      return null;
+    } finally {
+      state.busy.session = false;
     }
-    return getOnlineCount();
   }
 
-  async function refreshFeatured(force = false){
-    if (!getApiBase()) return readJson(FEATURED_CHOREO_KEY, []);
-    if (!force) {
-      const cached = readJson(FEATURED_CHOREO_KEY, []);
-      if (Array.isArray(cached) && cached.length) return cached;
-    }
+  async function heartbeat(){
+    if (!state.session || !state.session.credential) return null;
     try {
-      const data = await fetchJson('/api/featured-choreo');
-      writeJson(FEATURED_CHOREO_KEY, Array.isArray(data.items) ? data.items : []);
-      window.dispatchEvent(new Event('storage'));
-    } catch {}
-    return readJson(FEATURED_CHOREO_KEY, []);
+      const data = await authFetch('/api/presence/heartbeat', { method:'POST' });
+      state.presence = data;
+      if (state.session) {
+        saveSession(Object.assign({}, state.session, { isAdmin: !!data.isAdmin, updatedAt: new Date().toISOString() }));
+      }
+      renderPresenceOnly();
+      return data;
+    } catch {
+      return null;
+    }
   }
 
-  async function fetchAdminDances(force = false){
-    const profile = getProfile();
-    if (!(profile && profile.isAdmin) || !getApiBase()) {
-      adminDanceCache = [];
-      return adminDanceCache;
-    }
-    if (!force && adminDanceCache.length) return adminDanceCache;
-    try {
-      const data = await fetchJson('/api/admin/dances', { auth: true });
-      adminDanceCache = Array.isArray(data.items) ? data.items : [];
-    } catch (error) {
-      authMessage = error && error.message ? error.message : authMessage;
-    }
-    return adminDanceCache;
-  }
-
-  async function featureDance(ownerKey, danceId, badgeTone){
-    const data = await fetchJson('/api/admin/feature', {
-      method: 'POST',
-      auth: true,
-      body: { ownerKey, danceId, badgeTone, badgeLabel: String(badgeTone || 'bronze').replace(/^./, m => m.toUpperCase()) }
+  function ensureGsiLoaded(){
+    if (state.gisPromise) return state.gisPromise;
+    state.gisPromise = new Promise((resolve, reject) => {
+      if (window.google && window.google.accounts && window.google.accounts.id) {
+        state.gisReady = true;
+        resolve(window.google);
+        return;
+      }
+      const existing = document.querySelector('script[data-stepper-gsi="true"]');
+      if (existing) {
+        existing.addEventListener('load', () => {
+          state.gisReady = true;
+          resolve(window.google);
+        }, { once:true });
+        existing.addEventListener('error', () => reject(new Error('Could not load Google Identity Services.')), { once:true });
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://accounts.google.com/gsi/client';
+      script.async = true;
+      script.defer = true;
+      script.dataset.stepperGsi = 'true';
+      script.onload = () => {
+        state.gisReady = true;
+        resolve(window.google);
+      };
+      script.onerror = () => reject(new Error('Could not load Google Identity Services.'));
+      document.head.appendChild(script);
     });
-    adminDanceCache = Array.isArray(data.items) ? data.items : adminDanceCache;
-    await refreshFeatured(true);
-    authMessage = 'Featured list updated.';
-    renderOwnPages();
+    return state.gisPromise;
   }
 
-  async function unfeatureDance(ownerKey, danceId){
-    const data = await fetchJson('/api/admin/feature', {
-      method: 'DELETE',
-      auth: true,
-      body: { ownerKey, danceId }
-    });
-    adminDanceCache = Array.isArray(data.items) ? data.items : adminDanceCache;
-    await refreshFeatured(true);
-    authMessage = 'Featured dance removed.';
-    renderOwnPages();
+  async function handleGoogleCredential(response){
+    const credential = response && response.credential ? String(response.credential) : '';
+    if (!credential) return;
+    try {
+      const data = await fetchJson('/api/auth/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credential })
+      });
+      saveSession({
+        credential,
+        profile: data.profile,
+        isAdmin: !!data.isAdmin,
+        updatedAt: new Date().toISOString()
+      });
+      await refreshSession();
+      await heartbeat();
+      await syncCurrentDanceToBackend(true);
+      await syncFeaturedFromBackend();
+      if (isAdminSession()) await refreshAdminDances();
+    } catch (error) {
+      alert(error.message || 'Google sign in failed.');
+    }
+    renderPages();
   }
 
-  function currentDanceIdentity(data){
-    const meta = data && data.meta ? data.meta : {};
-    const title = String(meta.title || '').trim();
-    const choreographer = String(meta.choreographer || '').trim();
-    return {
-      id: (title || 'untitled').toLowerCase() + '|' + (choreographer || 'unknown').toLowerCase(),
-      title: title || 'Untitled Dance',
-      choreographer: choreographer || 'Uncredited'
-    };
+  async function renderGoogleButton(){
+    const container = document.getElementById('stepper-google-button-slot');
+    if (!container) return;
+    container.innerHTML = '';
+    if (!state.config || !state.config.googleEnabled || !state.config.googleClientId) return;
+    try {
+      await ensureGsiLoaded();
+      if (!(window.google && window.google.accounts && window.google.accounts.id)) return;
+      if (state.gisClientId !== state.config.googleClientId) {
+        window.google.accounts.id.initialize({
+          client_id: state.config.googleClientId,
+          callback: handleGoogleCredential,
+          auto_select: false,
+          cancel_on_tap_outside: true,
+          use_fedcm_for_prompt: true
+        });
+        state.gisClientId = state.config.googleClientId;
+      }
+      window.google.accounts.id.renderButton(container, {
+        type: 'standard',
+        theme: isDarkMode() ? 'filled_black' : 'outline',
+        size: 'large',
+        text: 'signin_with',
+        shape: 'pill',
+        width: 280
+      });
+    } catch (error) {
+      container.innerHTML = `<p class="text-sm ${themeClasses().subtle}">${escapeHtml(error.message || 'Google button could not load.')}</p>`;
+    }
+  }
+
+  function readAppData(){
+    return readJson(DATA_KEY, null);
   }
 
   function hasDanceContent(data){
     if (!data || !data.meta) return false;
-    const identity = currentDanceIdentity(data);
+    const title = String(data.meta.title || '').trim();
+    const choreographer = String(data.meta.choreographer || '').trim();
     const sections = Array.isArray(data.sections) ? data.sections : [];
-    return !!(identity.title !== 'Untitled Dance' || identity.choreographer !== 'Uncredited' || sections.some(section => Array.isArray(section && section.steps) && section.steps.length));
+    return !!(title || choreographer || sections.some(section => Array.isArray(section && section.steps) && section.steps.length));
   }
 
-  function buildSnapshotEntry(data){
-    const identity = currentDanceIdentity(data || {});
+  function buildCurrentDanceEntry(){
+    const data = readAppData();
+    if (!hasDanceContent(data)) return null;
+    const meta = data && data.meta ? data.meta : {};
     const sections = Array.isArray(data && data.sections) ? data.sections : [];
     const stepCount = sections.reduce((sum, section) => sum + ((section && Array.isArray(section.steps)) ? section.steps.length : 0), 0);
+    const title = String(meta.title || '').trim() || 'Untitled Dance';
+    const choreographer = String(meta.choreographer || '').trim() || 'Uncredited';
     return {
-      id: identity.id,
-      title: identity.title,
-      choreographer: identity.choreographer,
-      country: String((data && data.meta && data.meta.country) || '').trim(),
-      level: String((data && data.meta && data.meta.level) || 'Unlabelled').trim() || 'Unlabelled',
-      counts: String((data && data.meta && data.meta.counts) || '-').trim() || '-',
-      walls: String((data && data.meta && data.meta.walls) || '-').trim() || '-',
-      music: String((data && data.meta && data.meta.music) || '').trim(),
+      id: `${title.toLowerCase()}|${choreographer.toLowerCase()}`,
+      title,
+      choreographer,
+      country: String(meta.country || '').trim(),
+      level: String(meta.level || 'Unlabelled').trim() || 'Unlabelled',
+      counts: String(meta.counts || '-').trim() || '-',
+      walls: String(meta.walls || '-').trim() || '-',
+      music: String(meta.music || '').trim(),
       sections: sections.length,
       steps: stepCount,
       updatedAt: new Date().toISOString(),
       snapshot: {
-        data: JSON.parse(JSON.stringify(data || {})),
+        data: data,
         phrasedTools: readJson(PHR_TOOLS_KEY, {})
       }
     };
   }
 
-  async function syncCurrentDance(force = false){
-    if (!getToken() || !getApiBase() || syncBusy) return false;
-    const data = readAppData();
-    if (!hasDanceContent(data)) return false;
-    const entry = buildSnapshotEntry(data);
-    const signature = JSON.stringify({
-      id: entry.id,
-      title: entry.title,
-      choreographer: entry.choreographer,
-      counts: entry.counts,
-      walls: entry.walls,
-      level: entry.level,
-      music: entry.music,
-      snapshot: entry.snapshot
-    });
-    if (!force && signature === lastSyncSignature) return false;
-    syncBusy = true;
+  function buildDanceSignature(entry){
+    if (!entry) return '';
     try {
-      await fetchJson('/api/cloud-saves/upsert', { method: 'POST', auth: true, body: { entry } });
-      lastSyncSignature = signature;
-      await refreshFeatured(true);
-      const profile = getProfile();
-      if (profile && profile.isAdmin) await fetchAdminDances(true);
+      return JSON.stringify({
+        title: entry.title,
+        choreographer: entry.choreographer,
+        counts: entry.counts,
+        walls: entry.walls,
+        steps: entry.steps,
+        sections: entry.sections,
+        data: entry.snapshot && entry.snapshot.data ? entry.snapshot.data : {}
+      });
+    } catch {
+      return `${entry.id}|${entry.updatedAt}`;
+    }
+  }
+
+  async function syncCurrentDanceToBackend(force){
+    if (state.busy.sync) return false;
+    if (!state.session || !state.session.credential) return false;
+    const entry = buildCurrentDanceEntry();
+    if (!entry) return false;
+    const signature = buildDanceSignature(entry);
+    if (!force && signature && signature === state.lastSyncedSignature) return false;
+    state.busy.sync = true;
+    try {
+      await authFetch('/api/cloud-saves/upsert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entry })
+      });
+      state.lastSyncedSignature = signature;
       return true;
-    } catch (error) {
-      const message = String(error && error.message || '');
-      authMessage = message || authMessage;
-      if (/signed in|credential|auth|401|403/i.test(message)) clearSession();
+    } catch {
       return false;
     } finally {
-      syncBusy = false;
+      state.busy.sync = false;
     }
   }
 
-  function ensureHost(){
-    host = document.getElementById('stepper-extra-page-host');
-    if (!host) {
-      host = document.createElement('div');
-      host.id = 'stepper-extra-page-host';
-      host.hidden = true;
-      host.className = 'max-w-4xl mx-auto px-3 sm:px-4 py-6 sm:py-8 pb-28 sm:pb-32 print:hidden';
-      host.innerHTML = '<div class="space-y-5"></div>';
-      if (mainEl && mainEl.parentNode) mainEl.parentNode.insertBefore(host, footerWrap || mainEl.nextSibling);
-      else document.body.appendChild(host);
-    }
-    hostStack = host.querySelector(':scope > div') || host.firstElementChild;
-    if (!hostStack) {
-      hostStack = document.createElement('div');
-      hostStack.className = 'space-y-5';
-      host.appendChild(hostStack);
-    }
-    signInPage = document.getElementById(SIGN_IN_PAGE_ID);
-    if (!signInPage) {
-      signInPage = document.createElement('section');
-      signInPage.id = SIGN_IN_PAGE_ID;
-      signInPage.hidden = true;
-      signInPage.style.display = 'none';
-      hostStack.appendChild(signInPage);
-    }
-    adminPage = document.getElementById(ADMIN_PAGE_ID);
-    if (!adminPage) {
-      adminPage = document.createElement('section');
-      adminPage.id = ADMIN_PAGE_ID;
-      adminPage.hidden = true;
-      adminPage.style.display = 'none';
-      hostStack.appendChild(adminPage);
+  async function syncFeaturedFromBackend(){
+    try {
+      const data = await fetchJson('/api/featured-choreo');
+      state.featured = Array.isArray(data.items) ? data.items : [];
+      writeJson(FEATURED_CHOREO_KEY, state.featured);
+      window.dispatchEvent(new Event('storage'));
+      return state.featured;
+    } catch {
+      return state.featured;
     }
   }
 
-  function locateUi(){
-    buildBtn = Array.from(document.querySelectorAll('button')).find(btn => (btn.textContent || '').trim() === 'Build') || null;
-    sheetBtn = Array.from(document.querySelectorAll('button')).find(btn => (btn.textContent || '').trim() === 'Sheet') || null;
-    whatsNewBtn = Array.from(document.querySelectorAll('button')).find(btn => (btn.textContent || '').trim() === "What's New") || null;
-    savedBtn = Array.from(document.querySelectorAll('button')).find(btn => (btn.textContent || '').trim() === 'My Saved Dances') || null;
-    featuredBtn = Array.from(document.querySelectorAll('button')).find(btn => (btn.textContent || '').trim() === 'Featured Choreo') || null;
-    tabStrip = buildBtn ? buildBtn.parentElement : null;
-    mainEl = document.querySelector('main');
-    footerWrap = mainEl && mainEl.parentElement ? Array.from(mainEl.parentElement.querySelectorAll('div')).find(node => {
-      const cls = node.className || '';
-      return typeof cls === 'string' && cls.includes('max-w-4xl') && cls.includes('mx-auto') && cls.includes('pb-10');
-    }) || null : null;
-    ensureHost();
-    return !!(tabStrip && mainEl && signInPage && adminPage);
-  }
-
-  function makeTab(label, iconSvg, id){
-    const btn = document.createElement('button');
-    btn.id = id;
-    btn.type = 'button';
-    btn.className = 'stepper-google-admin-tab shrink-0 px-2.5 sm:px-4 py-2 rounded-lg flex items-center gap-1.5 sm:gap-2 text-[11px] sm:text-sm font-bold transition-all whitespace-nowrap opacity-50 hover:opacity-100';
-    btn.innerHTML = `<span class="stepper-google-admin-icon">${iconSvg}</span><span>${escapeHtml(label)}</span>`;
-    return btn;
-  }
-
-  function applyTabState(btn, active){
-    if (!btn) return;
-    const dark = isDarkMode();
-    btn.style.color = dark ? '#ffffff' : (active ? '#4f46e5' : '');
-    btn.style.opacity = active ? '1' : (dark ? '.92' : '');
-    btn.style.transform = active ? 'translateY(-1px)' : '';
-    btn.style.boxShadow = active ? '0 8px 24px rgba(79,70,229,.18)' : '';
-    btn.style.background = active ? (dark ? '#2f2f2f' : '#ffffff') : '';
-    btn.style.borderColor = active ? (dark ? '#525252' : '#d4d4d8') : '';
-  }
-
-  function updateTabStyles(){
-    applyTabState(signInBtn, activeOwnPage === 'signin');
-    applyTabState(adminBtn, activeOwnPage === 'admin');
-    if (adminBtn) adminBtn.style.display = (getProfile() && getProfile().isAdmin) ? '' : 'none';
-  }
-
-  function ensureTabs(){
-    if (!locateUi()) return false;
-    signInBtn = document.getElementById(SIGN_IN_TAB_ID);
-    if (!signInBtn) {
-      signInBtn = makeTab('Sign In', iconGoogle(), SIGN_IN_TAB_ID);
-      if (whatsNewBtn && whatsNewBtn.parentNode === tabStrip) whatsNewBtn.insertAdjacentElement('afterend', signInBtn);
-      else tabStrip.appendChild(signInBtn);
-      signInBtn.addEventListener('click', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        openOwnPage('signin');
-      }, true);
+  async function refreshAdminDances(){
+    if (!isAdminSession() || state.busy.admin) return [];
+    state.busy.admin = true;
+    try {
+      const data = await authFetch('/api/admin/dances');
+      state.adminDances = Array.isArray(data.items) ? data.items : [];
+      return state.adminDances;
+    } catch {
+      state.adminDances = [];
+      return [];
+    } finally {
+      state.busy.admin = false;
     }
-
-    adminBtn = document.getElementById(ADMIN_TAB_ID);
-    if (!adminBtn) {
-      adminBtn = makeTab('Admin', iconShield(), ADMIN_TAB_ID);
-      if (featuredBtn && featuredBtn.parentNode === tabStrip) featuredBtn.insertAdjacentElement('afterend', adminBtn);
-      else if (signInBtn && signInBtn.parentNode === tabStrip) signInBtn.insertAdjacentElement('afterend', adminBtn);
-      else tabStrip.appendChild(adminBtn);
-      adminBtn.addEventListener('click', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        openOwnPage('admin');
-      }, true);
-    }
-
-    if (!tabStrip.__stepperGoogleAdminWire) {
-      tabStrip.__stepperGoogleAdminWire = true;
-      tabStrip.addEventListener('click', (event) => {
-        const button = event.target.closest('button');
-        if (!button) return;
-        const text = (button.textContent || '').trim();
-        if (text === 'Build' || text === 'Sheet') {
-          closeOwnPages(true);
-        } else if (text === "What's New" || text === 'My Saved Dances' || text === 'Featured Choreo') {
-          closeOwnPages(false);
-        }
-      }, true);
-    }
-
-    updateTabStyles();
-    return true;
   }
 
-  function hideOwnSections(){
-    ensureHost();
-    [signInPage, adminPage].forEach((page) => {
-      if (!page) return;
-      page.hidden = true;
-      page.style.display = 'none';
-      page.setAttribute('aria-hidden', 'true');
-    });
+  function badgeLabelForTone(tone){
+    if (tone === 'gold') return 'Gold Feature';
+    if (tone === 'silver') return 'Silver Feature';
+    return 'Bronze Feature';
   }
 
-  function closeOwnPages(showMain){
-    activeOwnPage = null;
-    hideOwnSections();
-    if (showMain) {
-      if (mainEl) mainEl.style.display = '';
-      if (footerWrap) footerWrap.style.display = '';
-      const builtinVisible = hostStack && Array.from(hostStack.children).some((node) => {
-        if (!(node instanceof HTMLElement)) return false;
-        if (node.id === SIGN_IN_PAGE_ID || node.id === ADMIN_PAGE_ID) return false;
-        return !node.hidden && node.style.display !== 'none';
+  async function featureDance(registryId, tone){
+    if (!registryId || state.busy.feature) return;
+    state.busy.feature = true;
+    try {
+      await authFetch('/api/admin/feature', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          registryId,
+          badgeTone: tone,
+          badgeLabel: badgeLabelForTone(tone)
+        })
       });
-      if (!builtinVisible && host) host.hidden = true;
+      await refreshAdminDances();
+      await syncFeaturedFromBackend();
+      renderPages();
+    } catch (error) {
+      alert(error.message || 'Could not feature that dance.');
+    } finally {
+      state.busy.feature = false;
     }
-    updateTabStyles();
   }
 
-  function openOwnPage(pageName){
-    const go = async () => {
-      if (!ensureTabs()) return;
-      activeOwnPage = pageName === 'admin' ? 'admin' : 'signin';
-      hideOwnSections();
-      if (mainEl) mainEl.style.display = 'none';
-      if (footerWrap) footerWrap.style.display = 'none';
-      if (host) host.hidden = false;
-      const page = activeOwnPage === 'admin' ? adminPage : signInPage;
-      if (page) {
-        page.hidden = false;
-        page.style.display = '';
-        page.setAttribute('aria-hidden', 'false');
-      }
-      if (activeOwnPage === 'admin') await fetchAdminDances(true);
-      await refreshPresence();
-      renderOwnPages();
-      updateTabStyles();
-      if (host) host.scrollIntoView({ block: 'start', behavior: 'smooth' });
-    };
-    if (window.__stepperRunFaviconTransition) window.__stepperRunFaviconTransition(go, { target: pageName });
-    else go();
+  async function unfeatureDance(registryId){
+    if (!registryId || state.busy.feature) return;
+    state.busy.feature = true;
+    try {
+      await authFetch(`/api/admin/feature/${encodeURIComponent(registryId)}`, { method:'DELETE' });
+      await refreshAdminDances();
+      await syncFeaturedFromBackend();
+      renderPages();
+    } catch (error) {
+      alert(error.message || 'Could not remove that feature.');
+    } finally {
+      state.busy.feature = false;
+    }
   }
 
-  function patchFeaturedCopy(){
-    const page = document.getElementById('stepper-featured-choreo-page');
-    if (!page) return;
-    const paragraph = Array.from(page.querySelectorAll('p')).find(node => (node.textContent || '').includes('Featured dancers are best of the best'));
-    if (paragraph) {
-      paragraph.innerHTML = 'Featured dances are chosen in the admin tab now. Once Anthony signs in, every synced dance can be marked Bronze, Silver, or Gold and it will show up here automatically.';
-    }
+  function renderPresenceOnly(){
+    const countNodes = document.querySelectorAll('[data-stepper-online-count]');
+    countNodes.forEach(node => {
+      node.textContent = String((state.presence && state.presence.onlineCount) || 0);
+    });
   }
 
   function renderSignInPage(){
-    ensureHost();
-    const ui = theme();
-    const config = configCache || { googleEnabled: false, googleClientId: '' };
-    const profile = getProfile();
-    signInPage.className = `rounded-3xl border shadow-sm overflow-hidden ${ui.shell}`;
-    signInPage.innerHTML = `
-      <div class="px-6 py-5 border-b ${ui.panel}">
-        <h2 class="text-2xl font-black tracking-tight uppercase flex items-center gap-2"><span class="stepper-google-admin-icon">${iconGoogle()}</span> Sign In</h2>
+    const page = document.getElementById(SIGNIN_PAGE_ID);
+    if (!page) return;
+    const theme = themeClasses();
+    const session = state.session;
+    const profile = session && session.profile ? session.profile : null;
+    const backendError = state.config && state.config.error ? state.config.error : '';
+    const members = Array.isArray(state.presence && state.presence.members) ? state.presence.members.slice(0, 6) : [];
+    const signedInCard = profile ? `
+      <div class="rounded-3xl border p-5 sm:p-6 ${theme.soft}">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div class="text-lg font-black tracking-tight">Signed in as ${escapeHtml(profile.name || profile.email || 'Member')}</div>
+            <p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(profile.email || '')}</p>
+            <p class="mt-3 text-sm ${theme.subtle}">This signed-in account now auto-syncs the dance you are building into the backend registry so the admin page can see it.</p>
+          </div>
+          <div class="stepper-google-badge-row">
+            ${isAdminSession() ? `<span class="stepper-google-pill ${theme.orange}">${iconShield()} Admin</span>` : ''}
+            <button type="button" data-stepper-action="signout" class="stepper-google-cta stepper-google-danger ${theme.button}">Sign out</button>
+          </div>
+        </div>
       </div>
-      <div class="p-6 sm:p-8 space-y-5">
-        <div class="rounded-2xl border p-5 ${ui.panel}">
-          <div class="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <div class="text-lg font-black tracking-tight">Members online</div>
-              <p class="mt-1 text-sm ${ui.subtle}">Signed-in members ping the backend while they are using the builder.</p>
-            </div>
-            <div class="rounded-2xl border px-4 py-3 text-center ${ui.accent}">
-              <div class="text-[10px] font-black uppercase tracking-widest">Online now</div>
-              <div class="mt-1 text-2xl font-black">${escapeHtml(String(getOnlineCount()))}</div>
-            </div>
+    ` : `
+      <div class="rounded-3xl border p-5 sm:p-6 ${theme.soft}">
+        <div class="flex items-start gap-3">
+          <span class="stepper-extra-tab-icon">${iconUser()}</span>
+          <div>
+            <div class="text-lg font-black tracking-tight">Sign in with Google</div>
+            <p class="mt-2 text-sm leading-relaxed ${theme.subtle}">Sign in to show live member presence and to auto-store the dances you make in the backend registry. The admin tab only appears when <strong>${escapeHtml(ADMIN_EMAIL)}</strong> is the signed-in account.</p>
+            <p class="mt-3 text-sm ${theme.subtle}">You do not type the Google Client ID into this page. That stays on the backend only.</p>
           </div>
         </div>
-
-        <div class="rounded-2xl border p-5 ${ui.panel}">
-          <label class="block text-[10px] font-black uppercase tracking-widest ${ui.subtle}">Backend URL</label>
-          <div class="mt-2 flex flex-col sm:flex-row gap-3">
-            <input id="stepper-api-base-input" value="${escapeHtml(getApiBase())}" placeholder="https://your-backend.onrender.com" class="flex-1 px-4 py-3 rounded-2xl border outline-none ${ui.button}" />
-            <button type="button" id="stepper-api-base-save" class="stepper-google-admin-btn ${ui.accent}">Save backend URL</button>
-          </div>
-          <p class="mt-3 text-sm ${ui.subtle}">That Render service ID you sent helps identify the service in your dashboard, but the site still needs the actual public backend URL here.</p>
-        </div>
-
-        <div class="rounded-2xl border p-5 ${ui.soft}">
-          <div class="flex items-start justify-between gap-4 flex-wrap">
-            <div>
-              <div class="text-lg font-black tracking-tight">Google account</div>
-              <p class="mt-1 text-sm ${ui.subtle}">${profile ? `Signed in as ${escapeHtml(profile.email)}` : 'Sign in with Google so your current dance can sync to the backend automatically.'}</p>
-              <p class="mt-2 text-xs font-semibold uppercase tracking-widest ${ui.subtle}">Google ready: ${config.googleEnabled ? 'Yes' : 'No'}${config.googleClientId ? ' • Client ID live' : ''}</p>
-            </div>
-            ${profile ? `<button type="button" id="stepper-google-signout" class="stepper-google-admin-danger ${ui.orange}">Sign out</button>` : ''}
-          </div>
-          ${profile ? `
-            <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-              <div class="rounded-2xl border px-4 py-4 ${ui.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${ui.subtle}">Member</div><div class="mt-1 font-bold">${escapeHtml(profile.name || profile.email)}</div></div>
-              <div class="rounded-2xl border px-4 py-4 ${ui.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${ui.subtle}">Role</div><div class="mt-1 font-bold">${profile.isAdmin ? 'Admin' : 'Member'}</div></div>
-            </div>
-          ` : `<div id="stepper-google-button-slot" class="stepper-google-admin-google-slot mt-5"></div>`}
-        </div>
-
-        <div class="rounded-2xl border p-5 ${ui.panel}">
-          <div class="text-lg font-black tracking-tight">Automatic dance sync</div>
-          <p class="mt-2 text-sm leading-relaxed ${ui.subtle}">While a member is signed in, the current dance is sent to the backend automatically. Anthony's admin tab then shows every synced dance, and he can feature it with a Bronze, Silver, or Gold badge.</p>
-        </div>
-
-        ${authMessage ? `<div class="rounded-2xl border p-4 ${ui.panel}"><p class="text-sm font-semibold">${escapeHtml(authMessage)}</p></div>` : ''}
+        <div id="stepper-google-button-slot" class="stepper-google-google-btn mt-5"></div>
       </div>
     `;
 
-    const saveBtn = signInPage.querySelector('#stepper-api-base-save');
-    const apiInput = signInPage.querySelector('#stepper-api-base-input');
-    if (saveBtn && apiInput) saveBtn.addEventListener('click', async () => {
-      setApiBase(apiInput.value);
-      authMessage = getApiBase() ? `Backend URL saved as ${getApiBase()}.` : 'Backend URL cleared.';
-      await getConfig(true);
-      await tryRestoreSession();
-      await refreshPresence();
-      await refreshFeatured(true);
-      if (getProfile() && getProfile().isAdmin) await fetchAdminDances(true);
-      renderOwnPages();
-    });
+    const connectionStatus = state.config && state.config.googleEnabled
+      ? `<p class="mt-3 text-sm ${theme.subtle}">Google sign-in is enabled on this backend.</p>`
+      : `<p class="mt-3 text-sm ${theme.subtle}">Google sign-in is still waiting on the backend Google Client ID. This page does not ask you to type that ID by hand.</p>`;
 
-    const signOutBtn = signInPage.querySelector('#stepper-google-signout');
-    if (signOutBtn) signOutBtn.addEventListener('click', () => {
-      clearSession();
-      authMessage = 'Signed out.';
-      renderOwnPages();
-      updateTabStyles();
-    });
+    page.className = `rounded-3xl border shadow-sm overflow-hidden ${theme.shell}`;
+    page.innerHTML = `
+      <div class="px-6 py-5 border-b ${theme.panel}">
+        <h2 class="text-2xl font-black tracking-tight uppercase flex items-center gap-2"><span class="stepper-extra-tab-icon">${iconUser()}</span> Sign In</h2>
+      </div>
+      <div class="p-6 sm:p-8 space-y-5">
+        <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}">
+          <div class="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <div class="text-lg font-black tracking-tight flex items-center gap-2"><span class="stepper-extra-tab-icon">${iconMembers()}</span> Members online</div>
+              <p class="mt-1 text-sm ${theme.subtle}">Signed-in members seen recently by the backend.</p>
+            </div>
+            <div class="stepper-google-pill ${theme.orange}"><span data-stepper-online-count>${escapeHtml((state.presence && state.presence.onlineCount) || 0)}</span> online</div>
+          </div>
+          ${members.length ? `<div class="stepper-google-muted-list mt-5">${members.map(member => `
+            <div class="stepper-google-member-item text-sm">
+              <span class="font-semibold">${escapeHtml(member.name || member.email || 'Member')}</span>
+              <span class="${theme.subtle}">${escapeHtml(formatDate(member.lastSeenAt))}</span>
+            </div>
+          `).join('')}</div>` : `<p class="mt-4 text-sm ${theme.subtle}">Nobody signed in recently, or the backend is not reachable yet.</p>`}
+        </div>
+        <div class="rounded-3xl border p-5 sm:p-6 ${theme.soft}">
+          <div class="text-lg font-black tracking-tight">Connection</div>
+          <p class="mt-2 text-sm ${theme.subtle}">This build now has your Render service ID saved into it for reference: <strong>${escapeHtml(DEFAULT_RENDER_SERVICE_ID)}</strong>.</p>
+          <p class="mt-2 text-sm ${theme.subtle}">The Sign In page is now Google-only on the surface. The backend URL box is tucked away below so you do not have to stare at setup knobs unless something is broken.</p>
+          ${connectionStatus}
+          ${backendError ? `<p class="mt-3 text-sm text-red-500">${escapeHtml(backendError)}</p>` : ``}
+          <details class="mt-4 rounded-2xl border p-4 ${theme.panel}">
+            <summary class="cursor-pointer text-sm font-black uppercase tracking-widest">Advanced backend connection</summary>
+            <p class="mt-3 text-sm ${theme.subtle}">Only use this if your frontend is hosted separately from the backend and same-origin is not enough. A Render service ID is not itself a public URL.</p>
+            <div class="mt-4 flex flex-col sm:flex-row gap-3">
+              <input id="stepper-api-base-input" class="stepper-google-input ${theme.button}" value="${escapeHtml(state.apiBase)}" placeholder="https://your-backend.onrender.com" />
+              <button type="button" data-stepper-action="save-api-base" class="stepper-google-cta ${theme.button}">Save backend URL</button>
+            </div>
+          </details>
+        </div>
+        ${signedInCard}
+      </div>
+    `;
 
-    const googleSlot = signInPage.querySelector('#stepper-google-button-slot');
-    if (googleSlot && !profile) renderGoogleButton(googleSlot);
+    const saveBtn = page.querySelector('[data-stepper-action="save-api-base"]');
+    const apiInput = page.querySelector('#stepper-api-base-input');
+    if (saveBtn && apiInput) {
+      saveBtn.addEventListener('click', async () => {
+        saveApiBase(apiInput.value || '');
+        await refreshConfig();
+        await refreshPresence();
+        if (state.session) await refreshSession();
+        renderPages();
+      });
+    }
+
+    const signoutBtn = page.querySelector('[data-stepper-action="signout"]');
+    if (signoutBtn) {
+      signoutBtn.addEventListener('click', () => {
+        clearSession();
+        renderPages();
+      });
+    }
+
+    renderGoogleButton();
   }
 
   function renderAdminPage(){
-    ensureHost();
-    const ui = theme();
-    const profile = getProfile();
-    adminPage.className = `rounded-3xl border shadow-sm overflow-hidden ${ui.shell}`;
-
-    if (!(profile && profile.isAdmin)) {
-      adminPage.innerHTML = `
-        <div class="px-6 py-5 border-b ${ui.panel}">
-          <h2 class="text-2xl font-black tracking-tight uppercase flex items-center gap-2"><span class="stepper-google-admin-icon">${iconShield()}</span> Admin</h2>
+    const page = document.getElementById(ADMIN_PAGE_ID);
+    if (!page) return;
+    const theme = themeClasses();
+    if (!isAdminSession()) {
+      page.className = `rounded-3xl border shadow-sm overflow-hidden ${theme.shell}`;
+      page.innerHTML = `
+        <div class="px-6 py-5 border-b ${theme.panel}">
+          <h2 class="text-2xl font-black tracking-tight uppercase flex items-center gap-2"><span class="stepper-extra-tab-icon">${iconShield()}</span> Admin</h2>
         </div>
         <div class="p-6 sm:p-8">
-          <div class="rounded-2xl border p-6 ${ui.soft}">
-            <p class="text-lg font-bold">This tab is only for ${escapeHtml(ADMIN_EMAIL)}.</p>
-            <p class="mt-2 text-sm ${ui.subtle}">Sign in with the admin Google account and the full featuring controls will show up here.</p>
+          <div class="rounded-3xl border p-6 sm:p-8 text-center ${theme.soft}">
+            <p class="text-lg font-black">Admin access only.</p>
+            <p class="mt-2 text-sm ${theme.subtle}">Sign in as ${escapeHtml(ADMIN_EMAIL)} to see the full dance registry and feature dances.</p>
           </div>
         </div>
       `;
       return;
     }
 
-    const cards = adminDanceCache.length ? adminDanceCache.map((item) => {
-      const dance = item && item.dance ? item.dance : {};
-      const featured = item && item.featured ? item.featured : null;
-      const badge = featured ? `<span class="rounded-full px-3 py-1 text-xs font-black uppercase tracking-widest ${ui.orange}">${escapeHtml(featured.badgeLabel || featured.badgeTone || 'Featured')}</span>` : `<span class="rounded-full px-3 py-1 text-xs font-black uppercase tracking-widest ${ui.accent}">Not featured</span>`;
+    const cards = state.adminDances.length ? state.adminDances.map(item => {
+      const featurePill = item.isFeatured ? `<span class="stepper-google-pill ${theme.orange}">${iconMedal()} Featured</span>` : '';
       return `
-        <article class="rounded-3xl border p-5 sm:p-6 ${ui.soft}" data-owner-key="${escapeHtml(item.ownerKey || '')}" data-dance-id="${escapeHtml(dance.id || '')}">
-          <div class="flex items-start justify-between gap-4 flex-wrap">
+        <article class="rounded-3xl border p-5 sm:p-6 ${theme.soft}" data-stepper-registry-id="${escapeHtml(item.registryId)}">
+          <div class="flex flex-wrap items-start justify-between gap-4">
             <div class="min-w-0">
-              <div class="flex items-center gap-3 flex-wrap">${badge}</div>
-              <h3 class="mt-3 text-xl font-black tracking-tight">${escapeHtml(dance.title || 'Untitled Dance')}</h3>
-              <p class="mt-1 text-sm font-semibold ${ui.subtle}">${escapeHtml(dance.choreographer || 'Uncredited')}${dance.country ? ` (${escapeHtml(dance.country)})` : ''}</p>
-              <p class="mt-2 text-xs font-semibold uppercase tracking-widest ${ui.subtle}">Made by ${escapeHtml(item.ownerName || item.ownerEmail || 'Member')}</p>
+              <div class="flex flex-wrap items-center gap-3">
+                <h3 class="text-xl font-black tracking-tight">${escapeHtml(item.title || 'Untitled Dance')}</h3>
+                ${featurePill}
+              </div>
+              <p class="mt-1 text-sm font-semibold ${theme.subtle}">${escapeHtml(item.choreographer || 'Uncredited')}${item.country ? ` (${escapeHtml(item.country)})` : ''}</p>
+              <p class="mt-2 text-sm ${theme.subtle}">By ${escapeHtml(item.ownerName || item.ownerEmail || 'Unknown member')} • ${escapeHtml(item.ownerEmail || '')}</p>
             </div>
-            <div class="grid grid-cols-2 gap-2 text-sm">
-              <div class="rounded-2xl border px-3 py-3 ${ui.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${ui.subtle}">Counts</div><div class="mt-1 font-bold">${escapeHtml(dance.counts || '-')}</div></div>
-              <div class="rounded-2xl border px-3 py-3 ${ui.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${ui.subtle}">Walls</div><div class="mt-1 font-bold">${escapeHtml(dance.walls || '-')}</div></div>
-              <div class="rounded-2xl border px-3 py-3 ${ui.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${ui.subtle}">Level</div><div class="mt-1 font-bold">${escapeHtml(dance.level || '-')}</div></div>
-              <div class="rounded-2xl border px-3 py-3 ${ui.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${ui.subtle}">Steps</div><div class="mt-1 font-bold">${escapeHtml(String(dance.steps || 0))}</div></div>
-            </div>
+            <span class="rounded-full px-3 py-1 text-xs font-black uppercase tracking-widest ${theme.dark ? 'bg-indigo-900/50 text-indigo-200' : 'bg-indigo-100 text-indigo-700'}">${escapeHtml(item.level || 'Unlabelled')}</span>
           </div>
-          ${dance.music ? `<p class="mt-4 text-sm leading-relaxed ${ui.subtle}"><strong class="${ui.dark ? 'text-neutral-100' : 'text-neutral-900'}">Music:</strong> ${escapeHtml(dance.music)}</p>` : ''}
-          <div class="stepper-google-admin-actions mt-5 flex flex-wrap gap-3">
-            <button type="button" data-action="feature" data-badge="bronze" class="stepper-google-admin-btn ${ui.orange}">Bronze</button>
-            <button type="button" data-action="feature" data-badge="silver" class="stepper-google-admin-btn ${ui.button}">Silver</button>
-            <button type="button" data-action="feature" data-badge="gold" class="stepper-google-admin-btn ${ui.accent}">Gold</button>
-            ${featured ? `<button type="button" data-action="unfeature" class="stepper-google-admin-danger ${ui.button}">Remove feature</button>` : ''}
+          <div class="mt-4 stepper-google-grid text-sm">
+            <div class="stepper-google-stat ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Counts</div><div class="mt-1 font-bold">${escapeHtml(item.counts || '-')}</div></div>
+            <div class="stepper-google-stat ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Walls</div><div class="mt-1 font-bold">${escapeHtml(item.walls || '-')}</div></div>
+            <div class="stepper-google-stat ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Sections</div><div class="mt-1 font-bold">${escapeHtml(String(item.sections || 0))}</div></div>
+            <div class="stepper-google-stat ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Steps</div><div class="mt-1 font-bold">${escapeHtml(String(item.steps || 0))}</div></div>
+          </div>
+          <p class="mt-4 text-sm ${theme.subtle}">Updated ${escapeHtml(formatDate(item.updatedAt))}</p>
+          <div class="mt-5 flex flex-wrap items-center gap-3">
+            <button type="button" class="stepper-google-badge-btn" data-action="feature" data-tone="bronze">Bronze</button>
+            <button type="button" class="stepper-google-badge-btn" data-action="feature" data-tone="silver">Silver</button>
+            <button type="button" class="stepper-google-badge-btn" data-action="feature" data-tone="gold">Gold</button>
+            ${item.isFeatured ? `<button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="unfeature">Remove feature</button>` : ''}
           </div>
         </article>
       `;
-    }).join('') : `<div class="rounded-3xl border p-6 sm:p-8 text-center ${ui.soft}"><p class="text-lg font-bold">No synced dances yet.</p><p class="mt-2 ${ui.subtle}">Members need to sign in first. Once they do, the current dance starts showing up here automatically.</p></div>`;
-
-    adminPage.innerHTML = `
-      <div class="px-6 py-5 border-b ${ui.panel}">
-        <h2 class="text-2xl font-black tracking-tight uppercase flex items-center gap-2"><span class="stepper-google-admin-icon">${iconShield()}</span> Admin</h2>
-      </div>
-      <div class="p-6 sm:p-8 space-y-5">
-        <div class="rounded-2xl border p-5 ${ui.panel}">
-          <div class="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <div class="text-lg font-black tracking-tight">Every synced dance</div>
-              <p class="mt-1 text-sm ${ui.subtle}">Click Bronze, Silver, or Gold to feature the dance instantly.</p>
-            </div>
-            <button type="button" id="stepper-admin-refresh" class="stepper-google-admin-btn ${ui.accent}">Refresh list</button>
-          </div>
-        </div>
-        ${cards}
-        ${authMessage ? `<div class="rounded-2xl border p-4 ${ui.panel}"><p class="text-sm font-semibold">${escapeHtml(authMessage)}</p></div>` : ''}
+    }).join('') : `
+      <div class="rounded-3xl border p-6 sm:p-8 text-center ${theme.soft}">
+        <p class="text-lg font-black">No dances in the registry yet.</p>
+        <p class="mt-2 text-sm ${theme.subtle}">Once signed-in members build dances, they will start appearing here automatically.</p>
       </div>
     `;
 
-    const refreshBtn = adminPage.querySelector('#stepper-admin-refresh');
-    if (refreshBtn) refreshBtn.addEventListener('click', async () => {
-      await fetchAdminDances(true);
-      renderOwnPages();
-    });
+    page.className = `rounded-3xl border shadow-sm overflow-hidden ${theme.shell}`;
+    page.innerHTML = `
+      <div class="px-6 py-5 border-b ${theme.panel}">
+        <h2 class="text-2xl font-black tracking-tight uppercase flex items-center gap-2"><span class="stepper-extra-tab-icon">${iconShield()}</span> Admin</h2>
+      </div>
+      <div class="p-6 sm:p-8 space-y-5">
+        <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}">
+          <div class="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <div class="text-lg font-black tracking-tight">Registry overview</div>
+              <p class="mt-1 text-sm ${theme.subtle}">Click a badge to feature a dance. The public Featured Choreo tab refreshes from the backend list.</p>
+            </div>
+            <div class="stepper-google-badge-row">
+              <span class="stepper-google-pill ${theme.orange}">${escapeHtml(String(state.adminDances.length))} dances</span>
+              <span class="stepper-google-pill ${theme.orange}"><span data-stepper-online-count>${escapeHtml((state.presence && state.presence.onlineCount) || 0)}</span> online</span>
+            </div>
+          </div>
+        </div>
+        ${cards}
+      </div>
+    `;
 
-    adminPage.querySelectorAll('[data-action="feature"]').forEach((button) => {
-      button.addEventListener('click', async () => {
-        const card = button.closest('[data-owner-key][data-dance-id]');
-        if (!card) return;
-        await featureDance(card.getAttribute('data-owner-key'), card.getAttribute('data-dance-id'), button.getAttribute('data-badge') || 'bronze');
+    page.querySelectorAll('[data-stepper-registry-id]').forEach(card => {
+      const registryId = card.getAttribute('data-stepper-registry-id');
+      card.querySelectorAll('[data-action="feature"]').forEach(button => {
+        button.addEventListener('click', () => {
+          featureDance(registryId, button.getAttribute('data-tone') || 'bronze');
+        });
       });
-    });
-    adminPage.querySelectorAll('[data-action="unfeature"]').forEach((button) => {
-      button.addEventListener('click', async () => {
-        const card = button.closest('[data-owner-key][data-dance-id]');
-        if (!card) return;
-        await unfeatureDance(card.getAttribute('data-owner-key'), card.getAttribute('data-dance-id'));
-      });
+      const unfeatureBtn = card.querySelector('[data-action="unfeature"]');
+      if (unfeatureBtn) {
+        unfeatureBtn.addEventListener('click', () => {
+          unfeatureDance(registryId);
+        });
+      }
     });
   }
 
-  function renderOwnPages(){
+  function syncPageVisibility(){
+    const host = ensureHost();
+    const signInPage = document.getElementById(SIGNIN_PAGE_ID);
+    const adminPage = document.getElementById(ADMIN_PAGE_ID);
+    const showSignIn = state.activePage === 'signin';
+    const showAdmin = state.activePage === 'admin';
+    setVisibility(signInPage, showSignIn);
+    setVisibility(adminPage, showAdmin);
+    host.hidden = !state.activePage;
+    host.style.display = state.activePage ? '' : 'none';
+  }
+
+  function patchFeaturedPageCopy(){
+    const page = document.getElementById('stepper-featured-choreo-page');
+    if (!page) return;
+    const noteCard = page.querySelector('.rounded-2xl.border.p-5');
+    if (!noteCard) return;
+    if (noteCard.dataset.stepperAdminPatched === 'true') return;
+    noteCard.dataset.stepperAdminPatched = 'true';
+    const theme = themeClasses();
+    noteCard.innerHTML = `<p class="text-base sm:text-lg font-bold leading-relaxed">Featured dances now come from the admin workflow instead of Gmail submissions. Signed-in members can have their work auto-synced to the registry, and the admin account decides what gets a Bronze, Silver, or Gold feature badge.</p><p class="mt-3 text-sm ${theme.subtle}">Public members can still browse everything here once it has been featured.</p>`;
+  }
+
+  function renderPages(){
+    locateUi();
     ensureHost();
     renderSignInPage();
     renderAdminPage();
-    updateTabStyles();
-    patchFeaturedCopy();
+    syncPageVisibility();
+    renderPresenceOnly();
+    patchFeaturedPageCopy();
+    updateAdminTabVisibility();
+    updateTabButtons();
   }
 
-  async function refreshBackendBits(){
-    await getConfig();
-    await tryRestoreSession();
+  async function prime(){
+    ensureStyles();
+    if (!locateUi()) return;
+    ensureHost();
+    await refreshConfig();
     await refreshPresence();
-    await refreshFeatured(true);
-    const profile = getProfile();
-    if (profile && profile.isAdmin) await fetchAdminDances(true);
-    renderOwnPages();
-    ensureTabs();
+    if (state.session && state.session.credential) {
+      await refreshSession();
+      await heartbeat();
+      await syncCurrentDanceToBackend(false);
+      if (isAdminSession()) await refreshAdminDances();
+    }
+    await syncFeaturedFromBackend();
+    renderPages();
   }
 
-  function scheduleLoops(){
-    setInterval(async () => {
-      await refreshPresence();
-      await syncCurrentDance(false);
-      if (getProfile() && getProfile().isAdmin) await fetchAdminDances(true);
-      if (activeOwnPage === 'signin' || activeOwnPage === 'admin') renderOwnPages();
-      patchFeaturedCopy();
-    }, 25000);
-
-    window.addEventListener('storage', () => {
-      if (activeOwnPage === 'signin' || activeOwnPage === 'admin') renderOwnPages();
-      patchFeaturedCopy();
-      ensureTabs();
-    });
-
-    window.addEventListener('focus', async () => {
-      await refreshPresence();
-      await syncCurrentDance(false);
-      if (getProfile() && getProfile().isAdmin) await fetchAdminDances(true);
-      if (activeOwnPage === 'signin' || activeOwnPage === 'admin') renderOwnPages();
-    });
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', prime, { once:true });
+  } else {
+    prime();
   }
 
-  async function boot(){
-    injectStyles();
-    let tries = 0;
-    const timer = setInterval(async () => {
-      tries += 1;
-      const ready = ensureTabs();
-      renderOwnPages();
-      patchFeaturedCopy();
-      if (ready) {
-        clearInterval(timer);
-        await refreshBackendBits();
-        scheduleLoops();
-      }
-      if (tries > 40) clearInterval(timer);
-    }, 500);
-  }
+  setInterval(() => {
+    if (!locateUi()) return;
+    ensureHost();
+    updateAdminTabVisibility();
+    updateTabButtons();
+    renderPresenceOnly();
+    patchFeaturedPageCopy();
+    if (state.activePage) renderPages();
+  }, 2200);
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
-  else boot();
+  setInterval(() => {
+    syncCurrentDanceToBackend(false);
+  }, SYNC_INTERVAL_MS);
+
+  setInterval(() => {
+    refreshPresence();
+    if (state.session && state.session.credential) heartbeat();
+  }, PRESENCE_INTERVAL_MS);
+
+  setInterval(() => {
+    syncFeaturedFromBackend();
+    patchFeaturedPageCopy();
+    if (isAdminSession()) refreshAdminDances();
+  }, FEATURED_SYNC_INTERVAL_MS);
+
+  window.addEventListener('storage', () => {
+    if (state.session && state.session.credential) syncCurrentDanceToBackend(false);
+    renderPages();
+  });
 })();

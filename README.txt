@@ -2,7 +2,6 @@ Step by Stepper
 
 Files to keep together after unzipping:
 - index.html
-- stepper-google-admin.js
 - light-mode.mp3
 - dark-mode.mp3
 - tab-change.wav
@@ -10,12 +9,11 @@ Files to keep together after unzipping:
 - open-right-click.mp3
 - delete.mp3
 
-This build adds:
-- a Sign In tab with Google sign-in wiring
-- live members online count
-- automatic dance syncing for signed-in members
-- an Admin tab for Anthonytau4@gmail.com
-- Bronze / Silver / Gold featuring from the admin list
-
-If the Sign In tab says the backend URL is missing, paste your real Render backend URL into that field.
-A Render service ID on its own is not the same thing as the public backend URL.
+This build now includes:
+- a Google Sign In page
+- online member count
+- automatic signed-in dance syncing to the backend registry
+- an admin-only tab for Anthonytau4@gmail.com
+- admin featuring with Bronze / Silver / Gold badge choices
+- your Render service ID baked into the sign-in page for reference: srv-d6ss4295pdvs73e1iifg
+- the sign-in screen now keeps the backend URL controls tucked under an Advanced section instead of putting setup in your face

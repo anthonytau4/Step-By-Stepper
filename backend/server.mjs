@@ -16,8 +16,6 @@ const port = Number(process.env.PORT || 3000);
 const model = process.env.OPENAI_MODEL || "gpt-5";
 const googleClientId = String(process.env.GOOGLE_CLIENT_ID || "").trim();
 const googleClient = googleClientId ? new OAuth2Client(googleClientId) : null;
-const adminEmail = String(process.env.ADMIN_EMAIL || "Anthonytau4@gmail.com").trim().toLowerCase();
-const onlineWindowMs = Math.max(30_000, Number(process.env.ONLINE_WINDOW_MS || 120_000));
 const dataDir = process.env.DATA_DIR
   ? path.resolve(process.env.DATA_DIR)
   : path.join(__dirname, "data");
@@ -25,6 +23,12 @@ const dbPath = path.join(dataDir, "stepper-db.json");
 const openaiClient = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
+const adminEmail = normalizeEmail(process.env.ADMIN_EMAIL || "anthonytau4@gmail.com");
+const onlineWindowMs = Math.max(30_000, Number(process.env.ONLINE_WINDOW_MS || 180_000));
+
+function normalizeEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
 
 function parseAllowedOrigins(value) {
   const raw = String(value || "*").trim();
@@ -43,13 +47,13 @@ app.use(cors({
     callback(new Error("Origin not allowed by Step-By-Stepper backend."));
   }
 }));
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({ limit: "4mb" }));
 
-function blankDb() {
+function emptyDb() {
   return {
     users: {},
     featuredChoreo: [],
-    presence: {}
+    danceRegistry: []
   };
 }
 
@@ -58,7 +62,7 @@ async function ensureDb() {
   try {
     await fs.access(dbPath);
   } catch {
-    await fs.writeFile(dbPath, JSON.stringify(blankDb(), null, 2), "utf8");
+    await fs.writeFile(dbPath, JSON.stringify(emptyDb(), null, 2), "utf8");
   }
 }
 
@@ -67,13 +71,13 @@ async function readDb() {
   const raw = await fs.readFile(dbPath, "utf8");
   try {
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return blankDb();
+    if (!parsed || typeof parsed !== "object") return emptyDb();
     if (!parsed.users || typeof parsed.users !== "object") parsed.users = {};
     if (!Array.isArray(parsed.featuredChoreo)) parsed.featuredChoreo = [];
-    if (!parsed.presence || typeof parsed.presence !== "object") parsed.presence = {};
+    if (!Array.isArray(parsed.danceRegistry)) parsed.danceRegistry = [];
     return parsed;
   } catch {
-    return blankDb();
+    return emptyDb();
   }
 }
 
@@ -87,18 +91,16 @@ function userKeyFromClaims(claims) {
 }
 
 function pickProfile(claims) {
-  const email = String(claims?.email || "").trim();
   return {
     sub: String(claims?.sub || "").trim(),
-    email,
-    name: String(claims?.name || email || "").trim(),
-    picture: String(claims?.picture || "").trim(),
-    isAdmin: isAdminEmail(email)
+    email: String(claims?.email || "").trim(),
+    name: String(claims?.name || claims?.email || "").trim(),
+    picture: String(claims?.picture || "").trim()
   };
 }
 
-function isAdminEmail(email) {
-  return String(email || "").trim().toLowerCase() === adminEmail;
+function isAdminProfile(profile) {
+  return normalizeEmail(profile?.email) === adminEmail;
 }
 
 function readBearerToken(req) {
@@ -148,12 +150,14 @@ async function requireGoogleUser(req, res, next) {
   }
 }
 
-function requireAdmin(req, res, next) {
-  if (!req.stepperUser?.isAdmin) {
-    res.status(403).json({ ok: false, error: "Admin access only." });
-    return;
-  }
-  next();
+async function requireAdmin(req, res, next) {
+  requireGoogleUser(req, res, async () => {
+    if (!isAdminProfile(req.stepperUser)) {
+      res.status(403).json({ ok: false, error: "Admin access only." });
+      return;
+    }
+    next();
+  });
 }
 
 function sanitizeSnapshot(snapshot) {
@@ -164,7 +168,7 @@ function sanitizeSnapshot(snapshot) {
   };
 }
 
-function sanitizeCloudEntry(entry) {
+function sanitizeCloudEntry(entry, ownerProfile = null, ownerKey = "") {
   const safe = entry && typeof entry === "object" ? entry : {};
   const snapshot = sanitizeSnapshot(safe.snapshot);
   return {
@@ -179,122 +183,142 @@ function sanitizeCloudEntry(entry) {
     sections: Number.isFinite(Number(safe.sections)) ? Number(safe.sections) : 0,
     steps: Number.isFinite(Number(safe.steps)) ? Number(safe.steps) : 0,
     updatedAt: new Date().toISOString(),
+    ownerKey: String(ownerKey || "").trim(),
+    ownerEmail: String(ownerProfile?.email || safe.ownerEmail || "").trim(),
+    ownerName: String(ownerProfile?.name || safe.ownerName || "").trim(),
+    ownerPicture: String(ownerProfile?.picture || safe.ownerPicture || "").trim(),
     snapshot
   };
 }
 
+function buildPreviewSections(entry) {
+  const sections = Array.isArray(entry?.snapshot?.data?.sections) ? entry.snapshot.data.sections : [];
+  return sections.slice(0, 8).map((section, index) => {
+    const steps = Array.isArray(section?.steps) ? section.steps : [];
+    const lines = steps.slice(0, 12).map((step) => {
+      const count = String(step?.count || "").trim();
+      const name = String(step?.name || "").trim();
+      const description = String(step?.description || "").trim();
+      const note = step?.showNote ? String(step?.note || "").trim() : "";
+      return [count, name, description, note ? `(${note})` : ""].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+    }).filter(Boolean);
+
+    return {
+      name: String(section?.name || `Section ${index + 1}`).trim(),
+      subtitle: "",
+      lines
+    };
+  }).filter(section => Array.isArray(section.lines) && section.lines.length);
+}
+
+function buildBadgeLabel(tone, explicitLabel = "") {
+  const custom = String(explicitLabel || "").trim();
+  if (custom) return custom.slice(0, 120);
+  if (tone === "gold") return "Gold Feature";
+  if (tone === "silver") return "Silver Feature";
+  return "Bronze Feature";
+}
+
 function sanitizeBadgeTone(value) {
   const tone = String(value || "bronze").trim().toLowerCase();
-  return tone === "gold" || tone === "silver" ? tone : "bronze";
+  return ["bronze", "silver", "gold"].includes(tone) ? tone : "bronze";
 }
 
-function badgeLabelForTone(tone) {
-  const fixed = sanitizeBadgeTone(tone);
-  return fixed.charAt(0).toUpperCase() + fixed.slice(1);
+function upsertDanceRegistry(db, entry, userKey, profile) {
+  const safeEntry = sanitizeCloudEntry(entry, profile, userKey);
+  const registryId = `${normalizeEmail(profile?.email) || userKey}::${safeEntry.id}`;
+  const registryEntry = {
+    ...safeEntry,
+    registryId,
+    ownerKey: userKey,
+    ownerEmail: String(profile?.email || safeEntry.ownerEmail || "").trim(),
+    ownerName: String(profile?.name || safeEntry.ownerName || "").trim(),
+    ownerPicture: String(profile?.picture || safeEntry.ownerPicture || "").trim()
+  };
+
+  const list = Array.isArray(db.danceRegistry) ? db.danceRegistry : [];
+  const index = list.findIndex(item => item && item.registryId === registryId);
+  if (index >= 0) list[index] = { ...list[index], ...registryEntry, updatedAt: new Date().toISOString() };
+  else list.unshift(registryEntry);
+  db.danceRegistry = list
+    .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
+    .slice(0, 4000);
+
+  return db.danceRegistry.find(item => item && item.registryId === registryId) || registryEntry;
 }
 
-function sanitizeFeaturedEntry(entry) {
-  const safe = entry && typeof entry === "object" ? entry : {};
-  const badgeTone = sanitizeBadgeTone(safe.badgeTone);
-  const title = String(safe.title || "Untitled Dance").trim().slice(0, 200) || "Untitled Dance";
+function buildFeaturedItemFromRegistry(entry, featuredBy, badgeTone, badgeLabel) {
   return {
-    featureId: String(safe.featureId || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`).trim().slice(0, 120),
-    danceId: String(safe.danceId || safe.id || title).trim().slice(0, 160),
-    ownerKey: String(safe.ownerKey || "").trim().slice(0, 160),
-    ownerEmail: String(safe.ownerEmail || "").trim().slice(0, 200),
-    ownerName: String(safe.ownerName || "").trim().slice(0, 200),
-    title,
-    choreographer: String(safe.choreographer || "Uncredited").trim().slice(0, 200),
-    country: String(safe.country || "").trim().slice(0, 120),
-    level: String(safe.level || "Unlabelled").trim().slice(0, 60),
-    counts: String(safe.counts || "-").trim().slice(0, 40),
-    walls: String(safe.walls || "-").trim().slice(0, 40),
-    music: String(safe.music || "").trim().slice(0, 240),
-    sections: Number.isFinite(Number(safe.sections)) ? Number(safe.sections) : 0,
-    steps: Number.isFinite(Number(safe.steps)) ? Number(safe.steps) : 0,
+    id: entry.registryId,
+    registryId: entry.registryId,
+    title: entry.title,
+    choreographer: entry.choreographer,
+    country: entry.country,
+    level: entry.level,
+    counts: entry.counts,
+    walls: entry.walls,
+    music: entry.music,
+    sections: entry.sections,
+    steps: entry.steps,
+    updatedAt: entry.updatedAt,
     badgeTone,
-    badgeLabel: String(safe.badgeLabel || badgeLabelForTone(badgeTone)).trim().slice(0, 60) || badgeLabelForTone(badgeTone),
-    featuredAt: String(safe.featuredAt || new Date().toISOString()),
-    featuredBy: String(safe.featuredBy || "").trim().slice(0, 200),
-    updatedAt: String(safe.updatedAt || new Date().toISOString()),
-    snapshot: sanitizeSnapshot(safe.snapshot)
+    badgeLabel,
+    note: `${badgeLabel} • Featured by ${featuredBy?.name || featuredBy?.email || "Admin"}`,
+    ownerEmail: entry.ownerEmail,
+    ownerName: entry.ownerName,
+    ownerPicture: entry.ownerPicture,
+    featuredAt: new Date().toISOString(),
+    featuredBy: {
+      email: String(featuredBy?.email || "").trim(),
+      name: String(featuredBy?.name || featuredBy?.email || "").trim()
+    },
+    previewSections: buildPreviewSections(entry)
   };
 }
 
-function featuredFromDance({ dance, ownerKey, ownerProfile, featuredBy, existing }) {
-  return sanitizeFeaturedEntry({
-    featureId: existing?.featureId,
-    danceId: dance.id,
-    ownerKey,
-    ownerEmail: ownerProfile?.email || "",
-    ownerName: ownerProfile?.name || ownerProfile?.email || "",
-    title: dance.title,
-    choreographer: dance.choreographer,
-    country: dance.country,
-    level: dance.level,
-    counts: dance.counts,
-    walls: dance.walls,
-    music: dance.music,
-    sections: dance.sections,
-    steps: dance.steps,
-    badgeTone: existing?.badgeTone || "bronze",
-    badgeLabel: existing?.badgeLabel || badgeLabelForTone(existing?.badgeTone || "bronze"),
-    featuredAt: existing?.featuredAt || new Date().toISOString(),
-    featuredBy: featuredBy || existing?.featuredBy || "",
-    updatedAt: new Date().toISOString(),
-    snapshot: dance.snapshot
-  });
+function touchUser(db, profile, userKey) {
+  const key = String(userKey || profile?.sub || profile?.email || "").trim();
+  if (!key) return null;
+  const bucket = db.users[key] && typeof db.users[key] === "object" ? db.users[key] : {};
+  db.users[key] = {
+    ...bucket,
+    profile: {
+      sub: String(profile?.sub || bucket?.profile?.sub || "").trim(),
+      email: String(profile?.email || bucket?.profile?.email || "").trim(),
+      name: String(profile?.name || bucket?.profile?.name || profile?.email || "").trim(),
+      picture: String(profile?.picture || bucket?.profile?.picture || "").trim()
+    },
+    lastSeenAt: new Date().toISOString(),
+    cloudSaves: Array.isArray(bucket.cloudSaves) ? bucket.cloudSaves : []
+  };
+  return db.users[key];
 }
 
-function prunePresence(db) {
+function getOnlineUsers(db) {
   const now = Date.now();
-  const presence = db.presence && typeof db.presence === "object" ? db.presence : {};
-  const next = {};
-  Object.entries(presence).forEach(([key, value]) => {
-    const lastSeen = Number(value?.lastSeen || 0);
-    if (lastSeen && now - lastSeen <= onlineWindowMs) next[key] = value;
-  });
-  db.presence = next;
-  return next;
-}
-
-function collectAdminDanceRows(db) {
-  const rows = [];
-  const featuredIndex = new Map(
-    (Array.isArray(db.featuredChoreo) ? db.featuredChoreo : []).map(item => [
-      `${String(item.ownerKey || "")}|${String(item.danceId || "")}`,
-      item
-    ])
-  );
-  Object.entries(db.users || {}).forEach(([ownerKey, bucket]) => {
-    const profile = bucket?.profile || {};
-    const cloudSaves = Array.isArray(bucket?.cloudSaves) ? bucket.cloudSaves : [];
-    cloudSaves.forEach((dance) => {
-      const featured = featuredIndex.get(`${ownerKey}|${String(dance?.id || "")}`) || null;
-      rows.push({
-        ownerKey,
-        ownerEmail: String(profile.email || "").trim(),
-        ownerName: String(profile.name || profile.email || "").trim(),
-        dance: sanitizeCloudEntry(dance),
-        featured: featured ? sanitizeFeaturedEntry(featured) : null
-      });
-    });
-  });
-  rows.sort((a, b) => new Date(b.dance.updatedAt || 0) - new Date(a.dance.updatedAt || 0));
-  return rows;
+  return Object.values(db.users || {}).filter((user) => {
+    const email = normalizeEmail(user?.profile?.email);
+    if (!email) return false;
+    const seen = Date.parse(user?.lastSeenAt || 0);
+    return Number.isFinite(seen) && (now - seen) <= onlineWindowMs;
+  }).map((user) => ({
+    name: String(user?.profile?.name || user?.profile?.email || "").trim(),
+    email: String(user?.profile?.email || "").trim(),
+    picture: String(user?.profile?.picture || "").trim(),
+    lastSeenAt: user?.lastSeenAt || null
+  })).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 app.get("/api/health", async (_req, res) => {
   const db = await readDb();
-  const presence = prunePresence(db);
-  await writeDb(db);
   res.json({
     ok: true,
     service: "step-by-stepper-backend",
     googleEnabled: !!googleClientId,
     openaiEnabled: !!openaiClient,
     cloudStorage: "json-file",
-    membersOnline: Object.keys(presence).length
+    onlineCount: getOnlineUsers(db).length,
+    danceCount: Array.isArray(db.danceRegistry) ? db.danceRegistry.length : 0
   });
 });
 
@@ -303,10 +327,11 @@ app.get("/api/auth/config", (_req, res) => {
     ok: true,
     googleEnabled: !!googleClientId,
     googleClientId: googleClientId || "",
-    adminEmail,
     openaiEnabled: !!openaiClient,
     cloudStorage: "json-file",
-    authMode: googleClientId ? "google-id-token" : "none"
+    authMode: googleClientId ? "google-id-token" : "none",
+    adminEmail,
+    onlineWindowMs
   });
 });
 
@@ -315,41 +340,41 @@ app.post("/api/auth/google", async (req, res) => {
     const credential = String(req.body?.credential || "").trim();
     const claims = await verifyGoogleToken(credential);
     const profile = pickProfile(claims);
-    res.json({ ok: true, profile });
+    const db = await readDb();
+    touchUser(db, profile, userKeyFromClaims(claims));
+    await writeDb(db);
+    res.json({ ok: true, profile, isAdmin: isAdminProfile(profile), onlineCount: getOnlineUsers(db).length });
   } catch (error) {
     res.status(error.status || 401).json({ ok: false, error: error?.message || "Google sign-in failed." });
   }
 });
 
-app.get("/api/auth/me", requireGoogleUser, (req, res) => {
-  res.json({ ok: true, profile: req.stepperUser });
+app.get("/api/auth/me", requireGoogleUser, async (req, res) => {
+  const db = await readDb();
+  touchUser(db, req.stepperUser, userKeyFromClaims(req.stepperClaims));
+  await writeDb(db);
+  res.json({ ok: true, profile: req.stepperUser, isAdmin: isAdminProfile(req.stepperUser), onlineCount: getOnlineUsers(db).length });
 });
 
 app.get("/api/presence", async (_req, res) => {
   const db = await readDb();
-  const presence = prunePresence(db);
-  await writeDb(db);
-  res.json({
-    ok: true,
-    count: Object.keys(presence).length,
-    membersOnline: Object.keys(presence).length
-  });
+  const onlineUsers = getOnlineUsers(db);
+  res.json({ ok: true, onlineCount: onlineUsers.length, members: onlineUsers });
 });
 
-app.post("/api/presence/ping", requireGoogleUser, async (req, res) => {
+app.post("/api/presence/heartbeat", requireGoogleUser, async (req, res) => {
   const db = await readDb();
-  db.presence[userKeyFromClaims(req.stepperClaims)] = {
-    profile: req.stepperUser,
-    lastSeen: Date.now()
-  };
-  const presence = prunePresence(db);
+  touchUser(db, req.stepperUser, userKeyFromClaims(req.stepperClaims));
   await writeDb(db);
-  res.json({ ok: true, count: Object.keys(presence).length, membersOnline: Object.keys(presence).length });
+  const onlineUsers = getOnlineUsers(db);
+  res.json({ ok: true, onlineCount: onlineUsers.length, members: onlineUsers, isAdmin: isAdminProfile(req.stepperUser) });
 });
 
 app.get("/api/cloud-saves", requireGoogleUser, async (req, res) => {
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);
+  touchUser(db, req.stepperUser, key);
+  await writeDb(db);
   const bucket = db.users[key] && Array.isArray(db.users[key].cloudSaves) ? db.users[key].cloudSaves : [];
   res.json({ ok: true, items: bucket.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0)) });
 });
@@ -357,9 +382,8 @@ app.get("/api/cloud-saves", requireGoogleUser, async (req, res) => {
 app.post("/api/cloud-saves/upsert", requireGoogleUser, async (req, res) => {
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);
-  if (!db.users[key]) db.users[key] = { profile: req.stepperUser, cloudSaves: [] };
-  db.users[key].profile = req.stepperUser;
-  const entry = sanitizeCloudEntry(req.body?.entry);
+  touchUser(db, req.stepperUser, key);
+  const entry = sanitizeCloudEntry(req.body?.entry, req.stepperUser, key);
   const list = Array.isArray(db.users[key].cloudSaves) ? db.users[key].cloudSaves : [];
   const index = list.findIndex(item => item && item.id === entry.id);
   if (index >= 0) list[index] = { ...list[index], ...entry, updatedAt: new Date().toISOString() };
@@ -368,113 +392,75 @@ app.post("/api/cloud-saves/upsert", requireGoogleUser, async (req, res) => {
     .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
     .slice(0, 200);
 
-  const featuredIndex = Array.isArray(db.featuredChoreo)
-    ? db.featuredChoreo.findIndex(item => item && item.ownerKey === key && item.danceId === entry.id)
-    : -1;
-  if (featuredIndex >= 0) {
-    const existingFeatured = db.featuredChoreo[featuredIndex];
-    db.featuredChoreo[featuredIndex] = featuredFromDance({
-      dance: entry,
-      ownerKey: key,
-      ownerProfile: req.stepperUser,
-      featuredBy: existingFeatured?.featuredBy,
-      existing: existingFeatured
-    });
-  }
-
-  db.presence[key] = { profile: req.stepperUser, lastSeen: Date.now() };
-  prunePresence(db);
+  const registryItem = upsertDanceRegistry(db, entry, key, req.stepperUser);
   await writeDb(db);
-  res.json({ ok: true, item: entry, items: db.users[key].cloudSaves });
+  res.json({ ok: true, item: entry, registryItem, items: db.users[key].cloudSaves });
 });
 
 app.delete("/api/cloud-saves/:id", requireGoogleUser, async (req, res) => {
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);
-  const id = String(req.params.id || "").trim();
+  touchUser(db, req.stepperUser, key);
   const list = db.users[key] && Array.isArray(db.users[key].cloudSaves) ? db.users[key].cloudSaves : [];
-  db.users[key] = db.users[key] || { profile: req.stepperUser, cloudSaves: [] };
-  db.users[key].profile = req.stepperUser;
-  db.users[key].cloudSaves = list.filter(item => item && item.id !== id);
-  db.featuredChoreo = (Array.isArray(db.featuredChoreo) ? db.featuredChoreo : []).filter(item => !(item && item.ownerKey === key && item.danceId === id));
+  db.users[key].cloudSaves = list.filter(item => item && item.id !== String(req.params.id || "").trim());
   await writeDb(db);
-  res.json({ ok: true, deletedId: id });
+  res.json({ ok: true, deletedId: String(req.params.id || "").trim() });
 });
 
 app.get("/api/featured-choreo", async (_req, res) => {
   const db = await readDb();
-  const items = (Array.isArray(db.featuredChoreo) ? db.featuredChoreo : [])
-    .map(item => sanitizeFeaturedEntry(item))
-    .sort((a, b) => new Date(b.featuredAt || 0) - new Date(a.featuredAt || 0));
-  res.json({ ok: true, items });
+  const items = Array.isArray(db.featuredChoreo) ? db.featuredChoreo : [];
+  res.json({ ok: true, items: items.sort((a, b) => new Date(b.featuredAt || b.updatedAt || 0) - new Date(a.featuredAt || a.updatedAt || 0)) });
 });
 
-app.get("/api/admin/dances", requireGoogleUser, requireAdmin, async (_req, res) => {
+app.get("/api/admin/dances", requireAdmin, async (_req, res) => {
   const db = await readDb();
-  const rows = collectAdminDanceRows(db);
-  res.json({
-    ok: true,
-    items: rows,
-    featuredCount: (Array.isArray(db.featuredChoreo) ? db.featuredChoreo : []).length
-  });
+  const featuredIds = new Set((db.featuredChoreo || []).map(item => String(item?.registryId || item?.id || "")).filter(Boolean));
+  const items = (Array.isArray(db.danceRegistry) ? db.danceRegistry : [])
+    .slice()
+    .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
+    .map(item => ({
+      ...item,
+      isFeatured: featuredIds.has(String(item?.registryId || ""))
+    }));
+  res.json({ ok: true, items, featuredIds: Array.from(featuredIds), adminEmail, onlineCount: getOnlineUsers(db).length });
 });
 
-app.post("/api/admin/feature", requireGoogleUser, requireAdmin, async (req, res) => {
-  const db = await readDb();
-  const ownerKey = String(req.body?.ownerKey || "").trim();
-  const danceId = String(req.body?.danceId || "").trim();
-  const badgeTone = sanitizeBadgeTone(req.body?.badgeTone || "bronze");
-  const badgeLabel = String(req.body?.badgeLabel || badgeLabelForTone(badgeTone)).trim().slice(0, 60) || badgeLabelForTone(badgeTone);
-  const ownerBucket = db.users[ownerKey];
-  const ownerProfile = ownerBucket?.profile || null;
-  const dance = Array.isArray(ownerBucket?.cloudSaves)
-    ? ownerBucket.cloudSaves.find(item => item && String(item.id || "") === danceId)
-    : null;
-
-  if (!ownerKey || !danceId || !dance) {
-    res.status(404).json({ ok: false, error: "Dance not found for featuring." });
+app.post("/api/admin/feature", requireAdmin, async (req, res) => {
+  const registryId = String(req.body?.registryId || "").trim();
+  const badgeTone = sanitizeBadgeTone(req.body?.badgeTone);
+  const badgeLabel = buildBadgeLabel(badgeTone, req.body?.badgeLabel);
+  if (!registryId) {
+    res.status(400).json({ ok: false, error: "Missing registryId." });
     return;
   }
 
-  const existingIndex = (Array.isArray(db.featuredChoreo) ? db.featuredChoreo : []).findIndex(
-    item => item && item.ownerKey === ownerKey && item.danceId === danceId
-  );
-  const existing = existingIndex >= 0 ? db.featuredChoreo[existingIndex] : null;
-  const featuredEntry = sanitizeFeaturedEntry({
-    ...featuredFromDance({
-      dance: sanitizeCloudEntry(dance),
-      ownerKey,
-      ownerProfile,
-      featuredBy: req.stepperUser.email,
-      existing
-    }),
-    badgeTone,
-    badgeLabel,
-    featuredBy: req.stepperUser.email,
-    featuredAt: existing?.featuredAt || new Date().toISOString()
-  });
+  const db = await readDb();
+  const source = (Array.isArray(db.danceRegistry) ? db.danceRegistry : []).find(item => item && item.registryId === registryId);
+  if (!source) {
+    res.status(404).json({ ok: false, error: "Dance not found in registry." });
+    return;
+  }
 
-  if (!Array.isArray(db.featuredChoreo)) db.featuredChoreo = [];
-  if (existingIndex >= 0) db.featuredChoreo[existingIndex] = featuredEntry;
-  else db.featuredChoreo.unshift(featuredEntry);
-
-  db.featuredChoreo = db.featuredChoreo
-    .map(item => sanitizeFeaturedEntry(item))
-    .sort((a, b) => new Date(b.featuredAt || 0) - new Date(a.featuredAt || 0));
+  const featuredItem = buildFeaturedItemFromRegistry(source, req.stepperUser, badgeTone, badgeLabel);
+  const items = Array.isArray(db.featuredChoreo) ? db.featuredChoreo : [];
+  const index = items.findIndex(item => item && String(item.registryId || item.id || "") === registryId);
+  if (index >= 0) items[index] = { ...items[index], ...featuredItem, featuredAt: new Date().toISOString() };
+  else items.unshift(featuredItem);
+  db.featuredChoreo = items
+    .sort((a, b) => new Date(b.featuredAt || b.updatedAt || 0) - new Date(a.featuredAt || a.updatedAt || 0))
+    .slice(0, 300);
 
   await writeDb(db);
-  res.json({ ok: true, item: featuredEntry, items: collectAdminDanceRows(db) });
+  res.json({ ok: true, item: featuredItem, items: db.featuredChoreo });
 });
 
-app.delete("/api/admin/feature", requireGoogleUser, requireAdmin, async (req, res) => {
+app.delete("/api/admin/feature/:registryId", requireAdmin, async (req, res) => {
+  const registryId = String(req.params.registryId || "").trim();
   const db = await readDb();
-  const ownerKey = String(req.body?.ownerKey || "").trim();
-  const danceId = String(req.body?.danceId || "").trim();
-  db.featuredChoreo = (Array.isArray(db.featuredChoreo) ? db.featuredChoreo : []).filter(
-    item => !(item && item.ownerKey === ownerKey && item.danceId === danceId)
-  );
+  db.featuredChoreo = (Array.isArray(db.featuredChoreo) ? db.featuredChoreo : []).filter(item => String(item?.registryId || item?.id || "") !== registryId);
   await writeDb(db);
-  res.json({ ok: true, items: collectAdminDanceRows(db) });
+  res.json({ ok: true, registryId });
 });
 
 app.post("/api/openai/respond", async (req, res) => {
