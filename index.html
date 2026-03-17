@@ -2,7 +2,11 @@
 <html lang="en">
   <head>
     <script>
-  window.STEPPER_API_BASE = "https://step-by-stepper.onrender.com";
+  window.STEPPER_API_BASE = window.STEPPER_API_BASE || (
+    location.hostname === "localhost" || location.hostname === "127.0.0.1"
+      ? "http://localhost:3000"
+      : "https://api.step-by-stepper.com"
+  );
 </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -1227,6 +1231,9 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   const CHOREO_PANEL_ID = 'stepper-inline-choreography';
   const SETTINGS_PANEL_ID = 'stepper-inline-settings';
   const EXTRA_NOTES = [
+    'New: My Saved Dances now includes proper Google sign-in, and the backend verifies the Google ID token before it touches the cloud shelf.',
+    'New: signed-in cloud saves can now read, write and delete through the backend instead of pretending the front end is a server.',
+    'New: the saved-dances page now checks backend auth config and shows a real Google sign-in block when the service is ready for it.',
     'New: tab switches now use a single loading pass with smoother pacing, awkward hold beats, and a proper finish right as the loading bar lands.',
     'New: tab changes now run destination-based loading states, so Editor, Sheet, Whats New, Featured Choreo, and My Saved Dances each show their own status pass during the switch.',
     'New Featured choreography! Check it out in the Featured Choreography tab!',
@@ -1674,34 +1681,290 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     `;
   }
 
-  function getGoogleFrontendProfile(){
-    const profile = readJson(GOOGLE_FRONTEND_KEY, null);
-    if (!profile || typeof profile !== 'object') return null;
-    const email = String(profile.email || '').trim();
-    if (!email) return null;
-    const name = String(profile.name || '').trim() || email.split('@')[0];
-    return { name, email, updatedAt: profile.updatedAt || new Date().toISOString() };
-  }
+function getGoogleFrontendProfile(){
+  const profile = readJson(GOOGLE_FRONTEND_KEY, null);
+  if (!profile || typeof profile !== 'object') return null;
+  const email = String(profile.email || '').trim();
+  const credential = String(profile.credential || '').trim();
+  if (!email) return null;
+  const name = String(profile.name || '').trim() || email.split('@')[0];
+  return {
+    name,
+    email,
+    picture: String(profile.picture || '').trim(),
+    sub: String(profile.sub || '').trim(),
+    credential,
+    updatedAt: profile.updatedAt || new Date().toISOString()
+  };
+}
 
-  function getActiveCloudProfile(){
-    const profile = getGoogleFrontendProfile();
-    if (profile && profile.email) return profile;
-    return { name: 'This device', email: 'device@stepbystepper.local', updatedAt: new Date().toISOString(), localOnly: true };
-  }
+function getStoredGoogleCredential(){
+  const profile = getGoogleFrontendProfile();
+  return profile && profile.credential ? profile.credential : '';
+}
 
-  function saveGoogleFrontendProfile(profile){
-    writeJson(GOOGLE_FRONTEND_KEY, {
-      name: String(profile && profile.name || '').trim(),
-      email: String(profile && profile.email || '').trim(),
-      updatedAt: new Date().toISOString()
+function getApiBase(){
+  return String(window.STEPPER_API_BASE || '').replace(/\/+$/, '');
+}
+
+async function stepperApi(path, options){
+  const base = getApiBase();
+  if (!base) throw new Error('Missing Step by Stepper backend URL.');
+  const opts = options && typeof options === 'object' ? Object.assign({}, options) : {};
+  const headers = Object.assign({}, opts.headers || {});
+  if (opts.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+  const credential = opts.googleCredential || getStoredGoogleCredential();
+  if (credential && !headers.Authorization) headers.Authorization = `Bearer ${credential}`;
+  delete opts.googleCredential;
+  opts.headers = headers;
+  const response = await fetch(`${base}${path}`, opts);
+  const contentType = response.headers.get('content-type') || '';
+  const payload = contentType.includes('application/json') ? await response.json() : await response.text();
+  if (!response.ok) {
+    const message = payload && typeof payload === 'object' ? (payload.error || payload.message) : '';
+    throw new Error(message || `Request failed (${response.status}).`);
+  }
+  return payload;
+}
+
+let googleIdentityScriptPromise = null;
+let googleAuthConfigPromise = null;
+let cloudSyncState = { profileEmail: '', items: null, loading: false, error: '', configured: false, remoteReady: false, promise: null };
+
+async function fetchGoogleAuthConfig(force){
+  if (!force && googleAuthConfigPromise) return googleAuthConfigPromise;
+  googleAuthConfigPromise = stepperApi('/api/auth/config', { method: 'GET' })
+    .then(payload => ({
+      ok: !!(payload && payload.ok),
+      googleEnabled: !!(payload && payload.googleEnabled),
+      googleClientId: String(payload && payload.googleClientId || '').trim(),
+      openaiEnabled: !!(payload && payload.openaiEnabled),
+      cloudStorage: String(payload && payload.cloudStorage || '').trim(),
+      authMode: String(payload && payload.authMode || '').trim()
+    }))
+    .catch(error => ({
+      ok: false,
+      googleEnabled: false,
+      googleClientId: '',
+      openaiEnabled: false,
+      cloudStorage: '',
+      authMode: '',
+      error: error && error.message ? error.message : 'Backend auth config could not be reached.'
+    }));
+  return googleAuthConfigPromise;
+}
+
+function loadGoogleIdentityScript(){
+  if (window.google && window.google.accounts && window.google.accounts.id) return Promise.resolve(window.google);
+  if (googleIdentityScriptPromise) return googleIdentityScriptPromise;
+  googleIdentityScriptPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[data-stepper-google-gsi]');
+    if (existing) {
+      existing.addEventListener('load', () => resolve(window.google), { once: true });
+      existing.addEventListener('error', () => reject(new Error('Google sign-in script failed to load.')), { once: true });
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    script.dataset.stepperGoogleGsi = 'true';
+    script.onload = () => resolve(window.google);
+    script.onerror = () => reject(new Error('Google sign-in script failed to load.'));
+    document.head.appendChild(script);
+  });
+  return googleIdentityScriptPromise;
+}
+
+function isRemoteCloudProfile(profile){
+  return !!(profile && !profile.localOnly && profile.email && getStoredGoogleCredential());
+}
+
+function saveGoogleFrontendProfile(profile){
+  writeJson(GOOGLE_FRONTEND_KEY, {
+    name: String(profile && profile.name || '').trim(),
+    email: String(profile && profile.email || '').trim(),
+    picture: String(profile && profile.picture || '').trim(),
+    sub: String(profile && profile.sub || '').trim(),
+    credential: String(profile && profile.credential || '').trim(),
+    updatedAt: new Date().toISOString()
+  });
+}
+
+function clearGoogleFrontendProfile(){
+  localStorage.removeItem(GOOGLE_FRONTEND_KEY);
+  cloudSyncState = { profileEmail: '', items: null, loading: false, error: '', configured: false, remoteReady: false, promise: null };
+  try {
+    if (window.google && window.google.accounts && window.google.accounts.id) window.google.accounts.id.disableAutoSelect();
+  } catch (error) {
+    console.warn(error);
+  }
+}
+
+function getActiveCloudProfile(){
+  const profile = getGoogleFrontendProfile();
+  if (profile && profile.email) return profile;
+  return { name: 'This device', email: 'device@stepbystepper.local', updatedAt: new Date().toISOString(), localOnly: true };
+}
+
+async function verifyStoredGoogleProfile(){
+  const profile = getGoogleFrontendProfile();
+  if (!profile || !profile.credential) return null;
+  try {
+    const payload = await stepperApi('/api/auth/me', { method: 'GET', googleCredential: profile.credential });
+    if (!payload || !payload.ok || !payload.profile) throw new Error('Google session could not be verified.');
+    saveGoogleFrontendProfile(Object.assign({}, profile, payload.profile, { credential: profile.credential }));
+    return getGoogleFrontendProfile();
+  } catch (error) {
+    clearGoogleFrontendProfile();
+    return null;
+  }
+}
+
+async function handleGoogleCredentialResponse(response){
+  if (!response || !response.credential) return;
+  try {
+    const payload = await stepperApi('/api/auth/google', {
+      method: 'POST',
+      body: JSON.stringify({ credential: response.credential })
     });
+    if (!payload || !payload.ok || !payload.profile) throw new Error('Google sign-in could not be verified.');
+    saveGoogleFrontendProfile(Object.assign({}, payload.profile, { credential: response.credential }));
+    await refreshCloudEntriesFromBackend(true);
+    renderSavedDancesPage();
+  } catch (error) {
+    alert(error && error.message ? error.message : 'Google sign-in failed.');
+  }
+}
+
+function renderGoogleAuthShell(target, theme, html){
+  if (!target) return;
+  target.className = `rounded-3xl border p-5 sm:p-6 ${theme.soft}`;
+  target.innerHTML = html;
+}
+
+async function hydrateGoogleSignInUi(page, theme){
+  const target = page.querySelector('[data-stepper-google-auth]');
+  if (!target) return;
+  renderGoogleAuthShell(target, theme, `
+    <div class="flex items-center justify-between gap-3 flex-wrap">
+      <div>
+        <div class="text-lg font-black tracking-tight">Google cloud sign-in</div>
+        <p class="mt-1 text-sm ${theme.subtle}">Checking whether the backend is ready for Google sign-in and remote cloud saves.</p>
+      </div>
+      <span class="stepper-mini-btn ${theme.button}">Checking backend</span>
+    </div>
+  `);
+
+  const config = await fetchGoogleAuthConfig();
+  const profile = getGoogleFrontendProfile();
+
+  if (!config.ok) {
+    renderGoogleAuthShell(target, theme, `
+      <div class="space-y-3">
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <div class="text-lg font-black tracking-tight">Google cloud sign-in</div>
+            <p class="mt-1 text-sm ${theme.subtle}">The backend did not answer, so this page is staying on the device-only cloud shelf for now.</p>
+          </div>
+          <span class="stepper-danger-btn ${theme.dark ? 'bg-red-500/15 text-red-300 border border-red-400/20' : 'bg-red-50 text-red-700 border border-red-200'}">Backend offline</span>
+        </div>
+        <p class="text-sm leading-relaxed ${theme.subtle}">${escapeHtml(config.error || 'Could not reach the backend auth config.')}</p>
+      </div>
+    `);
+    return;
   }
 
-  function clearGoogleFrontendProfile(){
-    localStorage.removeItem(GOOGLE_FRONTEND_KEY);
+  if (!config.googleEnabled || !config.googleClientId) {
+    renderGoogleAuthShell(target, theme, `
+      <div class="space-y-3">
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <div class="text-lg font-black tracking-tight">Google cloud sign-in</div>
+            <p class="mt-1 text-sm ${theme.subtle}">The backend is alive, but Google sign-in is still waiting for the real client ID in Render.</p>
+          </div>
+          <span class="stepper-mini-btn ${theme.button}">Backend ready</span>
+        </div>
+        <p class="text-sm leading-relaxed ${theme.subtle}">Set GOOGLE_CLIENT_ID in the backend environment, then add your live site and localhost to the authorised JavaScript origins in Google Cloud.</p>
+      </div>
+    `);
+    return;
   }
 
-  function getCloudSaveMap(){
+  if (profile && profile.email) {
+    const verifiedProfile = await verifyStoredGoogleProfile();
+    const activeProfile = verifiedProfile || profile;
+    renderGoogleAuthShell(target, theme, `
+      <div class="flex items-start justify-between gap-4 flex-wrap">
+        <div class="flex items-center gap-4 min-w-0">
+          ${activeProfile.picture ? `<img src="${escapeHtml(activeProfile.picture)}" alt="" class="w-12 h-12 rounded-full border ${theme.dark ? 'border-neutral-700' : 'border-neutral-200'}">` : `<div class="w-12 h-12 rounded-full border flex items-center justify-center font-black ${theme.panel}">${escapeHtml((activeProfile.name || 'G').slice(0,1).toUpperCase())}</div>`}
+          <div class="min-w-0">
+            <div class="text-lg font-black tracking-tight">Signed in as ${escapeHtml(activeProfile.name || activeProfile.email)}</div>
+            <p class="mt-1 text-sm ${theme.subtle} break-all">${escapeHtml(activeProfile.email)}</p>
+            <p class="mt-1 text-sm ${theme.subtle}">Remote cloud saves can load, save and delete through the backend now.</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 flex-wrap">
+          <button type="button" data-action="refresh-google-cloud" class="stepper-mini-btn ${theme.button}">Refresh cloud</button>
+          <button type="button" data-action="signout-google" class="stepper-danger-btn ${theme.dark ? 'bg-red-500/15 text-red-300 border border-red-400/20' : 'bg-red-50 text-red-700 border border-red-200'}">Sign out</button>
+        </div>
+      </div>
+    `);
+    const refreshBtn = target.querySelector('[data-action="refresh-google-cloud"]');
+    if (refreshBtn) refreshBtn.addEventListener('click', async () => {
+      await refreshCloudEntriesFromBackend(true);
+      renderSavedDancesPage();
+    });
+    const signOutBtn = target.querySelector('[data-action="signout-google"]');
+    if (signOutBtn) signOutBtn.addEventListener('click', () => {
+      clearGoogleFrontendProfile();
+      renderSavedDancesPage();
+    });
+    return;
+  }
+
+  renderGoogleAuthShell(target, theme, `
+    <div class="flex items-start justify-between gap-4 flex-wrap">
+      <div>
+        <div class="text-lg font-black tracking-tight">Google cloud sign-in</div>
+        <p class="mt-1 text-sm ${theme.subtle}">Use a real Google sign-in before this page switches over from the device-only shelf to backend cloud saves.</p>
+      </div>
+      <span class="stepper-mini-btn ${theme.button}">Backend ready</span>
+    </div>
+    <div class="mt-4 flex flex-wrap items-center gap-3">
+      <div data-stepper-google-button></div>
+    </div>
+    <p class="mt-4 text-sm leading-relaxed ${theme.subtle}">The backend verifies the Google ID token before it touches any cloud save data, so this is not just a fake local profile badge anymore.</p>
+  `);
+
+  try {
+    await loadGoogleIdentityScript();
+    const buttonHost = target.querySelector('[data-stepper-google-button]');
+    if (!buttonHost || !(window.google && window.google.accounts && window.google.accounts.id)) return;
+    window.google.accounts.id.initialize({
+      client_id: config.googleClientId,
+      callback: handleGoogleCredentialResponse,
+      ux_mode: 'popup',
+      auto_select: false,
+      cancel_on_tap_outside: true
+    });
+    window.google.accounts.id.renderButton(buttonHost, {
+      type: 'standard',
+      theme: theme.dark ? 'filled_black' : 'outline',
+      size: 'large',
+      shape: 'pill',
+      text: 'signin_with',
+      logo_alignment: 'left',
+      width: 280
+    });
+  } catch (error) {
+    const buttonHost = target.querySelector('[data-stepper-google-button]');
+    if (buttonHost) buttonHost.innerHTML = `<p class="text-sm ${theme.subtle}">Google sign-in could not load just now.</p>`;
+  }
+}
+
+function getCloudSaveMap(){
+
     const payload = readJson(CLOUD_SAVES_KEY, {});
     return payload && typeof payload === 'object' ? payload : {};
   }
@@ -1751,206 +2014,308 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     };
   }
 
-  function getCloudEntriesForProfile(profile){
-    if (!profile || !profile.email) return [];
-    const map = getCloudSaveMap();
-    const list = Array.isArray(map[profile.email]) ? map[profile.email] : [];
-    return list.slice().sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+function getCloudEntriesForProfile(profile){
+  if (isRemoteCloudProfile(profile) && cloudSyncState.profileEmail === profile.email && Array.isArray(cloudSyncState.items)) {
+    return cloudSyncState.items.slice();
   }
+  if (!profile || !profile.email) return [];
+  const map = getCloudSaveMap();
+  const list = Array.isArray(map[profile.email]) ? map[profile.email] : [];
+  return list.slice().sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+}
 
-  function loadSnapshotEntry(entry){
-    if (!entry || !entry.snapshot) return;
-    const snapshotData = entry.snapshot.data || entry.snapshot;
-    writeJson(DATA_KEY, snapshotData);
-    writeJson(PHR_TOOLS_KEY, entry.snapshot.phrasedTools || {});
-    location.reload();
+async function refreshCloudEntriesFromBackend(force){
+  const profile = getGoogleFrontendProfile();
+  if (!profile || !profile.email || !profile.credential) {
+    cloudSyncState = { profileEmail: '', items: null, loading: false, error: '', configured: false, remoteReady: false, promise: null };
+    return [];
   }
+  if (!force && cloudSyncState.loading && cloudSyncState.promise) return cloudSyncState.promise;
+  if (!force && cloudSyncState.profileEmail === profile.email && Array.isArray(cloudSyncState.items)) return cloudSyncState.items.slice();
 
-  function deleteLocalSavedDance(id){
-    const featured = getFeaturedDances().filter(item => item && item.id !== id);
-    writeJson(FEATURED_KEY, featured);
-  }
+  const task = (async () => {
+    cloudSyncState = Object.assign({}, cloudSyncState, {
+      profileEmail: profile.email,
+      loading: true,
+      error: '',
+      configured: true,
+      remoteReady: false
+    });
+    try {
+      const payload = await stepperApi('/api/cloud-saves', { method: 'GET', googleCredential: profile.credential });
+      const items = Array.isArray(payload && payload.items) ? payload.items.slice().sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0)) : [];
+      cloudSyncState = {
+        profileEmail: profile.email,
+        items,
+        loading: false,
+        error: '',
+        configured: true,
+        remoteReady: true,
+        promise: null
+      };
+      return items.slice();
+    } catch (error) {
+      cloudSyncState = {
+        profileEmail: profile.email,
+        items: [],
+        loading: false,
+        error: error && error.message ? error.message : 'Cloud saves could not be loaded.',
+        configured: true,
+        remoteReady: false,
+        promise: null
+      };
+      return [];
+    }
+  })();
 
-  function saveCurrentDanceToCloud(){
-    const profile = getActiveCloudProfile();
-    const data = readAppData();
-    if (!hasDanceContent(data)) {
-      alert('Build a dance first, then save it to the cloud front end.');
+  cloudSyncState.promise = task;
+  return task;
+}
+
+function loadSnapshotEntry(entry){
+  if (!entry || !entry.snapshot) return;
+  const snapshotData = entry.snapshot.data || entry.snapshot;
+  writeJson(DATA_KEY, snapshotData);
+  writeJson(PHR_TOOLS_KEY, entry.snapshot.phrasedTools || {});
+  location.reload();
+}
+
+function deleteLocalSavedDance(id){
+  const featured = getFeaturedDances().filter(item => item && item.id !== id);
+  writeJson(FEATURED_KEY, featured);
+}
+
+async function upsertEntryToCloud(entry){
+  const profile = getActiveCloudProfile();
+  if (!entry) return false;
+  if (isRemoteCloudProfile(profile)) {
+    try {
+      await stepperApi('/api/cloud-saves/upsert', {
+        method: 'POST',
+        body: JSON.stringify({ entry }),
+        googleCredential: profile.credential
+      });
+      await refreshCloudEntriesFromBackend(true);
+      return true;
+    } catch (error) {
+      alert(error && error.message ? error.message : 'Cloud save failed.');
       return false;
     }
-    const entry = buildLocalSnapshotEntry(data);
-    const map = getCloudSaveMap();
-    let list = Array.isArray(map[profile.email]) ? map[profile.email] : [];
-    const existingIndex = list.findIndex(item => item && item.id === entry.id);
-    if (existingIndex >= 0) list[existingIndex] = Object.assign({}, list[existingIndex], entry);
-    else list.unshift(entry);
-    list = list.slice().sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0)).slice(0, 120);
-    map[profile.email] = list;
-    saveCloudSaveMap(map);
-    return true;
   }
+  const map = getCloudSaveMap();
+  let list = Array.isArray(map[profile.email]) ? map[profile.email] : [];
+  const existingIndex = list.findIndex(item => item && item.id === entry.id);
+  if (existingIndex >= 0) list[existingIndex] = Object.assign({}, list[existingIndex], entry);
+  else list.unshift(entry);
+  map[profile.email] = list.slice().sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0)).slice(0, 120);
+  saveCloudSaveMap(map);
+  return true;
+}
 
-  function deleteCloudDance(profile, id){
-    if (!profile || !profile.email) return;
-    const map = getCloudSaveMap();
-    const list = Array.isArray(map[profile.email]) ? map[profile.email] : [];
-    map[profile.email] = list.filter(item => item && item.id !== id);
-    saveCloudSaveMap(map);
+async function saveCurrentDanceToCloud(){
+  const profile = getActiveCloudProfile();
+  const data = readAppData();
+  if (!hasDanceContent(data)) {
+    alert(isRemoteCloudProfile(profile)
+      ? 'Build a dance first, then save it to Google cloud.'
+      : 'Build a dance first, then save it to the cloud front end.');
+    return false;
   }
+  const entry = buildLocalSnapshotEntry(data);
+  return upsertEntryToCloud(entry);
+}
 
-  function renderSavedDancesPage(){
-    const page = document.getElementById(SAVED_PAGE_ID);
-    if (!page) return;
-    const theme = themeClasses();
-    const profile = getActiveCloudProfile();
-    const localDances = getFeaturedDances();
-    const cloudDances = getCloudEntriesForProfile(profile);
-    const cloudShelfCard = `
-      <div class="rounded-2xl border p-5 sm:p-6 ${theme.panel}">
-        <div class="flex flex-wrap items-start justify-between gap-4">
-          <div class="min-w-0">
-            <div class="flex items-center gap-3">
-              <span class="stepper-extra-tab-icon">${iconCloud()}</span>
-              <div>
-                <div class="text-lg font-black tracking-tight">Cloud save shelf</div>
-                <p class="mt-1 text-sm ${theme.subtle}">Attached to ${escapeHtml(profile.name)}</p>
-              </div>
-            </div>
-            <p class="mt-4 text-sm leading-relaxed ${theme.subtle}">This shelf keeps cloud-style saves grouped on this device, and on computer you can also kick the current dance over to Gmail in a new tab for an easy backup trail.</p>
-          </div>
-          <div class="flex flex-wrap gap-3">
-            <button type="button" data-action="save-current-cloud" class="stepper-mini-btn ${theme.orange}">Save current dance to cloud</button>
-            <a href="${escapeHtml(buildCloudBackupGmailLink())}" target="_blank" rel="noopener noreferrer" class="stepper-mini-btn ${theme.button}">Backup in Gmail (new tab)</a>
-          </div>
-        </div>
-      </div>`;
-
-    const localCards = localDances.length ? localDances.map(item => `
-      <article class="rounded-3xl border p-5 sm:p-6 ${theme.soft}" data-local-dance-id="${escapeHtml(item.id)}">
-        <div class="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <h3 class="text-xl font-black tracking-tight">${escapeHtml(item.title || 'Untitled Dance')}</h3>
-            <p class="mt-1 text-sm font-semibold ${theme.subtle}">${escapeHtml(item.choreographer || 'Uncredited')}${item.country ? ` (${escapeHtml(item.country)})` : ''}</p>
-          </div>
-          <span class="rounded-full px-3 py-1 text-xs font-black uppercase tracking-widest ${theme.dark ? 'bg-indigo-900/40 text-indigo-200' : 'bg-indigo-100 text-indigo-700'}">On this device</span>
-        </div>
-        <div class="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-          <div class="rounded-2xl border px-3 py-3 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Counts</div><div class="mt-1 font-bold">${escapeHtml(item.counts || '-')}</div></div>
-          <div class="rounded-2xl border px-3 py-3 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Walls</div><div class="mt-1 font-bold">${escapeHtml(item.walls || '-')}</div></div>
-          <div class="rounded-2xl border px-3 py-3 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Sections</div><div class="mt-1 font-bold">${escapeHtml(String(item.sections || 0))}</div></div>
-          <div class="rounded-2xl border px-3 py-3 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Steps</div><div class="mt-1 font-bold">${escapeHtml(String(item.steps || 0))}</div></div>
-        </div>
-        <div class="mt-4 flex flex-wrap items-center gap-3">
-          <button type="button" data-action="load-local" class="stepper-mini-btn ${theme.button}">Load</button>
-          <button type="button" data-action="delete-local" class="stepper-danger-btn ${theme.dark ? 'bg-red-500/15 text-red-300 border border-red-400/20' : 'bg-red-50 text-red-700 border border-red-200'}">Delete</button>
-          <button type="button" data-action="push-local-cloud" class="stepper-mini-btn ${theme.orange}">Push to cloud</button>
-          <span class="text-xs font-semibold uppercase tracking-widest ${theme.subtle}">Updated ${escapeHtml(formatDate(item.updatedAt))}</span>
-        </div>
-      </article>
-    `).join('') : `<div class="rounded-3xl border p-6 sm:p-8 text-center ${theme.soft}"><p class="text-lg font-bold">No saved dances yet.</p><p class="mt-2 ${theme.subtle}">Step by Stepper already remembers what people make on this device. Once a dance has a title or a few steps, it will show up here automatically.</p></div>`;
-
-    const cloudCards = cloudDances.length ? cloudDances.map(item => `
-      <article class="rounded-3xl border p-5 sm:p-6 ${theme.soft}" data-cloud-dance-id="${escapeHtml(item.id)}">
-        <div class="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <h3 class="text-xl font-black tracking-tight">${escapeHtml(item.title || 'Untitled Dance')}</h3>
-            <p class="mt-1 text-sm font-semibold ${theme.subtle}">${escapeHtml(item.choreographer || 'Uncredited')}</p>
-          </div>
-          <span class="rounded-full px-3 py-1 text-xs font-black uppercase tracking-widest ${theme.dark ? 'bg-emerald-900/40 text-emerald-200' : 'bg-emerald-100 text-emerald-700'}">Cloud front end</span>
-        </div>
-        <div class="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-          <div class="rounded-2xl border px-3 py-3 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Counts</div><div class="mt-1 font-bold">${escapeHtml(item.counts || '-')}</div></div>
-          <div class="rounded-2xl border px-3 py-3 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Walls</div><div class="mt-1 font-bold">${escapeHtml(item.walls || '-')}</div></div>
-          <div class="rounded-2xl border px-3 py-3 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Sections</div><div class="mt-1 font-bold">${escapeHtml(String(item.sections || 0))}</div></div>
-          <div class="rounded-2xl border px-3 py-3 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Steps</div><div class="mt-1 font-bold">${escapeHtml(String(item.steps || 0))}</div></div>
-        </div>
-        <div class="mt-4 flex flex-wrap items-center gap-3">
-          <button type="button" data-action="load-cloud" class="stepper-mini-btn ${theme.button}">Load</button>
-          <button type="button" data-action="delete-cloud" class="stepper-danger-btn ${theme.dark ? 'bg-red-500/15 text-red-300 border border-red-400/20' : 'bg-red-50 text-red-700 border border-red-200'}">Delete</button>
-          <span class="text-xs font-semibold uppercase tracking-widest ${theme.subtle}">Saved ${escapeHtml(formatDate(item.updatedAt))}</span>
-        </div>
-      </article>
-    `).join('') : `<div class="rounded-3xl border p-6 sm:p-8 text-center ${theme.soft}"><p class="text-lg font-bold">No cloud saves yet.</p><p class="mt-2 ${theme.subtle}">Use the cloud button above or push one of your saved dances up into the cloud shelf.</p></div>`;
-
-    page.className = `rounded-3xl border shadow-sm overflow-hidden ${theme.shell}`;
-    page.innerHTML = `
-      <div class="px-6 py-5 border-b ${theme.panel}">
-        <h2 class="text-2xl font-black tracking-tight uppercase flex items-center gap-2"><span class="stepper-extra-tab-icon">${iconFolder()}</span> My Saved Dances</h2>
-      </div>
-      <div class="p-6 sm:p-8 space-y-5">
-        ${cloudShelfCard}
-        <div class="rounded-2xl border p-5 ${theme.panel}">
-          <div class="flex items-center gap-3">
-            <span class="stepper-extra-tab-icon">${iconCloud()}</span>
-            <div>
-              <div class="text-lg font-black tracking-tight">Cloud save front end</div>
-              <p class="mt-1 text-sm ${theme.subtle}">Your saved dances stay here on this device, and the cloud shelf plus Gmail backup button give computer users an extra way to keep copies without mixing them into the showcase shelf.</p>
-            </div>
-          </div>
-        </div>
-        <section class="space-y-4">
-          <div class="flex items-center justify-between gap-3 flex-wrap">
-            <h3 class="text-lg font-black uppercase tracking-widest">Saved on this device</h3>
-            <span class="text-xs font-semibold uppercase tracking-widest ${theme.subtle}">${localDances.length} saved</span>
-          </div>
-          ${localCards}
-        </section>
-        <section class="space-y-4">
-          <div class="flex items-center justify-between gap-3 flex-wrap">
-            <h3 class="text-lg font-black uppercase tracking-widest">Cloud saves</h3>
-            <span class="text-xs font-semibold uppercase tracking-widest ${theme.subtle}">${cloudDances.length} saved</span>
-          </div>
-          ${cloudCards}
-        </section>
-      </div>
-    `;
-
-    const saveCurrentBtn = page.querySelector('[data-action="save-current-cloud"]');
-    if (saveCurrentBtn) saveCurrentBtn.addEventListener('click', () => {
-      if (saveCurrentDanceToCloud()) renderSavedDancesPage();
-    });
-
-    page.querySelectorAll('[data-local-dance-id]').forEach(card => {
-      const id = card.getAttribute('data-local-dance-id');
-      const entry = localDances.find(item => item && item.id === id);
-      const loadBtn = card.querySelector('[data-action="load-local"]');
-      const deleteBtn = card.querySelector('[data-action="delete-local"]');
-      const pushBtn = card.querySelector('[data-action="push-local-cloud"]');
-      if (loadBtn) loadBtn.addEventListener('click', () => loadSnapshotEntry(entry));
-      if (deleteBtn) deleteBtn.addEventListener('click', () => {
-        if (confirm(`Delete saved dance "${(entry && entry.title) || 'this dance'}" from this device?`)) {
-          deleteLocalSavedDance(id);
-          renderSavedDancesPage();
-        }
+async function deleteCloudDance(profile, id){
+  if (!profile || !profile.email) return;
+  if (isRemoteCloudProfile(profile)) {
+    try {
+      await stepperApi(`/api/cloud-saves/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        googleCredential: profile.credential
       });
-      if (pushBtn) pushBtn.addEventListener('click', () => {
-        const profile = getActiveCloudProfile();
-        const map = getCloudSaveMap();
-        let list = Array.isArray(map[profile.email]) ? map[profile.email] : [];
-        const existingIndex = list.findIndex(item => item && item.id === id);
-        if (existingIndex >= 0) list[existingIndex] = Object.assign({}, list[existingIndex], entry, { updatedAt: new Date().toISOString() });
-        else list.unshift(Object.assign({}, entry, { updatedAt: new Date().toISOString() }));
-        map[profile.email] = list.slice().sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0)).slice(0, 120);
-        saveCloudSaveMap(map);
+      await refreshCloudEntriesFromBackend(true);
+    } catch (error) {
+      alert(error && error.message ? error.message : 'Cloud delete failed.');
+    }
+    return;
+  }
+  const map = getCloudSaveMap();
+  const list = Array.isArray(map[profile.email]) ? map[profile.email] : [];
+  map[profile.email] = list.filter(item => item && item.id !== id);
+  saveCloudSaveMap(map);
+}
+
+function renderSavedDancesPage(){
+  const page = document.getElementById(SAVED_PAGE_ID);
+  if (!page) return;
+  const theme = themeClasses();
+  const profile = getActiveCloudProfile();
+  const signedInGoogle = !!(profile && !profile.localOnly && profile.email);
+  const localDances = getFeaturedDances();
+  const remoteCloud = signedInGoogle && cloudSyncState.profileEmail === profile.email && Array.isArray(cloudSyncState.items)
+    ? cloudSyncState.items
+    : null;
+  const cloudDances = remoteCloud || getCloudEntriesForProfile(profile);
+  const cloudStatusLine = signedInGoogle
+    ? cloudSyncState.loading
+      ? 'Refreshing the backend cloud shelf now.'
+      : cloudSyncState.error
+        ? cloudSyncState.error
+        : cloudSyncState.remoteReady
+          ? 'Signed-in saves are coming straight from the backend.'
+          : 'Sign in with Google to switch this shelf over to backend cloud saves.'
+    : 'Sign in with Google to switch this shelf over from the device-only cloud shelf to backend cloud saves.';
+  const cloudShelfCard = `
+    <div class="rounded-3xl border p-5 sm:p-6 ${theme.soft}">
+      <div class="flex items-start justify-between gap-4 flex-wrap">
+        <div class="flex items-center gap-4 min-w-0">
+          <span class="stepper-extra-tab-icon">${iconCloud()}</span>
+          <div>
+            <div class="text-lg font-black tracking-tight">Cloud saves</div>
+            <p class="mt-1 text-sm ${theme.subtle}">This shelf can still keep device-only copies, but signed-in accounts now have a proper backend route for cloud save reads and writes.</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 flex-wrap">
+          <button type="button" data-action="save-current-cloud" class="stepper-mini-btn ${theme.orange}">Save current dance to cloud</button>
+          <button type="button" data-action="gmail-backup-current" class="stepper-mini-btn ${theme.button}">Backup in Gmail</button>
+        </div>
+      </div>
+      <p class="mt-4 text-sm leading-relaxed ${theme.subtle}">${escapeHtml(cloudStatusLine)}</p>
+    </div>
+  `;
+
+  const localCards = localDances.length ? localDances.map(item => `
+    <article class="rounded-3xl border p-5 sm:p-6 ${theme.soft}" data-local-dance-id="${escapeHtml(item.id)}">
+      <div class="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h3 class="text-xl font-black tracking-tight">${escapeHtml(item.title || 'Untitled Dance')}</h3>
+          <p class="mt-1 text-sm font-semibold ${theme.subtle}">${escapeHtml(item.choreographer || 'Uncredited')}</p>
+        </div>
+        <span class="shrink-0 rounded-full px-3 py-1 text-xs font-black uppercase tracking-widest ${theme.dark ? 'bg-indigo-900/50 text-indigo-200' : 'bg-indigo-100 text-indigo-700'}">${escapeHtml(item.level || 'Unlabelled')}</span>
+      </div>
+      <div class="mt-4 grid grid-cols-2 gap-3 text-sm">
+        <div class="rounded-2xl border px-3 py-3 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Counts</div><div class="mt-1 font-bold">${escapeHtml(item.counts || '-')}</div></div>
+        <div class="rounded-2xl border px-3 py-3 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Walls</div><div class="mt-1 font-bold">${escapeHtml(item.walls || '-')}</div></div>
+        <div class="rounded-2xl border px-3 py-3 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Sections</div><div class="mt-1 font-bold">${escapeHtml(String(item.sections || 0))}</div></div>
+        <div class="rounded-2xl border px-3 py-3 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Steps</div><div class="mt-1 font-bold">${escapeHtml(String(item.steps || 0))}</div></div>
+      </div>
+      <p class="mt-4 text-xs font-semibold uppercase tracking-widest ${theme.subtle}">Updated ${escapeHtml(formatCloudUpdatedAt(item.updatedAt))}</p>
+      <div class="mt-4 flex flex-wrap gap-2">
+        <button type="button" data-action="load-local" class="stepper-mini-btn ${theme.button}">Load</button>
+        <button type="button" data-action="push-local-cloud" class="stepper-mini-btn ${theme.orange}">Push to cloud</button>
+        <button type="button" data-action="delete-local" class="stepper-danger-btn ${theme.dark ? 'bg-red-500/15 text-red-300 border border-red-400/20' : 'bg-red-50 text-red-700 border border-red-200'}">Delete</button>
+      </div>
+    </article>
+  `).join('') : `<div class="rounded-3xl border p-6 sm:p-8 text-center ${theme.soft}"><p class="text-lg font-bold">No saved dances yet.</p><p class="mt-2 ${theme.subtle}">Build a dance and it will save here automatically on this device.</p></div>`;
+
+  const cloudCards = cloudSyncState.loading && signedInGoogle && !cloudDances.length
+    ? `<div class="rounded-3xl border p-6 sm:p-8 text-center ${theme.soft}"><p class="text-lg font-bold">Loading cloud saves...</p><p class="mt-2 ${theme.subtle}">The backend shelf is warming up for ${escapeHtml(profile.email)}.</p></div>`
+    : cloudDances.length ? cloudDances.map(item => `
+    <article class="rounded-3xl border p-5 sm:p-6 ${theme.soft}" data-cloud-dance-id="${escapeHtml(item.id)}">
+      <div class="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h3 class="text-xl font-black tracking-tight">${escapeHtml(item.title || 'Untitled Dance')}</h3>
+          <p class="mt-1 text-sm font-semibold ${theme.subtle}">${escapeHtml(item.choreographer || 'Uncredited')}</p>
+        </div>
+        <span class="shrink-0 rounded-full px-3 py-1 text-xs font-black uppercase tracking-widest ${theme.dark ? 'bg-indigo-900/50 text-indigo-200' : 'bg-indigo-100 text-indigo-700'}">${escapeHtml(item.level || 'Unlabelled')}</span>
+      </div>
+      <div class="mt-4 grid grid-cols-2 gap-3 text-sm">
+        <div class="rounded-2xl border px-3 py-3 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Counts</div><div class="mt-1 font-bold">${escapeHtml(item.counts || '-')}</div></div>
+        <div class="rounded-2xl border px-3 py-3 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Walls</div><div class="mt-1 font-bold">${escapeHtml(item.walls || '-')}</div></div>
+        <div class="rounded-2xl border px-3 py-3 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Sections</div><div class="mt-1 font-bold">${escapeHtml(String(item.sections || 0))}</div></div>
+        <div class="rounded-2xl border px-3 py-3 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Steps</div><div class="mt-1 font-bold">${escapeHtml(String(item.steps || 0))}</div></div>
+      </div>
+      <p class="mt-4 text-xs font-semibold uppercase tracking-widest ${theme.subtle}">Updated ${escapeHtml(formatCloudUpdatedAt(item.updatedAt))}</p>
+      <div class="mt-4 flex flex-wrap gap-2">
+        <button type="button" data-action="load-cloud" class="stepper-mini-btn ${theme.button}">Load</button>
+        <button type="button" data-action="delete-cloud" class="stepper-danger-btn ${theme.dark ? 'bg-red-500/15 text-red-300 border border-red-400/20' : 'bg-red-50 text-red-700 border border-red-200'}">Delete</button>
+      </div>
+    </article>
+  `).join('') : `<div class="rounded-3xl border p-6 sm:p-8 text-center ${theme.soft}"><p class="text-lg font-bold">No cloud saves yet.</p><p class="mt-2 ${theme.subtle}">${signedInGoogle ? 'Save the current dance or push one of your local builds up into the backend shelf.' : 'Sign in with Google to move this shelf onto the backend, or keep using the device-only copy.'}</p></div>`;
+
+  page.className = `rounded-3xl border shadow-sm overflow-hidden ${theme.shell}`;
+  page.hidden = false;
+  page.innerHTML = `
+    <div class="px-6 py-5 border-b ${theme.panel}">
+      <h2 class="text-2xl font-black tracking-tight uppercase flex items-center gap-2"><span class="stepper-extra-tab-icon">${iconFolder()}</span> My Saved Dances</h2>
+    </div>
+    <div class="p-6 sm:p-8 space-y-5">
+      <div data-stepper-google-auth></div>
+      ${cloudShelfCard}
+      <section class="space-y-4">
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <h3 class="text-lg font-black uppercase tracking-widest">Saved on this device</h3>
+          <span class="text-xs font-semibold uppercase tracking-widest ${theme.subtle}">${localDances.length} saved</span>
+        </div>
+        ${localCards}
+      </section>
+      <section class="space-y-4">
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <h3 class="text-lg font-black uppercase tracking-widest">${signedInGoogle ? 'Google cloud saves' : 'Device cloud shelf'}</h3>
+          <span class="text-xs font-semibold uppercase tracking-widest ${theme.subtle}">${cloudDances.length} saved</span>
+        </div>
+        ${cloudCards}
+      </section>
+    </div>
+  `;
+
+  hydrateGoogleSignInUi(page, theme).catch(error => console.error(error));
+
+  if (signedInGoogle) {
+    refreshCloudEntriesFromBackend(false).then(() => {
+      if (activeExtraPage === 'saveddances') renderSavedDancesPage();
+    });
+  }
+
+  const saveCurrentBtn = page.querySelector('[data-action="save-current-cloud"]');
+  if (saveCurrentBtn) saveCurrentBtn.addEventListener('click', async () => {
+    if (await saveCurrentDanceToCloud()) renderSavedDancesPage();
+  });
+
+  const gmailBackupBtn = page.querySelector('[data-action="gmail-backup-current"]');
+  if (gmailBackupBtn) gmailBackupBtn.addEventListener('click', () => {
+    const data = readAppData();
+    if (!hasDanceContent(data)) {
+      alert('Build a dance first, then use Gmail backup.');
+      return;
+    }
+    window.open(buildSaveToCloudMailto(buildLocalSnapshotEntry(data)), '_blank', 'noopener,noreferrer');
+  });
+
+  page.querySelectorAll('[data-local-dance-id]').forEach(card => {
+    const id = card.getAttribute('data-local-dance-id');
+    const entry = localDances.find(item => item && item.id === id);
+    const loadBtn = card.querySelector('[data-action="load-local"]');
+    const deleteBtn = card.querySelector('[data-action="delete-local"]');
+    const pushBtn = card.querySelector('[data-action="push-local-cloud"]');
+    if (loadBtn) loadBtn.addEventListener('click', () => loadSnapshotEntry(entry));
+    if (deleteBtn) deleteBtn.addEventListener('click', () => {
+      if (confirm(`Delete saved dance "${(entry && entry.title) || 'this dance'}" from this device?`)) {
+        deleteLocalSavedDance(id);
         renderSavedDancesPage();
-      });
+      }
     });
+    if (pushBtn) pushBtn.addEventListener('click', async () => {
+      if (await upsertEntryToCloud(entry)) renderSavedDancesPage();
+    });
+  });
 
-    page.querySelectorAll('[data-cloud-dance-id]').forEach(card => {
-      const id = card.getAttribute('data-cloud-dance-id');
-      const entry = cloudDances.find(item => item && item.id === id);
-      const loadBtn = card.querySelector('[data-action="load-cloud"]');
-      const deleteBtn = card.querySelector('[data-action="delete-cloud"]');
-      if (loadBtn) loadBtn.addEventListener('click', () => loadSnapshotEntry(entry));
-      if (deleteBtn) deleteBtn.addEventListener('click', () => {
-        if (!profile) return;
-        if (confirm(`Delete cloud save "${(entry && entry.title) || 'this dance'}"?`)) {
-          deleteCloudDance(profile, id);
-          renderSavedDancesPage();
-        }
-      });
+  page.querySelectorAll('[data-cloud-dance-id]').forEach(card => {
+    const id = card.getAttribute('data-cloud-dance-id');
+    const entry = cloudDances.find(item => item && item.id === id);
+    const loadBtn = card.querySelector('[data-action="load-cloud"]');
+    const deleteBtn = card.querySelector('[data-action="delete-cloud"]');
+    if (loadBtn) loadBtn.addEventListener('click', () => loadSnapshotEntry(entry));
+    if (deleteBtn) deleteBtn.addEventListener('click', async () => {
+      if (!profile) return;
+      if (confirm(`Delete cloud save "${(entry && entry.title) || 'this dance'}"?`)) {
+        await deleteCloudDance(profile, id);
+        renderSavedDancesPage();
+      }
     });
-  }
+  });
+}
+
 
   function renderWhatsNewPage(){
     const page = document.getElementById(WHATSNEW_PAGE_ID);
@@ -2516,6 +2881,9 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     elegant: 'Georgia, "Times New Roman", serif'
   };
   const EXTRA_NOTES = [
+    'New: My Saved Dances now includes proper Google sign-in, and the backend verifies the Google ID token before it touches the cloud shelf.',
+    'New: signed-in cloud saves can now read, write and delete through the backend instead of pretending the front end is a server.',
+    'New: the saved-dances page now checks backend auth config and shows a real Google sign-in block when the service is ready for it.',
     'New: tab switches now use a single loading pass with smoother pacing, awkward hold beats, and a proper finish right as the loading bar lands.',
     'New: tab changes now run destination-based loading states, so Editor, Sheet, Whats New, Featured Choreo, and My Saved Dances each show their own status pass during the switch.',
     'New Featured choreography! Check it out in the Featured Choreography tab!',
