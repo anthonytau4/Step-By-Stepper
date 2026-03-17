@@ -16,9 +16,12 @@ const port = Number(process.env.PORT || 3000);
 const model = process.env.OPENAI_MODEL || "gpt-5";
 const googleClientId = String(process.env.GOOGLE_CLIENT_ID || "").trim();
 const googleClient = googleClientId ? new OAuth2Client(googleClientId) : null;
+const renderDiskRoot = String(process.env.RENDER_DISK_MOUNT_PATH || '').trim();
 const dataDir = process.env.DATA_DIR
   ? path.resolve(process.env.DATA_DIR)
-  : path.join(__dirname, "data");
+  : renderDiskRoot
+    ? path.join(path.resolve(renderDiskRoot), 'stepper-data')
+    : path.join(__dirname, "data");
 const dbPath = path.join(dataDir, "stepper-db.json");
 const openaiClient = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
@@ -53,7 +56,8 @@ function emptyDb() {
   return {
     users: {},
     featuredChoreo: [],
-    danceRegistry: []
+    danceRegistry: [],
+    submissions: []
   };
 }
 
@@ -75,6 +79,7 @@ async function readDb() {
     if (!parsed.users || typeof parsed.users !== "object") parsed.users = {};
     if (!Array.isArray(parsed.featuredChoreo)) parsed.featuredChoreo = [];
     if (!Array.isArray(parsed.danceRegistry)) parsed.danceRegistry = [];
+    if (!Array.isArray(parsed.submissions)) parsed.submissions = [];
     return parsed;
   } catch {
     return emptyDb();
@@ -289,7 +294,8 @@ function touchUser(db, profile, userKey) {
       picture: String(profile?.picture || bucket?.profile?.picture || "").trim()
     },
     lastSeenAt: new Date().toISOString(),
-    cloudSaves: Array.isArray(bucket.cloudSaves) ? bucket.cloudSaves : []
+    cloudSaves: Array.isArray(bucket.cloudSaves) ? bucket.cloudSaves : [],
+    notifications: Array.isArray(bucket.notifications) ? bucket.notifications : []
   };
   return db.users[key];
 }
@@ -308,6 +314,96 @@ function getOnlineUsers(db) {
     lastSeenAt: user?.lastSeenAt || null
   })).sort((a, b) => a.name.localeCompare(b.name));
 }
+
+
+function findUserKeyByEmail(db, email) {
+  const wanted = normalizeEmail(email);
+  if (!wanted) return "";
+  return Object.keys(db.users || {}).find((key) => normalizeEmail(db.users?.[key]?.profile?.email) === wanted) || "";
+}
+
+function pushNotification(db, target, payload) {
+  const userKey = String(target?.userKey || findUserKeyByEmail(db, target?.email) || "").trim();
+  if (!userKey) return null;
+  const bucket = db.users[userKey] && typeof db.users[userKey] === "object" ? db.users[userKey] : null;
+  if (!bucket) return null;
+  if (!Array.isArray(bucket.notifications)) bucket.notifications = [];
+  const item = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    kind: String(payload?.kind || "Notice").trim() || "Notice",
+    title: String(payload?.title || "Update").trim() || "Update",
+    message: String(payload?.message || "").trim(),
+    createdAt: new Date().toISOString(),
+    readAt: null
+  };
+  bucket.notifications.unshift(item);
+  bucket.notifications = bucket.notifications.slice(0, 100);
+  return item;
+}
+
+function sanitizeRequestType(value) {
+  const type = String(value || "feature").trim().toLowerCase();
+  return ["feature", "site"].includes(type) ? type : "feature";
+}
+
+function upsertSubmission(db, payload) {
+  const entry = payload && typeof payload === "object" ? payload : {};
+  const item = {
+    id: String(entry.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`).trim(),
+    registryId: String(entry.registryId || "").trim(),
+    ownerKey: String(entry.ownerKey || "").trim(),
+    ownerEmail: String(entry.ownerEmail || "").trim(),
+    ownerName: String(entry.ownerName || entry.ownerEmail || "").trim(),
+    ownerPicture: String(entry.ownerPicture || "").trim(),
+    title: String(entry.title || "Untitled Dance").trim(),
+    choreographer: String(entry.choreographer || "Uncredited").trim(),
+    requestType: sanitizeRequestType(entry.requestType),
+    status: String(entry.status || "pending").trim(),
+    createdAt: entry.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  const list = Array.isArray(db.submissions) ? db.submissions : [];
+  const index = list.findIndex(row => row && row.registryId === item.registryId && row.requestType === item.requestType && row.status === "pending");
+  if (index >= 0) list[index] = { ...list[index], ...item, id: list[index].id || item.id, updatedAt: new Date().toISOString() };
+  else list.unshift(item);
+  db.submissions = list.sort((a,b)=> new Date(b.updatedAt||0)-new Date(a.updatedAt||0)).slice(0, 2000);
+  return db.submissions.find(row => row && row.id === item.id) || item;
+}
+
+function markMatchingSubmissions(db, registryId, nextStatus) {
+  const items = Array.isArray(db.submissions) ? db.submissions : [];
+  const touched = [];
+  items.forEach((item) => {
+    if (String(item?.registryId || "") === String(registryId || "") && String(item?.status || "") === "pending") {
+      item.status = nextStatus;
+      item.updatedAt = new Date().toISOString();
+      touched.push(item);
+    }
+  });
+  return touched;
+}
+
+function buildFeatureSummary(source, badgeLabel) {
+  return `${source?.title || 'Your dance'} was featured with ${badgeLabel}.`;
+}
+
+
+const SITE_HELP_CONTEXT = `You are the Step By Stepper site helper. Keep answers short, practical, and human. Only answer about using this site.
+Tabs and actions available: Build, Sheet, What's New, My Saved Dances, Featured Choreo, Sign In, and Admin for anthonytau4@gmail.com only.
+Important behaviours: users sign in with Google, Save Changes pushes the current dance to cloud save, Send to host for featuring creates a feature request, Upload to site creates a site-upload request, Featured Choreo shows public featured dances, removing a feature removes it from Featured Choreo, and signed-in users can get notifications when admin approves or rejects requests.
+If someone asks where to go, tell them the exact tab or button to use.`;
+
+function fallbackSiteHelp(prompt, context = {}) {
+  const q = String(prompt || '').toLowerCase();
+  if (q.includes('save')) return 'Use the Save Changes button at the top. Sign in first so the dance can save into your Google-linked cloud save.';
+  if (q.includes('feature') || q.includes('featured')) return context.isAdmin ? 'Open Admin, find the dance, then press Bronze, Silver, or Gold. Remove feature there if you want it gone from Featured Choreo.' : 'Use Send to host for featuring after signing in. Admin reviews it from the Admin tab.';
+  if (q.includes('upload')) return 'Sign in, then use Upload to site. That sends the current dance into the admin review queue.';
+  if (q.includes('admin')) return 'The Admin tab only appears for anthonytau4@gmail.com after Google sign-in.';
+  if (q.includes('sign in') || q.includes('google')) return 'Open the Sign In tab and press Sign in with Google.';
+  if (q.includes('saved')) return 'Use My Saved Dances for your saved items, and Save Changes at the top to push the current one to cloud save.';
+  return 'Use Build to make or edit a dance, Save Changes at the top to keep it, Sign In for Google saving, My Saved Dances for your saved work, and Featured Choreo to browse featured dances.';
+}
+
 
 app.get("/api/health", async (_req, res) => {
   const db = await readDb();
@@ -407,6 +503,54 @@ app.delete("/api/cloud-saves/:id", requireGoogleUser, async (req, res) => {
   res.json({ ok: true, deletedId: String(req.params.id || "").trim() });
 });
 
+app.post("/api/submissions/request", requireGoogleUser, async (req, res) => {
+  const db = await readDb();
+  const key = userKeyFromClaims(req.stepperClaims);
+  touchUser(db, req.stepperUser, key);
+  const registryId = String(req.body?.registryId || "").trim();
+  const source = (Array.isArray(db.danceRegistry) ? db.danceRegistry : []).find(item => item && item.registryId === registryId);
+  if (!source) {
+    return res.status(404).json({ ok: false, error: "Dance not found in registry." });
+  }
+  const requestType = sanitizeRequestType(req.body?.requestType);
+  const submission = upsertSubmission(db, {
+    registryId,
+    ownerKey: key,
+    ownerEmail: req.stepperUser.email,
+    ownerName: req.stepperUser.name,
+    ownerPicture: req.stepperUser.picture,
+    title: source.title,
+    choreographer: source.choreographer,
+    requestType,
+    status: 'pending'
+  });
+  await writeDb(db);
+  res.json({ ok: true, submission });
+});
+
+app.get("/api/notifications", requireGoogleUser, async (req, res) => {
+  const db = await readDb();
+  const key = userKeyFromClaims(req.stepperClaims);
+  touchUser(db, req.stepperUser, key);
+  await writeDb(db);
+  const items = Array.isArray(db.users[key]?.notifications) ? db.users[key].notifications.slice().sort((a,b)=> new Date(b.createdAt||0)-new Date(a.createdAt||0)) : [];
+  res.json({ ok: true, items, unreadCount: items.filter(item => !item.readAt).length });
+});
+
+app.post("/api/notifications/mark-read", requireGoogleUser, async (req, res) => {
+  const db = await readDb();
+  const key = userKeyFromClaims(req.stepperClaims);
+  touchUser(db, req.stepperUser, key);
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(value => String(value || "").trim()).filter(Boolean) : [];
+  const list = Array.isArray(db.users[key]?.notifications) ? db.users[key].notifications : [];
+  list.forEach(item => {
+    if (!item || item.readAt) return;
+    if (!ids.length || ids.includes(String(item.id || ""))) item.readAt = new Date().toISOString();
+  });
+  await writeDb(db);
+  res.json({ ok: true, ids });
+});
+
 app.get("/api/featured-choreo", async (_req, res) => {
   const db = await readDb();
   const items = Array.isArray(db.featuredChoreo) ? db.featuredChoreo : [];
@@ -424,6 +568,46 @@ app.get("/api/admin/dances", requireAdmin, async (_req, res) => {
       isFeatured: featuredIds.has(String(item?.registryId || ""))
     }));
   res.json({ ok: true, items, featuredIds: Array.from(featuredIds), adminEmail, onlineCount: getOnlineUsers(db).length });
+});
+
+app.get("/api/admin/submissions", requireAdmin, async (_req, res) => {
+  const db = await readDb();
+  const items = (Array.isArray(db.submissions) ? db.submissions : [])
+    .filter(item => String(item?.status || 'pending') === 'pending')
+    .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
+  res.json({ ok: true, items });
+});
+
+app.post("/api/admin/submissions/:id/reject", requireAdmin, async (req, res) => {
+  const db = await readDb();
+  const id = String(req.params.id || "").trim();
+  const item = (Array.isArray(db.submissions) ? db.submissions : []).find(row => row && row.id === id);
+  if (!item) return res.status(404).json({ ok: false, error: 'Submission not found.' });
+  item.status = 'rejected';
+  item.updatedAt = new Date().toISOString();
+  pushNotification(db, { userKey: item.ownerKey, email: item.ownerEmail }, {
+    kind: 'Request update',
+    title: 'Feature request declined',
+    message: `${item.title || 'Your dance'} was not approved this time.`
+  });
+  await writeDb(db);
+  res.json({ ok: true, item });
+});
+
+app.post("/api/admin/submissions/:id/approve-site", requireAdmin, async (req, res) => {
+  const db = await readDb();
+  const id = String(req.params.id || "").trim();
+  const item = (Array.isArray(db.submissions) ? db.submissions : []).find(row => row && row.id === id);
+  if (!item) return res.status(404).json({ ok: false, error: 'Submission not found.' });
+  item.status = 'approved';
+  item.updatedAt = new Date().toISOString();
+  pushNotification(db, { userKey: item.ownerKey, email: item.ownerEmail }, {
+    kind: 'Site upload',
+    title: 'Upload approved',
+    message: `${item.title || 'Your dance'} was approved for the site.`
+  });
+  await writeDb(db);
+  res.json({ ok: true, item });
 });
 
 app.post("/api/admin/feature", requireAdmin, async (req, res) => {
@@ -451,8 +635,14 @@ app.post("/api/admin/feature", requireAdmin, async (req, res) => {
     .sort((a, b) => new Date(b.featuredAt || b.updatedAt || 0) - new Date(a.featuredAt || a.updatedAt || 0))
     .slice(0, 300);
 
+  const touched = markMatchingSubmissions(db, registryId, 'approved');
+  pushNotification(db, { userKey: source.ownerKey, email: source.ownerEmail }, {
+    kind: 'Featured',
+    title: 'Your dance was featured',
+    message: buildFeatureSummary(source, badgeLabel)
+  });
   await writeDb(db);
-  res.json({ ok: true, item: featuredItem, items: db.featuredChoreo });
+  res.json({ ok: true, item: featuredItem, items: db.featuredChoreo, resolvedSubmissions: touched.map(item => item.id) });
 });
 
 app.delete("/api/admin/feature/:registryId", requireAdmin, async (req, res) => {
@@ -461,6 +651,34 @@ app.delete("/api/admin/feature/:registryId", requireAdmin, async (req, res) => {
   db.featuredChoreo = (Array.isArray(db.featuredChoreo) ? db.featuredChoreo : []).filter(item => String(item?.registryId || item?.id || "") !== registryId);
   await writeDb(db);
   res.json({ ok: true, registryId });
+});
+
+
+app.post('/api/chatbot/help', async (req, res) => {
+  const prompt = String(req.body?.prompt || '').trim();
+  const context = req.body?.context && typeof req.body.context === 'object' ? req.body.context : {};
+  if (!prompt) {
+    return res.status(400).json({ ok:false, error:'Missing prompt.' });
+  }
+  if (!openaiClient) {
+    return res.json({ ok:true, text: fallbackSiteHelp(prompt, context), mode:'fallback' });
+  }
+  try {
+    const response = await openaiClient.responses.create({
+      model,
+      input: [
+        { role: 'system', content: [{ type: 'input_text', text: SITE_HELP_CONTEXT }] },
+        { role: 'user', content: [{ type: 'input_text', text: `Current tab: ${context.currentTab || 'unknown'}
+Signed in: ${context.signedIn ? 'yes' : 'no'}
+Admin: ${context.isAdmin ? 'yes' : 'no'}
+Question: ${prompt}` }] }
+      ]
+    });
+    const text = String(response.output_text || '').trim() || fallbackSiteHelp(prompt, context);
+    res.json({ ok:true, text, mode:'openai' });
+  } catch (error) {
+    res.json({ ok:true, text: fallbackSiteHelp(prompt, context), mode:'fallback-error' });
+  }
 });
 
 app.post("/api/openai/respond", async (req, res) => {

@@ -5,7 +5,9 @@
   const DATA_KEY = 'linedance_builder_data_v13';
   const PHR_TOOLS_KEY = 'stepper_current_phrased_tools_v1';
   const FEATURED_CHOREO_KEY = 'stepper_featured_choreo_v1';
+  const CURRENT_REGISTRY_KEY = 'stepper_current_registry_id_v1';
   const SESSION_KEY = 'stepper_google_auth_session_v2';
+  const LAST_SAVED_SIGNATURE_KEY = 'stepper_last_saved_signature_v1';
   const API_BASE_KEY = 'stepper_api_base_v1';
   const SIGNIN_PAGE_ID = 'stepper-google-signin-page';
   const ADMIN_PAGE_ID = 'stepper-google-admin-page';
@@ -26,7 +28,14 @@
     session: readJson(SESSION_KEY, null),
     adminDances: [],
     featured: [],
+    submissions: [],
+    notifications: [],
+    cloudSaves: [],
+    chatOpen: false,
+    chatBusy: false,
+    chatMessages: [],
     lastSyncedSignature: '',
+    lastSavedSignature: String(localStorage.getItem(LAST_SAVED_SIGNATURE_KEY) || ''),
     ui: {
       buildBtn: null,
       sheetBtn: null,
@@ -93,12 +102,23 @@
   }
 
   function clearSession(){
+    state.cloudSaves = [];
     saveSession(null);
     try {
       if (window.google && window.google.accounts && window.google.accounts.id) {
         window.google.accounts.id.disableAutoSelect();
       }
     } catch {}
+  }
+
+  function getCurrentRegistryId(){
+    return String(localStorage.getItem(CURRENT_REGISTRY_KEY) || '').trim();
+  }
+
+  function setCurrentRegistryId(value){
+    const safe = String(value || '').trim();
+    if (safe) localStorage.setItem(CURRENT_REGISTRY_KEY, safe);
+    else localStorage.removeItem(CURRENT_REGISTRY_KEY);
   }
 
   function isAdminSession(){
@@ -499,9 +519,12 @@
       });
       await refreshSession();
       await heartbeat();
+      await refreshCloudSaves();
+      await restoreLatestCloudSaveIfNeeded();
       await syncCurrentDanceToBackend(true);
+      await refreshNotifications();
       await syncFeaturedFromBackend();
-      if (isAdminSession()) await refreshAdminDances();
+      if (isAdminSession()) { await refreshAdminDances(); await refreshSubmissions(); }
     } catch (error) {
       alert(error.message || 'Google sign in failed.');
     }
@@ -516,7 +539,7 @@
     if (!state.config || !state.config.googleEnabled || !state.config.googleClientId) {
       container.innerHTML = `
         <button type="button" disabled class="stepper-google-cta ${theme.button}" style="width:280px;max-width:100%;opacity:.65;cursor:not-allowed">Sign in with Google</button>
-        <p class="mt-3 text-sm ${theme.subtle}">Google sign-in is not ready on the backend yet.</p>
+        <p class="mt-3 text-sm ${theme.subtle}">Google sign-in is still loading.</p>
       `;
       return;
     }
@@ -605,6 +628,77 @@
     }
   }
 
+
+  function getCurrentDanceSignature(){
+    const entry = buildCurrentDanceEntry();
+    return buildDanceSignature(entry);
+  }
+
+  function hasUnsavedChanges(){
+    const current = getCurrentDanceSignature();
+    if (!current) return false;
+    return current !== String(state.lastSavedSignature || '');
+  }
+
+  function updateSavedSignature(signature){
+    const safe = String(signature || '');
+    state.lastSavedSignature = safe;
+    if (safe) localStorage.setItem(LAST_SAVED_SIGNATURE_KEY, safe);
+    else localStorage.removeItem(LAST_SAVED_SIGNATURE_KEY);
+  }
+
+  function restoreDanceSnapshot(item){
+    const data = item && item.snapshot && item.snapshot.data && typeof item.snapshot.data === 'object' ? item.snapshot.data : null;
+    const phrasedTools = item && item.snapshot && item.snapshot.phrasedTools && typeof item.snapshot.phrasedTools === 'object' ? item.snapshot.phrasedTools : {};
+    if (!data) return false;
+    writeJson(DATA_KEY, data);
+    writeJson(PHR_TOOLS_KEY, phrasedTools);
+    window.dispatchEvent(new Event('storage'));
+    return true;
+  }
+
+  async function refreshCloudSaves(){
+    if (!state.session || !state.session.credential) {
+      state.cloudSaves = [];
+      return [];
+    }
+    try {
+      const data = await authFetch('/api/cloud-saves');
+      state.cloudSaves = Array.isArray(data.items) ? data.items : [];
+      return state.cloudSaves;
+    } catch {
+      state.cloudSaves = [];
+      return [];
+    }
+  }
+
+  async function restoreLatestCloudSaveIfNeeded(){
+    const localEntry = buildCurrentDanceEntry();
+    if (localEntry) return false;
+    const items = state.cloudSaves && state.cloudSaves.length ? state.cloudSaves : await refreshCloudSaves();
+    const latest = Array.isArray(items) ? items[0] : null;
+    if (!latest) return false;
+    const restored = restoreDanceSnapshot(latest);
+    if (restored) {
+      setCurrentRegistryId(latest.registryId || '');
+      updateSavedSignature(buildDanceSignature(latest));
+      state.lastSyncedSignature = buildDanceSignature(latest);
+    }
+    return restored;
+  }
+
+  async function saveChangesNow(opts){
+    const force = !!(opts && opts.force);
+    const synced = await syncCurrentDanceToBackend(force || true);
+    if (synced) {
+      await refreshCloudSaves();
+      renderSaveButton();
+      return true;
+    }
+    renderSaveButton();
+    return false;
+  }
+
   async function syncCurrentDanceToBackend(force){
     if (state.busy.sync) return false;
     if (!state.session || !state.session.credential) return false;
@@ -614,12 +708,15 @@
     if (!force && signature && signature === state.lastSyncedSignature) return false;
     state.busy.sync = true;
     try {
-      await authFetch('/api/cloud-saves/upsert', {
+      const data = await authFetch('/api/cloud-saves/upsert', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ entry })
       });
+      if (data && data.registryItem && data.registryItem.registryId) setCurrentRegistryId(data.registryItem.registryId);
       state.lastSyncedSignature = signature;
+      updateSavedSignature(signature);
+      if (data && Array.isArray(data.items)) state.cloudSaves = data.items;
       return true;
     } catch {
       return false;
@@ -661,20 +758,39 @@
     return 'Bronze Feature';
   }
 
+  async function buildAiBadgeLabel(registryId, tone){
+    const fallback = badgeLabelForTone(tone);
+    try {
+      const match = (state.adminDances || []).find(item => item.registryId === registryId);
+      const prompt = `Write one short human-sounding featured choreography badge label for a line dance called "${match?.title || 'this dance'}" by "${match?.choreographer || 'Unknown'}". Tone: ${tone}. Return only the label, max 4 words.`;
+      const data = await fetchJson('/api/openai/respond', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, system: 'You write short plainspoken labels for featured line dances.' })
+      });
+      const label = String((data && data.text) || '').trim().replace(/^['"]|['"]$/g, '');
+      return label || fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
   async function featureDance(registryId, tone){
     if (!registryId || state.busy.feature) return;
     state.busy.feature = true;
     try {
+      const aiLabel = await buildAiBadgeLabel(registryId, tone);
       await authFetch('/api/admin/feature', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           registryId,
           badgeTone: tone,
-          badgeLabel: badgeLabelForTone(tone)
+          badgeLabel: aiLabel
         })
       });
       await refreshAdminDances();
+      await refreshSubmissions();
       await syncFeaturedFromBackend();
       renderPages();
     } catch (error) {
@@ -699,6 +815,274 @@
     }
   }
 
+
+  async function refreshNotifications(){
+    if (!state.session || !state.session.credential) {
+      state.notifications = [];
+      return [];
+    }
+    try {
+      const data = await authFetch('/api/notifications');
+      state.notifications = Array.isArray(data.items) ? data.items : [];
+      return state.notifications;
+    } catch {
+      state.notifications = [];
+      return [];
+    }
+  }
+
+  async function markNotificationsRead(ids){
+    if (!state.session || !state.session.credential) return false;
+    try {
+      await authFetch('/api/notifications/mark-read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: Array.isArray(ids) ? ids : [] })
+      });
+      state.notifications = state.notifications.map(item => ids.includes(item.id) ? Object.assign({}, item, { readAt: new Date().toISOString() }) : item);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function ensureToastHost(){
+    let host = document.getElementById('stepper-google-toast-host');
+    if (host) return host;
+    host = document.createElement('div');
+    host.id = 'stepper-google-toast-host';
+    host.style.position = 'fixed';
+    host.style.top = '16px';
+    host.style.right = '16px';
+    host.style.zIndex = '9999';
+    host.style.display = 'grid';
+    host.style.gap = '10px';
+    host.style.maxWidth = 'min(420px, calc(100vw - 24px))';
+    document.body.appendChild(host);
+    return host;
+  }
+
+  function showNotificationToasts(){
+    const unread = state.notifications.filter(item => item && !item.readAt);
+    if (!unread.length) return;
+    const host = ensureToastHost();
+    const theme = themeClasses();
+    unread.slice(0, 4).forEach(item => {
+      if (host.querySelector(`[data-toast-id="${item.id}"]`)) return;
+      const card = document.createElement('div');
+      card.setAttribute('data-toast-id', item.id);
+      card.className = `rounded-3xl border shadow-xl p-4 ${theme.shell}`;
+      card.innerHTML = `<div class="flex items-start gap-3"><div class="stepper-google-pill ${theme.orange}">${escapeHtml(item.kind || 'Notice')}</div><button type="button" class="ml-auto text-xs font-black uppercase tracking-widest" data-close="1">Close</button></div><div class="mt-3 text-base font-black tracking-tight">${escapeHtml(item.title || 'Update')}</div><p class="mt-2 text-sm ${theme.subtle}">${escapeHtml(item.message || '')}</p></div>`;
+      card.querySelector('[data-close="1"]').addEventListener('click', async () => {
+        card.remove();
+        await markNotificationsRead([item.id]);
+      });
+      host.appendChild(card);
+    });
+  }
+
+  function renderFeatureBadge(){
+    let badge = document.getElementById('stepper-feature-owner-badge');
+    if (!badge) {
+      badge = document.createElement('div');
+      badge.id = 'stepper-feature-owner-badge';
+      badge.style.position = 'fixed';
+      badge.style.left = '12px';
+      badge.style.top = '12px';
+      badge.style.zIndex = '9000';
+      badge.style.pointerEvents = 'none';
+      document.body.appendChild(badge);
+    }
+    const currentRegistryId = getCurrentRegistryId();
+    const currentEmail = normalizeEmail(state.session && state.session.profile && state.session.profile.email);
+    const item = (state.featured || []).find(entry => String(entry.registryId || entry.id || '') === currentRegistryId && normalizeEmail(entry.ownerEmail) === currentEmail);
+    if (!item) { badge.style.display = 'none'; badge.innerHTML = ''; return; }
+    const tone = String(item.badgeTone || 'bronze');
+    const label = String(item.badgeLabel || badgeLabelForTone(tone));
+    const bg = tone === 'gold' ? '#fff3c4' : tone === 'silver' ? '#eef2f7' : '#f7eadf';
+    const fg = tone === 'gold' ? '#8a5800' : tone === 'silver' ? '#4b5563' : '#8a4b25';
+    badge.style.display = '';
+    badge.innerHTML = `<div style="display:inline-flex;align-items:center;gap:.45rem;padding:.58rem .9rem;border-radius:999px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;background:${bg};color:${fg};box-shadow:0 8px 24px rgba(0,0,0,.12);border:1px solid rgba(0,0,0,.06);font-size:11px;">⭐ ${escapeHtml(label)}</div>`;
+  }
+
+  async function refreshSubmissions(){
+    if (!isAdminSession()) { state.submissions = []; return []; }
+    try {
+      const data = await authFetch('/api/admin/submissions');
+      state.submissions = Array.isArray(data.items) ? data.items : [];
+      return state.submissions;
+    } catch {
+      state.submissions = [];
+      return [];
+    }
+  }
+
+  async function requestModeration(requestType){
+    const entry = buildCurrentDanceEntry();
+    if (!entry) {
+      alert('Build a dance first so there is something to send.');
+      return false;
+    }
+    try {
+      const sync = await authFetch('/api/cloud-saves/upsert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entry })
+      });
+      if (sync && sync.registryItem && sync.registryItem.registryId) setCurrentRegistryId(sync.registryItem.registryId);
+      await authFetch('/api/submissions/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestType, registryId: sync && sync.registryItem ? sync.registryItem.registryId : '' })
+      });
+      alert(requestType === 'site' ? 'Uploaded to the site review queue.' : 'Sent to host for featuring.');
+      return true;
+    } catch (error) {
+      alert(error.message || 'Could not send that request.');
+      return false;
+    }
+  }
+
+  async function rejectSubmission(submissionId){
+    try {
+      await authFetch(`/api/admin/submissions/${encodeURIComponent(submissionId)}/reject`, { method: 'POST' });
+      await refreshSubmissions();
+      renderPages();
+    } catch (error) {
+      alert(error.message || 'Could not reject that request.');
+    }
+  }
+
+  async function approveSiteSubmission(submissionId){
+    try {
+      await authFetch(`/api/admin/submissions/${encodeURIComponent(submissionId)}/approve-site`, { method: 'POST' });
+      await refreshSubmissions();
+      renderPages();
+    } catch (error) {
+      alert(error.message || 'Could not approve that upload.');
+    }
+  }
+
+
+  function ensureSaveHost(){
+    let host = document.getElementById('stepper-google-save-host');
+    if (host) return host;
+    host = document.createElement('div');
+    host.id = 'stepper-google-save-host';
+    host.style.position = 'fixed';
+    host.style.top = '12px';
+    host.style.left = '50%';
+    host.style.transform = 'translateX(-50%)';
+    host.style.zIndex = '8600';
+    document.body.appendChild(host);
+    return host;
+  }
+
+  function renderSaveButton(){
+    const host = ensureSaveHost();
+    const entry = buildCurrentDanceEntry();
+    const hasSession = !!(state.session && state.session.credential);
+    if (!entry) { host.style.display='none'; host.innerHTML=''; return; }
+    const dirty = hasUnsavedChanges();
+    host.style.display='';
+    host.innerHTML = `<button type="button" data-save-now="1" style="border:1px solid rgba(79,70,229,.25);background:${dirty ? '#4f46e5' : '#ffffff'};color:${dirty ? '#ffffff' : '#111827'};padding:.72rem 1rem;border-radius:999px;font-weight:900;box-shadow:0 10px 30px rgba(0,0,0,.12);display:inline-flex;align-items:center;gap:.55rem;">${dirty ? 'Save changes' : 'Saved'}<span style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.78;">${hasSession ? (dirty ? 'cloud needed' : 'cloud up to date') : 'sign in to save'}</span></button>`;
+    host.querySelector('[data-save-now="1"]').addEventListener('click', async () => {
+      if (!hasSession) {
+        openPage('signin');
+        return;
+      }
+      const ok = await saveChangesNow({ force:true });
+      if (!ok) alert('Could not save to the backend just now.');
+    });
+  }
+
+  async function askSiteHelper(question){
+    const prompt = String(question || '').trim();
+    if (!prompt) return;
+    state.chatBusy = true;
+    renderSiteHelper();
+    try {
+      const currentTab = state.activePage || 'main';
+      const data = await fetchJson('/api/chatbot/help', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt,
+          context: {
+            currentTab,
+            signedIn: !!(state.session && state.session.credential),
+            isAdmin: isAdminSession(),
+            onlineCount: (state.presence && state.presence.onlineCount) || 0
+          }
+        })
+      });
+      state.chatMessages.push({ role:'assistant', text: String(data.text || 'I could not think of anything useful just then.') });
+    } catch (error) {
+      state.chatMessages.push({ role:'assistant', text: error.message || 'The helper bot could not reach the backend.' });
+    } finally {
+      state.chatBusy = false;
+      renderSiteHelper();
+    }
+  }
+
+  function ensureSiteHelperHost(){
+    let host = document.getElementById('stepper-site-helper-host');
+    if (host) return host;
+    host = document.createElement('div');
+    host.id = 'stepper-site-helper-host';
+    host.style.position = 'fixed';
+    host.style.right = '14px';
+    host.style.bottom = '96px';
+    host.style.zIndex = '8700';
+    document.body.appendChild(host);
+    return host;
+  }
+
+  function renderSiteHelper(){
+    const host = ensureSiteHelperHost();
+    if (!state.chatMessages.length) {
+      state.chatMessages = [{ role:'assistant', text:'Need help using the site? Ask me what tab to use, how featuring works, or how to save your dance.' }];
+    }
+    if (!state.chatOpen) {
+      host.innerHTML = `<button type="button" data-chat-open="1" style="border:none;background:#4f46e5;color:#fff;width:58px;height:58px;border-radius:999px;font-size:26px;box-shadow:0 12px 30px rgba(0,0,0,.18);">💬</button>`;
+      host.querySelector('[data-chat-open="1"]').addEventListener('click', ()=>{ state.chatOpen = true; renderSiteHelper(); });
+      return;
+    }
+    const messages = state.chatMessages.slice(-8).map(msg => `<div style="align-self:${msg.role==='user'?'flex-end':'stretch'};max-width:100%;background:${msg.role==='user'?'#4f46e5':'#ffffff'};color:${msg.role==='user'?'#ffffff':'#111827'};border:1px solid rgba(79,70,229,.12);padding:.75rem .85rem;border-radius:18px;font-size:14px;line-height:1.45;box-shadow:0 8px 24px rgba(0,0,0,.08);">${escapeHtml(msg.text)}</div>`).join('');
+    host.innerHTML = `<div style="width:min(360px, calc(100vw - 24px));background:#f8fafc;border:1px solid rgba(99,102,241,.16);border-radius:24px;box-shadow:0 18px 40px rgba(0,0,0,.18);overflow:hidden;"><div style="padding:.9rem 1rem;background:#4f46e5;color:#fff;display:flex;align-items:center;gap:.6rem;"><div style="font-weight:900;">Site helper</div><button type="button" data-chat-close="1" style="margin-left:auto;border:none;background:rgba(255,255,255,.18);color:#fff;border-radius:999px;padding:.35rem .65rem;font-weight:900;">Close</button></div><div style="padding:1rem;display:flex;flex-direction:column;gap:.7rem;max-height:320px;overflow:auto;">${messages}${state.chatBusy ? '<div style="font-size:13px;color:#6b7280;">Thinking…</div>' : ''}</div><form data-chat-form="1" style="padding:0 1rem 1rem;display:flex;gap:.6rem;"><input data-chat-input="1" type="text" placeholder="Ask where to go or what to press" style="flex:1;border:1px solid rgba(99,102,241,.18);border-radius:999px;padding:.8rem 1rem;background:#fff;" /><button type="submit" style="border:none;background:#4f46e5;color:#fff;border-radius:999px;padding:.8rem 1rem;font-weight:900;">Send</button></form></div>`;
+    host.querySelector('[data-chat-close="1"]').addEventListener('click', ()=>{ state.chatOpen = false; renderSiteHelper(); });
+    host.querySelector('[data-chat-form="1"]').addEventListener('submit', (event)=>{
+      event.preventDefault();
+      const input = host.querySelector('[data-chat-input="1"]');
+      const value = String(input && input.value || '').trim();
+      if (!value) return;
+      state.chatMessages.push({ role:'user', text:value });
+      input.value = '';
+      renderSiteHelper();
+      askSiteHelper(value);
+    });
+  }
+
+  function renderQuickActions(){
+    let host = document.getElementById('stepper-google-quick-actions');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'stepper-google-quick-actions';
+      host.style.position = 'fixed';
+      host.style.right = '14px';
+      host.style.bottom = '18px';
+      host.style.zIndex = '8500';
+      document.body.appendChild(host);
+    }
+    const hasSession = !!(state.session && state.session.credential);
+    const entry = buildCurrentDanceEntry();
+    if (!hasSession || !entry) { host.style.display='none'; host.innerHTML=''; return; }
+    host.style.display='';
+    host.innerHTML = `<div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end;"><button type="button" data-quick="feature" style="border:1px solid rgba(99,102,241,.18);background:#fff;padding:.75rem 1rem;border-radius:999px;font-weight:900;box-shadow:0 10px 30px rgba(0,0,0,.12);">Send to host for featuring</button><button type="button" data-quick="site" style="border:1px solid rgba(99,102,241,.18);background:#fff;padding:.75rem 1rem;border-radius:999px;font-weight:900;box-shadow:0 10px 30px rgba(0,0,0,.12);">Upload to site</button></div>`;
+    host.querySelector('[data-quick="feature"]').addEventListener('click', ()=>requestModeration('feature'));
+    host.querySelector('[data-quick="site"]').addEventListener('click', ()=>requestModeration('site'));
+  }
+
   function renderPresenceOnly(){
     const countNodes = document.querySelectorAll('[data-stepper-online-count]');
     countNodes.forEach(node => {
@@ -712,9 +1096,7 @@
     const theme = themeClasses();
     const session = state.session;
     const profile = session && session.profile ? session.profile : null;
-    const backendError = state.config && state.config.error ? state.config.error : '';
     const onlineCount = (state.presence && state.presence.onlineCount) || 0;
-    const setupTrouble = !!backendError || !(state.config && state.config.googleEnabled);
 
     page.className = `rounded-3xl border shadow-sm overflow-hidden ${theme.shell}`;
 
@@ -729,7 +1111,11 @@
               <div>
                 <div class="text-lg font-black tracking-tight">Signed in as ${escapeHtml(profile.name || profile.email || 'Member')}</div>
                 <p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(profile.email || '')}</p>
-                <p class="mt-3 text-sm ${theme.subtle}">Your dances now sync into the backend registry automatically.</p>
+                <p class="mt-3 text-sm ${theme.subtle}">Your dances sync into your Google-linked cloud save automatically. Use Save Changes before leaving if you want the newest version locked in straight away.</p>
+                <div class="mt-4 flex flex-wrap gap-3">
+                  <button type="button" data-stepper-action="send-host" class="stepper-google-cta ${theme.button}">Send to host for featuring</button>
+                  <button type="button" data-stepper-action="upload-site" class="stepper-google-cta ${theme.button}">Upload to site</button>
+                </div>
               </div>
               <div class="stepper-google-badge-row">
                 <span class="stepper-google-pill ${theme.orange}"><span data-stepper-online-count>${escapeHtml(onlineCount)}</span> online</span>
@@ -737,17 +1123,6 @@
                 <button type="button" data-stepper-action="signout" class="stepper-google-cta stepper-google-danger ${theme.button}">Sign out</button>
               </div>
             </div>
-            ${setupTrouble ? `
-              <details class="mt-5 rounded-2xl border p-4 ${theme.panel}">
-                <summary class="cursor-pointer text-sm font-black uppercase tracking-widest">Connection help</summary>
-                ${backendError ? `<p class="mt-3 text-sm text-red-500">${escapeHtml(backendError)}</p>` : ''}
-                ${!(state.config && state.config.googleEnabled) ? `<p class="mt-3 text-sm ${theme.subtle}">Google sign-in is not ready on the backend yet.</p>` : ''}
-                <div class="mt-4 flex flex-col sm:flex-row gap-3">
-                  <input id="stepper-api-base-input" class="stepper-google-input ${theme.button}" value="${escapeHtml(state.apiBase)}" placeholder="https://your-backend.onrender.com" />
-                  <button type="button" data-stepper-action="save-api-base" class="stepper-google-cta ${theme.button}">Save backend URL</button>
-                </div>
-              </details>
-            ` : ''}
           </div>
         </div>
       `;
@@ -763,32 +1138,9 @@
               <p class="mt-3 text-sm leading-relaxed ${theme.subtle}">Use your Google account to sign in. The admin tab appears only for <strong>${escapeHtml(ADMIN_EMAIL)}</strong>.</p>
             </div>
             <div id="stepper-google-button-slot" class="stepper-google-google-btn mt-6 flex justify-center"></div>
-            ${setupTrouble ? `
-              <details class="mt-5 rounded-2xl border p-4 ${theme.panel}">
-                <summary class="cursor-pointer text-sm font-black uppercase tracking-widest">Connection help</summary>
-                ${backendError ? `<p class="mt-3 text-sm text-red-500">${escapeHtml(backendError)}</p>` : ''}
-                ${!(state.config && state.config.googleEnabled) ? `<p class="mt-3 text-sm ${theme.subtle}">Google sign-in is not ready on the backend yet.</p>` : ''}
-                <div class="mt-4 flex flex-col sm:flex-row gap-3">
-                  <input id="stepper-api-base-input" class="stepper-google-input ${theme.button}" value="${escapeHtml(state.apiBase)}" placeholder="https://your-backend.onrender.com" />
-                  <button type="button" data-stepper-action="save-api-base" class="stepper-google-cta ${theme.button}">Save backend URL</button>
-                </div>
-              </details>
-            ` : ''}
           </div>
         </div>
       `;
-    }
-
-    const saveBtn = page.querySelector('[data-stepper-action="save-api-base"]');
-    const apiInput = page.querySelector('#stepper-api-base-input');
-    if (saveBtn && apiInput) {
-      saveBtn.addEventListener('click', async () => {
-        saveApiBase(apiInput.value || '');
-        await refreshConfig();
-        await refreshPresence();
-        if (state.session) await refreshSession();
-        renderPages();
-      });
     }
 
     const signoutBtn = page.querySelector('[data-stepper-action="signout"]');
@@ -798,6 +1150,10 @@
         renderPages();
       });
     }
+    const sendHostBtn = page.querySelector('[data-stepper-action="send-host"]');
+    if (sendHostBtn) sendHostBtn.addEventListener('click', () => requestModeration('feature'));
+    const uploadSiteBtn = page.querySelector('[data-stepper-action="upload-site"]');
+    if (uploadSiteBtn) uploadSiteBtn.addEventListener('click', () => requestModeration('site'));
 
     renderGoogleButton();
     renderPresenceOnly();
@@ -822,6 +1178,21 @@
       `;
       return;
     }
+
+    const pendingCards = state.submissions.length ? state.submissions.map(item => `
+      <article class="rounded-3xl border p-5 sm:p-6 ${theme.soft}" data-stepper-submission-id="${escapeHtml(item.id)}">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div class="flex flex-wrap items-center gap-3"><h3 class="text-lg font-black tracking-tight">${escapeHtml(item.title || 'Untitled Dance')}</h3><span class="stepper-google-pill ${theme.orange}">${escapeHtml(item.requestType || 'request')}</span></div>
+            <p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.ownerName || item.ownerEmail || 'Member')} • ${escapeHtml(item.ownerEmail || '')}</p>
+          </div>
+          <div class="stepper-google-badge-row">
+            ${item.requestType === 'site' ? `<button type="button" class="stepper-google-cta ${theme.button}" data-action="approve-site">Approve upload</button>` : ''}
+            <button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="reject-submission">Delete confirmation</button>
+          </div>
+        </div>
+      </article>
+    `).join('') : `<div class="rounded-3xl border p-6 sm:p-8 text-center ${theme.soft}"><p class="text-lg font-black">No pending requests.</p><p class="mt-2 text-sm ${theme.subtle}">Feature and upload requests from members will show here.</p></div>`;
 
     const cards = state.adminDances.length ? state.adminDances.map(item => {
       const featurePill = item.isFeatured ? `<span class="stepper-google-pill ${theme.orange}">${iconMedal()} Featured</span>` : '';
@@ -878,9 +1249,19 @@
             </div>
           </div>
         </div>
+        <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Pending member requests</div><p class="mt-1 text-sm ${theme.subtle}">Approve uploads, reject requests, or feature dances with a badge.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String(state.submissions.length))} pending</span></div></div>
+        ${pendingCards}
         ${cards}
       </div>
     `;
+
+    page.querySelectorAll('[data-stepper-submission-id]').forEach(card => {
+      const submissionId = card.getAttribute('data-stepper-submission-id');
+      const rejectBtn = card.querySelector('[data-action="reject-submission"]');
+      if (rejectBtn) rejectBtn.addEventListener('click', () => rejectSubmission(submissionId));
+      const approveBtn = card.querySelector('[data-action="approve-site"]');
+      if (approveBtn) approveBtn.addEventListener('click', () => approveSiteSubmission(submissionId));
+    });
 
     page.querySelectorAll('[data-stepper-registry-id]').forEach(card => {
       const registryId = card.getAttribute('data-stepper-registry-id');
@@ -931,6 +1312,11 @@
     patchFeaturedPageCopy();
     updateAdminTabVisibility();
     updateTabButtons();
+    renderQuickActions();
+    renderSaveButton();
+    renderFeatureBadge();
+    renderSiteHelper();
+    showNotificationToasts();
   }
 
   async function prime(){
@@ -942,8 +1328,11 @@
     if (state.session && state.session.credential) {
       await refreshSession();
       await heartbeat();
+      await refreshCloudSaves();
+      await restoreLatestCloudSaveIfNeeded();
       await syncCurrentDanceToBackend(false);
-      if (isAdminSession()) await refreshAdminDances();
+      await refreshNotifications();
+      if (isAdminSession()) { await refreshAdminDances(); await refreshSubmissions(); }
     }
     await syncFeaturedFromBackend();
     renderPages();
@@ -967,6 +1356,7 @@
 
   setInterval(() => {
     syncCurrentDanceToBackend(false);
+    renderSaveButton();
   }, SYNC_INTERVAL_MS);
 
   setInterval(() => {
@@ -977,8 +1367,15 @@
   setInterval(() => {
     syncFeaturedFromBackend();
     patchFeaturedPageCopy();
-    if (isAdminSession()) refreshAdminDances();
+    if (state.session && state.session.credential) refreshNotifications();
+    if (isAdminSession()) { refreshAdminDances(); refreshSubmissions(); }
   }, FEATURED_SYNC_INTERVAL_MS);
+
+  window.addEventListener('beforeunload', (event) => {
+    if (!hasUnsavedChanges()) return;
+    event.preventDefault();
+    event.returnValue = '';
+  });
 
   window.addEventListener('storage', () => {
     if (state.session && state.session.credential) syncCurrentDanceToBackend(false);
