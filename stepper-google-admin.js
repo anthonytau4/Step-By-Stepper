@@ -35,6 +35,7 @@
     chatOpen: false,
     chatBusy: false,
     chatMessages: [],
+    chatDraft: '',
     lastSyncedSignature: '',
     lastSavedSignature: String(localStorage.getItem(LAST_SAVED_SIGNATURE_KEY) || ''),
     ui: {
@@ -352,7 +353,6 @@
     if (state.ui.footerWrap) state.ui.footerWrap.style.display = 'none';
     renderPages();
     updateTabButtons();
-    host.scrollIntoView({ block:'start', behavior:'smooth' });
   }
 
   function updateAdminTabVisibility(){
@@ -417,6 +417,7 @@
       pushCandidate(state.apiBase);
       pushCandidate(window.STEPPER_API_BASE || '');
       if (location.protocol === 'http:' || location.protocol === 'https:') pushCandidate(location.origin);
+      pushCandidate('https://step-by-stepper.com');
       let lastError = null;
       for (const candidate of candidates) {
         try {
@@ -591,7 +592,7 @@
       helper.className = `mt-3 text-xs ${theme.subtle}`;
       helper.textContent = state.config && state.config.source === 'frontend-fallback'
         ? 'Using the built-in Google sign-in fallback while the site checks the backend.'
-        : 'Google sign-in is ready.';
+        : 'Google sign-in should be ready here. If the button still does nothing, the backend URL or Google origin is mismatched.';
       container.appendChild(helper);
     } catch (error) {
       container.innerHTML = `<button type="button" disabled class="stepper-google-cta ${theme.button}" style="width:280px;max-width:100%;opacity:.65;cursor:not-allowed">Sign in with Google</button><p class="mt-3 text-sm ${theme.subtle}">${escapeHtml(error.message || 'Google button could not load.')}</p>`;
@@ -996,7 +997,7 @@
     host = document.createElement('div');
     host.id = 'stepper-google-save-host';
     host.style.position = 'fixed';
-    host.style.top = '12px';
+    host.style.top = '14px';
     host.style.left = '50%';
     host.style.transform = 'translateX(-50%)';
     host.style.zIndex = '8600';
@@ -1007,6 +1008,7 @@
   function renderSaveButton(){
     const host = ensureSaveHost();
     const entry = buildCurrentDanceEntry();
+    host.style.bottom = state.chatOpen ? '92px' : '18px';
     const hasSession = !!(state.session && state.session.credential);
     if (!entry) { host.style.display='none'; host.innerHTML=''; return; }
     const dirty = hasUnsavedChanges();
@@ -1022,29 +1024,55 @@
     });
   }
 
+  function localSiteHelp(prompt){
+    const text = String(prompt || '').toLowerCase();
+    if (!text) return 'Try asking where to save, how sign-in works, how featuring works, or what tab to use.';
+    if (text.includes('save') || text.includes('changes')) return state.session && state.session.credential ? 'Use Save Changes at the top to lock the newest version into your Google-linked cloud save. Your latest signed-in dance also auto-syncs in the background.' : 'Use Save Changes at the top. Sign in with Google first if you want that save to follow you onto other devices.';
+    if (text.includes('feature') || text.includes('badge') || text.includes('bronze') || text.includes('silver') || text.includes('gold')) return 'Use Send to host for featuring. The admin account can approve it, add Bronze, Silver, or Gold, and it will appear in Featured Choreo. Removing a feature takes it back off that public page.';
+    if (text.includes('upload') || text.includes('site')) return 'Use Upload to site to send your dance into the admin moderation queue. The admin can approve it for the site or delete it.';
+    if (text.includes('signin') || text.includes('google') || text.includes('sign in')) return 'Open the Sign In tab and use Sign in with Google. Once signed in, your dances can sync to the backend and the admin tab appears only for the admin email.';
+    if (text.includes('tab') || text.includes('where') || text.includes('go')) return 'Use Build to make or edit a dance, Sheet for the clean sheet view, My Saved Dances for your cloud saves, Featured Choreo for public featured dances, and Sign In for Google saving and moderation actions.';
+    return 'Use Build to create or edit a dance, Save Changes to lock it in, Sign In for Google saving, My Saved Dances for your cloud work, and Featured Choreo to browse featured dances.';
+  }
+
   async function askSiteHelper(question){
     const prompt = String(question || '').trim();
     if (!prompt) return;
     state.chatBusy = true;
     renderSiteHelper();
+    const currentTab = state.activePage || 'main';
+    const payload = {
+      prompt,
+      context: {
+        currentTab,
+        signedIn: !!(state.session && state.session.credential),
+        isAdmin: isAdminSession(),
+        onlineCount: (state.presence && state.presence.onlineCount) || 0
+      }
+    };
     try {
-      const currentTab = state.activePage || 'main';
-      const data = await fetchJson('/api/chatbot/help', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt,
-          context: {
-            currentTab,
-            signedIn: !!(state.session && state.session.credential),
-            isAdmin: isAdminSession(),
-            onlineCount: (state.presence && state.presence.onlineCount) || 0
-          }
-        })
-      });
-      state.chatMessages.push({ role:'assistant', text: String(data.text || 'I could not think of anything useful just then.') });
+      let text = '';
+      try {
+        const data = await fetchJson('/api/chatbot/help', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        text = String(data.text || '').trim();
+      } catch (primaryError) {
+        const backup = await fetchJson('/api/openai/respond', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            system: 'You are the Step By Stepper site helper. Answer briefly and practically. Explain which tab or button to use. Mention Build, Sheet, Sign In, My Saved Dances, Featured Choreo, Save Changes, Send to host for featuring, and Upload to site when useful. Never invent hidden features.',
+            prompt: `Current tab: ${currentTab}\nSigned in: ${payload.context.signedIn ? 'yes' : 'no'}\nAdmin: ${payload.context.isAdmin ? 'yes' : 'no'}\nOnline count: ${payload.context.onlineCount}\nQuestion: ${prompt}`
+          })
+        });
+        text = String(backup.text || '').trim();
+      }
+      state.chatMessages.push({ role:'assistant', text: text || localSiteHelp(prompt) });
     } catch (error) {
-      state.chatMessages.push({ role:'assistant', text: error.message || 'The helper bot could not reach the backend.' });
+      state.chatMessages.push({ role:'assistant', text: localSiteHelp(prompt) });
     } finally {
       state.chatBusy = false;
       renderSiteHelper();
@@ -1066,23 +1094,25 @@
 
   function renderSiteHelper(){
     const host = ensureSiteHelperHost();
+    host.style.right = '14px';
+    host.style.bottom = '20px';
+    host.style.zIndex = '8700';
     if (!state.chatMessages.length) {
       state.chatMessages = [{ role:'assistant', text:'Need help using the site? Ask me what tab to use, how featuring works, or how to save your dance.' }];
     }
     if (!state.chatOpen) {
-      host.innerHTML = `<button type="button" data-chat-open="1" style="border:none;background:#4f46e5;color:#fff;width:58px;height:58px;border-radius:999px;font-size:26px;box-shadow:0 12px 30px rgba(0,0,0,.18);">💬</button>`;
+      host.innerHTML = `<button type="button" data-chat-open="1" aria-label="Open site helper" style="border:none;background:#4f46e5;color:#fff;width:58px;height:58px;border-radius:999px;font-size:26px;box-shadow:0 12px 30px rgba(0,0,0,.18);">💬</button>`;
       host.querySelector('[data-chat-open="1"]').addEventListener('click', ()=>{ state.chatOpen = true; renderSiteHelper(); });
       return;
     }
-    const messages = state.chatMessages.slice(-8).map(msg => `<div style="align-self:${msg.role==='user'?'flex-end':'stretch'};max-width:100%;background:${msg.role==='user'?'#4f46e5':'#ffffff'};color:${msg.role==='user'?'#ffffff':'#111827'};border:1px solid rgba(79,70,229,.12);padding:.75rem .85rem;border-radius:18px;font-size:14px;line-height:1.45;box-shadow:0 8px 24px rgba(0,0,0,.08);">${escapeHtml(msg.text)}</div>`).join('');
-    host.innerHTML = `<div style="width:min(360px, calc(100vw - 24px));background:#f8fafc;border:1px solid rgba(99,102,241,.16);border-radius:24px;box-shadow:0 18px 40px rgba(0,0,0,.18);overflow:hidden;"><div style="padding:.9rem 1rem;background:#4f46e5;color:#fff;display:flex;align-items:center;gap:.6rem;"><div style="font-weight:900;">Site helper</div><button type="button" data-chat-close="1" style="margin-left:auto;border:none;background:rgba(255,255,255,.18);color:#fff;border-radius:999px;padding:.35rem .65rem;font-weight:900;">Close</button></div><div data-chat-messages="1" style="padding:1rem;display:flex;flex-direction:column;gap:.7rem;max-height:320px;overflow:auto;">${messages}${state.chatBusy ? '<div style="font-size:13px;color:#6b7280;">Thinking…</div>' : ''}</div><form data-chat-form="1" style="padding:0 1rem 1rem;display:flex;gap:.6rem;"><input data-chat-input="1" type="text" placeholder="Ask where to go or what to press" value="${escapeHtml(state.chatDraft || '')}" style="flex:1;border:1px solid rgba(99,102,241,.18);border-radius:999px;padding:.8rem 1rem;background:#fff;" /><button type="submit" style="border:none;background:#4f46e5;color:#fff;border-radius:999px;padding:.8rem 1rem;font-weight:900;">Send</button></form></div>`;
+    const messages = state.chatMessages.slice(-10).map(msg => `<div style="align-self:${msg.role==='user'?'flex-end':'stretch'};max-width:100%;background:${msg.role==='user'?'#4f46e5':'#ffffff'};color:${msg.role==='user'?'#ffffff':'#111827'};border:1px solid rgba(79,70,229,.12);padding:.75rem .85rem;border-radius:18px;font-size:14px;line-height:1.45;box-shadow:0 8px 24px rgba(0,0,0,.08);word-break:break-word;">${escapeHtml(msg.text)}</div>`).join('');
+    host.innerHTML = `<div style="width:min(380px, calc(100vw - 24px));max-width:calc(100vw - 24px);background:#f8fafc;border:1px solid rgba(99,102,241,.16);border-radius:24px;box-shadow:0 18px 40px rgba(0,0,0,.18);overflow:hidden;"><div style="padding:.9rem 1rem;background:#4f46e5;color:#fff;display:flex;align-items:center;gap:.6rem;"><div style="font-weight:900;">Site helper</div><button type="button" data-chat-close="1" style="margin-left:auto;border:none;background:rgba(255,255,255,.18);color:#fff;border-radius:999px;padding:.35rem .65rem;font-weight:900;">Close</button></div><div data-chat-messages="1" style="padding:1rem;display:flex;flex-direction:column;gap:.7rem;max-height:min(45vh, 340px);overflow:auto;overscroll-behavior:contain;">${messages}${state.chatBusy ? '<div style="font-size:13px;color:#6b7280;">Thinking…</div>' : ''}</div><form data-chat-form="1" style="padding:0 1rem 1rem;display:flex;gap:.6rem;align-items:center;"><input data-chat-input="1" type="text" autocomplete="off" autocapitalize="sentences" spellcheck="true" placeholder="Ask where to go or what to press" value="${escapeHtml(state.chatDraft || '')}" style="flex:1;border:1px solid rgba(99,102,241,.18);border-radius:999px;padding:.9rem 1rem;background:#fff;font-size:16px;" /><button type="submit" style="border:none;background:#4f46e5;color:#fff;border-radius:999px;padding:.85rem 1rem;font-weight:900;white-space:nowrap;">Send</button></form></div>`;
     const list = host.querySelector('[data-chat-messages="1"]');
     if (list) list.scrollTop = list.scrollHeight;
     host.querySelector('[data-chat-close="1"]').addEventListener('click', ()=>{ state.chatOpen = false; renderSiteHelper(); });
     const input = host.querySelector('[data-chat-input="1"]');
     if (input) {
       input.addEventListener('input', ()=>{ state.chatDraft = input.value; });
-      try { input.focus({ preventScroll:true }); } catch {}
     }
     host.querySelector('[data-chat-form="1"]').addEventListener('submit', (event)=>{
       event.preventDefault();
@@ -1102,7 +1132,7 @@
       host.id = 'stepper-google-quick-actions';
       host.style.position = 'fixed';
       host.style.right = '14px';
-      host.style.bottom = '18px';
+      host.style.bottom = state.chatOpen ? '92px' : '18px';
       host.style.zIndex = '8500';
       document.body.appendChild(host);
     }
