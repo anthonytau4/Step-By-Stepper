@@ -1,17 +1,17 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <script>
-  window.STEPPER_API_BASE = window.STEPPER_API_BASE || (
-    location.hostname === "localhost" || location.hostname === "127.0.0.1"
-      ? "http://localhost:3000"
-      : "https://step-by-stepper.onrender.com/"
-  );
-</script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#111827" />
     <title>Step by Stepper</title>
+    <script>
+  window.STEPPER_API_BASE = window.STEPPER_API_BASE || (
+    location.hostname === "localhost" || location.hostname === "127.0.0.1"
+      ? "http://localhost:3000"
+      : "https://api.step-by-stepper.com"
+  );
+</script>
     <link rel="icon" href="./favicon.ico" sizes="any" />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
@@ -1681,7 +1681,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     `;
   }
 
-function getGoogleFrontendProfile(){
+  function getGoogleFrontendProfile(){
   const profile = readJson(GOOGLE_FRONTEND_KEY, null);
   if (!profile || typeof profile !== 'object') return null;
   const email = String(profile.email || '').trim();
