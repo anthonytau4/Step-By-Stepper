@@ -16,6 +16,7 @@
   const ADMIN_TAB_ID = 'stepper-google-admin-tab';
   const ADMIN_EMAIL = 'anthonytau4@gmail.com';
   const DEFAULT_RENDER_SERVICE_ID = 'srv-d6ss4295pdvs73e1iifg';
+  const FALLBACK_GOOGLE_CLIENT_ID = '1038282546217-a7qv2i1puevmtjf38f6sv761vt7he26s.apps.googleusercontent.com';
   const SYNC_INTERVAL_MS = 6000;
   const PRESENCE_INTERVAL_MS = 30000;
   const FEATURED_SYNC_INTERVAL_MS = 18000;
@@ -416,9 +417,10 @@
     } catch (error) {
       state.config = {
         ok: false,
-        googleEnabled: false,
-        googleClientId: '',
-        error: error.message || 'Could not reach backend.'
+        googleEnabled: !!FALLBACK_GOOGLE_CLIENT_ID,
+        googleClientId: FALLBACK_GOOGLE_CLIENT_ID,
+        error: error.message || 'Could not reach backend.',
+        source: 'frontend-fallback'
       };
       return state.config;
     } finally {
@@ -536,28 +538,29 @@
     if (!container) return;
     const theme = themeClasses();
     container.innerHTML = '';
-    if (!state.config || !state.config.googleEnabled || !state.config.googleClientId) {
+    const effectiveClientId = (state.config && state.config.googleClientId) || FALLBACK_GOOGLE_CLIENT_ID;
+    if (!state.config || !(state.config.googleEnabled || effectiveClientId) || !effectiveClientId) {
       container.innerHTML = `
         <button type="button" disabled class="stepper-google-cta ${theme.button}" style="width:280px;max-width:100%;opacity:.65;cursor:not-allowed">Sign in with Google</button>
-        <p class="mt-3 text-sm ${theme.subtle}">Google sign-in is still loading.</p>
+        <p class="mt-3 text-sm ${theme.subtle}">Google sign-in is not configured yet.</p>
       `;
       return;
     }
     try {
       await ensureGsiLoaded();
       if (!(window.google && window.google.accounts && window.google.accounts.id)) {
-        container.innerHTML = `<p class="text-sm ${theme.subtle}">Google sign-in could not load right now.</p>`;
+        container.innerHTML = `<p class="text-sm ${theme.subtle}">Google sign-in could not load right now. Check that the Google script is allowed on this device.</p>`;
         return;
       }
-      if (state.gisClientId !== state.config.googleClientId) {
+      if (state.gisClientId !== effectiveClientId) {
         window.google.accounts.id.initialize({
-          client_id: state.config.googleClientId,
+          client_id: effectiveClientId,
           callback: handleGoogleCredential,
           auto_select: false,
           cancel_on_tap_outside: true,
           use_fedcm_for_prompt: true
         });
-        state.gisClientId = state.config.googleClientId;
+        state.gisClientId = effectiveClientId;
       }
       window.google.accounts.id.renderButton(container, {
         type: 'standard',
