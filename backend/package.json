@@ -1,6 +1,6 @@
 {
   "name": "step-by-stepper-backend",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,6 +11,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
+    "google-auth-library": "^10.5.0",
     "openai": "^4.104.0"
   }
 }
