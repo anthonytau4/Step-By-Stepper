@@ -304,11 +304,19 @@
     nativeHost.style.display = 'none';
   }
 
+  function showNativeExtraHost(){
+    const nativeHost = document.getElementById('stepper-extra-page-host');
+    if (!nativeHost) return;
+    nativeHost.hidden = false;
+    nativeHost.style.display = '';
+  }
+
   function closePages(){
     state.activePage = null;
     const host = ensureHost();
     host.hidden = true;
     host.style.display = 'none';
+    showNativeExtraHost();
     if (state.ui.mainEl) state.ui.mainEl.style.display = '';
     if (state.ui.footerWrap) state.ui.footerWrap.style.display = '';
     updateTabButtons();
@@ -503,11 +511,21 @@
   async function renderGoogleButton(){
     const container = document.getElementById('stepper-google-button-slot');
     if (!container) return;
+    const theme = themeClasses();
     container.innerHTML = '';
-    if (!state.config || !state.config.googleEnabled || !state.config.googleClientId) return;
+    if (!state.config || !state.config.googleEnabled || !state.config.googleClientId) {
+      container.innerHTML = `
+        <button type="button" disabled class="stepper-google-cta ${theme.button}" style="width:280px;max-width:100%;opacity:.65;cursor:not-allowed">Sign in with Google</button>
+        <p class="mt-3 text-sm ${theme.subtle}">Google sign-in is not ready on the backend yet.</p>
+      `;
+      return;
+    }
     try {
       await ensureGsiLoaded();
-      if (!(window.google && window.google.accounts && window.google.accounts.id)) return;
+      if (!(window.google && window.google.accounts && window.google.accounts.id)) {
+        container.innerHTML = `<p class="text-sm ${theme.subtle}">Google sign-in could not load right now.</p>`;
+        return;
+      }
       if (state.gisClientId !== state.config.googleClientId) {
         window.google.accounts.id.initialize({
           client_id: state.config.googleClientId,
@@ -527,7 +545,7 @@
         width: 280
       });
     } catch (error) {
-      container.innerHTML = `<p class="text-sm ${themeClasses().subtle}">${escapeHtml(error.message || 'Google button could not load.')}</p>`;
+      container.innerHTML = `<p class="text-sm ${theme.subtle}">${escapeHtml(error.message || 'Google button could not load.')}</p>`;
     }
   }
 
@@ -695,78 +713,71 @@
     const session = state.session;
     const profile = session && session.profile ? session.profile : null;
     const backendError = state.config && state.config.error ? state.config.error : '';
-    const members = Array.isArray(state.presence && state.presence.members) ? state.presence.members.slice(0, 6) : [];
-    const signedInCard = profile ? `
-      <div class="rounded-3xl border p-5 sm:p-6 ${theme.soft}">
-        <div class="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <div class="text-lg font-black tracking-tight">Signed in as ${escapeHtml(profile.name || profile.email || 'Member')}</div>
-            <p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(profile.email || '')}</p>
-            <p class="mt-3 text-sm ${theme.subtle}">This signed-in account now auto-syncs the dance you are building into the backend registry so the admin page can see it.</p>
-          </div>
-          <div class="stepper-google-badge-row">
-            ${isAdminSession() ? `<span class="stepper-google-pill ${theme.orange}">${iconShield()} Admin</span>` : ''}
-            <button type="button" data-stepper-action="signout" class="stepper-google-cta stepper-google-danger ${theme.button}">Sign out</button>
-          </div>
-        </div>
-      </div>
-    ` : `
-      <div class="rounded-3xl border p-5 sm:p-6 ${theme.soft}">
-        <div class="flex items-start gap-3">
-          <span class="stepper-extra-tab-icon">${iconUser()}</span>
-          <div>
-            <div class="text-lg font-black tracking-tight">Sign in with Google</div>
-            <p class="mt-2 text-sm leading-relaxed ${theme.subtle}">Sign in to show live member presence and to auto-store the dances you make in the backend registry. The admin tab only appears when <strong>${escapeHtml(ADMIN_EMAIL)}</strong> is the signed-in account.</p>
-            <p class="mt-3 text-sm ${theme.subtle}">You do not type the Google Client ID into this page. That stays on the backend only.</p>
-          </div>
-        </div>
-        <div id="stepper-google-button-slot" class="stepper-google-google-btn mt-5"></div>
-      </div>
-    `;
-
-    const connectionStatus = state.config && state.config.googleEnabled
-      ? `<p class="mt-3 text-sm ${theme.subtle}">Google sign-in is enabled on this backend.</p>`
-      : `<p class="mt-3 text-sm ${theme.subtle}">Google sign-in is still waiting on the backend Google Client ID. This page does not ask you to type that ID by hand.</p>`;
+    const onlineCount = (state.presence && state.presence.onlineCount) || 0;
+    const setupTrouble = !!backendError || !(state.config && state.config.googleEnabled);
 
     page.className = `rounded-3xl border shadow-sm overflow-hidden ${theme.shell}`;
-    page.innerHTML = `
-      <div class="px-6 py-5 border-b ${theme.panel}">
-        <h2 class="text-2xl font-black tracking-tight uppercase flex items-center gap-2"><span class="stepper-extra-tab-icon">${iconUser()}</span> Sign In</h2>
-      </div>
-      <div class="p-6 sm:p-8 space-y-5">
-        <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}">
-          <div class="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <div class="text-lg font-black tracking-tight flex items-center gap-2"><span class="stepper-extra-tab-icon">${iconMembers()}</span> Members online</div>
-              <p class="mt-1 text-sm ${theme.subtle}">Signed-in members seen recently by the backend.</p>
+
+    if (profile) {
+      page.innerHTML = `
+        <div class="px-6 py-5 border-b ${theme.panel}">
+          <h2 class="text-2xl font-black tracking-tight uppercase flex items-center gap-2"><span class="stepper-extra-tab-icon">${iconUser()}</span> Sign In</h2>
+        </div>
+        <div class="p-6 sm:p-8">
+          <div class="mx-auto max-w-3xl rounded-3xl border p-5 sm:p-6 ${theme.soft}">
+            <div class="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div class="text-lg font-black tracking-tight">Signed in as ${escapeHtml(profile.name || profile.email || 'Member')}</div>
+                <p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(profile.email || '')}</p>
+                <p class="mt-3 text-sm ${theme.subtle}">Your dances now sync into the backend registry automatically.</p>
+              </div>
+              <div class="stepper-google-badge-row">
+                <span class="stepper-google-pill ${theme.orange}"><span data-stepper-online-count>${escapeHtml(onlineCount)}</span> online</span>
+                ${isAdminSession() ? `<span class="stepper-google-pill ${theme.orange}">${iconShield()} Admin</span>` : ''}
+                <button type="button" data-stepper-action="signout" class="stepper-google-cta stepper-google-danger ${theme.button}">Sign out</button>
+              </div>
             </div>
-            <div class="stepper-google-pill ${theme.orange}"><span data-stepper-online-count>${escapeHtml((state.presence && state.presence.onlineCount) || 0)}</span> online</div>
+            ${setupTrouble ? `
+              <details class="mt-5 rounded-2xl border p-4 ${theme.panel}">
+                <summary class="cursor-pointer text-sm font-black uppercase tracking-widest">Connection help</summary>
+                ${backendError ? `<p class="mt-3 text-sm text-red-500">${escapeHtml(backendError)}</p>` : ''}
+                ${!(state.config && state.config.googleEnabled) ? `<p class="mt-3 text-sm ${theme.subtle}">Google sign-in is not ready on the backend yet.</p>` : ''}
+                <div class="mt-4 flex flex-col sm:flex-row gap-3">
+                  <input id="stepper-api-base-input" class="stepper-google-input ${theme.button}" value="${escapeHtml(state.apiBase)}" placeholder="https://your-backend.onrender.com" />
+                  <button type="button" data-stepper-action="save-api-base" class="stepper-google-cta ${theme.button}">Save backend URL</button>
+                </div>
+              </details>
+            ` : ''}
           </div>
-          ${members.length ? `<div class="stepper-google-muted-list mt-5">${members.map(member => `
-            <div class="stepper-google-member-item text-sm">
-              <span class="font-semibold">${escapeHtml(member.name || member.email || 'Member')}</span>
-              <span class="${theme.subtle}">${escapeHtml(formatDate(member.lastSeenAt))}</span>
-            </div>
-          `).join('')}</div>` : `<p class="mt-4 text-sm ${theme.subtle}">Nobody signed in recently, or the backend is not reachable yet.</p>`}
         </div>
-        <div class="rounded-3xl border p-5 sm:p-6 ${theme.soft}">
-          <div class="text-lg font-black tracking-tight">Connection</div>
-          <p class="mt-2 text-sm ${theme.subtle}">This build now has your Render service ID saved into it for reference: <strong>${escapeHtml(DEFAULT_RENDER_SERVICE_ID)}</strong>.</p>
-          <p class="mt-2 text-sm ${theme.subtle}">The Sign In page is now Google-only on the surface. The backend URL box is tucked away below so you do not have to stare at setup knobs unless something is broken.</p>
-          ${connectionStatus}
-          ${backendError ? `<p class="mt-3 text-sm text-red-500">${escapeHtml(backendError)}</p>` : ``}
-          <details class="mt-4 rounded-2xl border p-4 ${theme.panel}">
-            <summary class="cursor-pointer text-sm font-black uppercase tracking-widest">Advanced backend connection</summary>
-            <p class="mt-3 text-sm ${theme.subtle}">Only use this if your frontend is hosted separately from the backend and same-origin is not enough. A Render service ID is not itself a public URL.</p>
-            <div class="mt-4 flex flex-col sm:flex-row gap-3">
-              <input id="stepper-api-base-input" class="stepper-google-input ${theme.button}" value="${escapeHtml(state.apiBase)}" placeholder="https://your-backend.onrender.com" />
-              <button type="button" data-stepper-action="save-api-base" class="stepper-google-cta ${theme.button}">Save backend URL</button>
-            </div>
-          </details>
+      `;
+    } else {
+      page.innerHTML = `
+        <div class="px-6 py-5 border-b ${theme.panel}">
+          <h2 class="text-2xl font-black tracking-tight uppercase flex items-center gap-2"><span class="stepper-extra-tab-icon">${iconUser()}</span> Sign In</h2>
         </div>
-        ${signedInCard}
-      </div>
-    `;
+        <div class="p-6 sm:p-8">
+          <div class="mx-auto max-w-2xl rounded-3xl border p-6 sm:p-8 ${theme.soft}">
+            <div class="text-center">
+              <div class="text-2xl font-black tracking-tight">Sign in with Google</div>
+              <p class="mt-3 text-sm leading-relaxed ${theme.subtle}">Use your Google account to sign in. The admin tab appears only for <strong>${escapeHtml(ADMIN_EMAIL)}</strong>.</p>
+            </div>
+            <div id="stepper-google-button-slot" class="stepper-google-google-btn mt-6 flex justify-center"></div>
+            ${setupTrouble ? `
+              <details class="mt-5 rounded-2xl border p-4 ${theme.panel}">
+                <summary class="cursor-pointer text-sm font-black uppercase tracking-widest">Connection help</summary>
+                ${backendError ? `<p class="mt-3 text-sm text-red-500">${escapeHtml(backendError)}</p>` : ''}
+                ${!(state.config && state.config.googleEnabled) ? `<p class="mt-3 text-sm ${theme.subtle}">Google sign-in is not ready on the backend yet.</p>` : ''}
+                <div class="mt-4 flex flex-col sm:flex-row gap-3">
+                  <input id="stepper-api-base-input" class="stepper-google-input ${theme.button}" value="${escapeHtml(state.apiBase)}" placeholder="https://your-backend.onrender.com" />
+                  <button type="button" data-stepper-action="save-api-base" class="stepper-google-cta ${theme.button}">Save backend URL</button>
+                </div>
+              </details>
+            ` : ''}
+          </div>
+        </div>
+      `;
+    }
 
     const saveBtn = page.querySelector('[data-stepper-action="save-api-base"]');
     const apiInput = page.querySelector('#stepper-api-base-input');
@@ -789,6 +800,7 @@
     }
 
     renderGoogleButton();
+    renderPresenceOnly();
   }
 
   function renderAdminPage(){
