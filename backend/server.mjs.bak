@@ -74,21 +74,8 @@ async function stripeRequest(endpoint, params = null, method = 'POST') {
 function getUserMembership(bucket, profile = null) {
   const current = bucket && bucket.membership && typeof bucket.membership === 'object' ? bucket.membership : {};
   const admin = normalizeEmail(profile?.email || bucket?.profile?.email) === adminEmail;
-  const role = String(bucket?.role || '').trim().toLowerCase();
   if (admin) {
     return { isPremium: true, status: 'active', plan: 'admin', source: 'admin', updatedAt: new Date().toISOString() };
-  }
-  if (role === 'moderator') {
-    return {
-      isPremium: true,
-      status: 'active',
-      plan: 'moderator',
-      source: 'moderator',
-      updatedAt: String(current.updatedAt || '').trim() || new Date().toISOString(),
-      stripeCustomerId: String(current.stripeCustomerId || '').trim(),
-      stripeSubscriptionId: String(current.stripeSubscriptionId || '').trim(),
-      checkoutSessionId: String(current.checkoutSessionId || '').trim()
-    };
   }
   return {
     isPremium: !!current.isPremium,
@@ -136,8 +123,7 @@ function emptyDb() {
     users: {},
     featuredChoreo: [],
     danceRegistry: [],
-    submissions: [],
-    moderatorApplications: []
+    submissions: []
   };
 }
 
@@ -160,7 +146,6 @@ async function readDb() {
     if (!Array.isArray(parsed.featuredChoreo)) parsed.featuredChoreo = [];
     if (!Array.isArray(parsed.danceRegistry)) parsed.danceRegistry = [];
     if (!Array.isArray(parsed.submissions)) parsed.submissions = [];
-    if (!Array.isArray(parsed.moderatorApplications)) parsed.moderatorApplications = [];
     return parsed;
   } catch {
     return emptyDb();
@@ -187,10 +172,6 @@ function pickProfile(claims) {
 
 function isAdminProfile(profile) {
   return normalizeEmail(profile?.email) === adminEmail;
-}
-
-function isModeratorBucket(bucket) {
-  return String(bucket?.role || '').trim().toLowerCase() === 'moderator';
 }
 
 function readBearerToken(req) {
@@ -250,28 +231,6 @@ async function requireAdmin(req, res, next) {
   });
 }
 
-async function requireModerator(req, res, next) {
-  try {
-    const token = readBearerToken(req);
-    const claims = await verifyGoogleToken(token);
-    req.stepperUser = pickProfile(claims);
-    req.stepperClaims = claims;
-    req.stepperToken = token;
-    const db = await readDb();
-    const key = userKeyFromClaims(claims);
-    const bucket = touchUser(db, req.stepperUser, key);
-    await writeDb(db);
-    if (isAdminProfile(req.stepperUser) || isModeratorBucket(bucket)) {
-      req.stepperUserBucket = bucket;
-      next();
-      return;
-    }
-    res.status(403).json({ ok: false, error: 'Moderator access only.' });
-  } catch (error) {
-    res.status(error.status || 401).json({ ok: false, error: error?.message || 'Google authentication failed.' });
-  }
-}
-
 function sanitizeSnapshot(snapshot) {
   const safe = snapshot && typeof snapshot === "object" ? snapshot : {};
   return {
@@ -280,53 +239,10 @@ function sanitizeSnapshot(snapshot) {
   };
 }
 
-function sanitizePreviewSections(value) {
-  if (!Array.isArray(value)) return [];
-  return value.slice(0, 12).map((section, index) => {
-    const lines = Array.isArray(section?.lines)
-      ? section.lines.slice(0, 16).map((line) => String(line || '').trim()).filter(Boolean)
-      : [];
-    return {
-      name: String(section?.name || `Section ${index + 1}`).trim().slice(0, 120),
-      subtitle: String(section?.subtitle || '').trim().slice(0, 200),
-      lines
-    };
-  }).filter((section) => section.lines.length);
-}
-
-function buildStoredJsonPayload(entryLike) {
-  const safe = entryLike && typeof entryLike === 'object' ? entryLike : {};
-  const snapshot = sanitizeSnapshot(safe.snapshot);
-  const payload = {
-    schemaVersion: 2,
-    savedAt: new Date().toISOString(),
-    dance: {
-      id: String(safe.id || '').trim().slice(0, 160),
-      title: String(safe.title || 'Untitled Dance').trim().slice(0, 200),
-      choreographer: String(safe.choreographer || 'Uncredited').trim().slice(0, 200),
-      country: String(safe.country || '').trim().slice(0, 120),
-      level: String(safe.level || 'Unlabelled').trim().slice(0, 60),
-      counts: String(safe.counts || '-').trim().slice(0, 40),
-      walls: String(safe.walls || '-').trim().slice(0, 40),
-      music: String(safe.music || '').trim().slice(0, 240),
-      sections: Number.isFinite(Number(safe.sections)) ? Number(safe.sections) : 0,
-      steps: Number.isFinite(Number(safe.steps)) ? Number(safe.steps) : 0,
-      ownerKey: String(safe.ownerKey || '').trim(),
-      ownerEmail: String(safe.ownerEmail || '').trim(),
-      ownerName: String(safe.ownerName || '').trim(),
-      ownerPicture: String(safe.ownerPicture || '').trim(),
-      updatedAt: String(safe.updatedAt || new Date().toISOString()).trim()
-    },
-    previewSections: sanitizePreviewSections(safe.previewSections),
-    snapshot
-  };
-  return JSON.stringify(payload);
-}
-
 function sanitizeCloudEntry(entry, ownerProfile = null, ownerKey = "") {
   const safe = entry && typeof entry === "object" ? entry : {};
   const snapshot = sanitizeSnapshot(safe.snapshot);
-  const base = {
+  return {
     id: String(safe.id || `${Date.now()}`).trim().slice(0, 160),
     title: String(safe.title || "Untitled Dance").trim().slice(0, 200),
     choreographer: String(safe.choreographer || "Uncredited").trim().slice(0, 200),
@@ -338,19 +254,11 @@ function sanitizeCloudEntry(entry, ownerProfile = null, ownerKey = "") {
     sections: Number.isFinite(Number(safe.sections)) ? Number(safe.sections) : 0,
     steps: Number.isFinite(Number(safe.steps)) ? Number(safe.steps) : 0,
     updatedAt: new Date().toISOString(),
-    ownerKey: String(ownerKey || safe.ownerKey || "").trim(),
+    ownerKey: String(ownerKey || "").trim(),
     ownerEmail: String(ownerProfile?.email || safe.ownerEmail || "").trim(),
     ownerName: String(ownerProfile?.name || safe.ownerName || "").trim(),
     ownerPicture: String(ownerProfile?.picture || safe.ownerPicture || "").trim(),
     snapshot
-  };
-  const previewSections = sanitizePreviewSections(safe.previewSections).length
-    ? sanitizePreviewSections(safe.previewSections)
-    : buildPreviewSections({ snapshot });
-  return {
-    ...base,
-    previewSections,
-    jsonPayload: String(safe.jsonPayload || '').trim() || buildStoredJsonPayload({ ...base, previewSections })
   };
 }
 
@@ -435,9 +343,7 @@ function buildFeaturedItemFromRegistry(entry, featuredBy, badgeTone, badgeLabel)
       email: String(featuredBy?.email || "").trim(),
       name: String(featuredBy?.name || featuredBy?.email || "").trim()
     },
-    snapshot: sanitizeSnapshot(entry?.snapshot),
-    previewSections: sanitizePreviewSections(entry?.previewSections).length ? sanitizePreviewSections(entry?.previewSections) : buildPreviewSections(entry),
-    jsonPayload: String(entry?.jsonPayload || '').trim() || buildStoredJsonPayload(entry)
+    previewSections: buildPreviewSections(entry)
   };
 }
 
@@ -456,7 +362,6 @@ function touchUser(db, profile, userKey) {
     lastSeenAt: new Date().toISOString(),
     cloudSaves: Array.isArray(bucket.cloudSaves) ? bucket.cloudSaves : [],
     notifications: Array.isArray(bucket.notifications) ? bucket.notifications : [],
-    role: isModeratorBucket(bucket) ? 'moderator' : '',
     membership: getUserMembership(bucket, profile)
   };
   return db.users[key];
@@ -523,20 +428,8 @@ function upsertSubmission(db, payload) {
     requestType: sanitizeRequestType(entry.requestType),
     status: String(entry.status || "pending").trim(),
     createdAt: entry.createdAt || new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    snapshot: sanitizeSnapshot(entry.snapshot),
-    previewSections: sanitizePreviewSections(entry.previewSections),
-    jsonPayload: String(entry.jsonPayload || '').trim(),
-    moderatorApproved: !!entry.moderatorApproved,
-    moderatorApprovedAt: entry.moderatorApprovedAt || null,
-    moderatorApprovedBy: entry.moderatorApprovedBy && typeof entry.moderatorApprovedBy === 'object' ? {
-      email: String(entry.moderatorApprovedBy.email || '').trim(),
-      name: String(entry.moderatorApprovedBy.name || '').trim()
-    } : null,
-    moderatorReviewStatus: String(entry.moderatorReviewStatus || '').trim(),
-    moderatorNote: String(entry.moderatorNote || '').trim().slice(0, 800)
+    updatedAt: new Date().toISOString()
   };
-  if (!item.jsonPayload) item.jsonPayload = buildStoredJsonPayload(item);
   const list = Array.isArray(db.submissions) ? db.submissions : [];
   const index = list.findIndex(row => row && row.registryId === item.registryId && row.requestType === item.requestType && row.status === "pending");
   if (index >= 0) list[index] = { ...list[index], ...item, id: list[index].id || item.id, updatedAt: new Date().toISOString() };
@@ -616,8 +509,7 @@ app.post("/api/auth/google", async (req, res) => {
     const db = await readDb();
     touchUser(db, profile, userKeyFromClaims(claims));
     await writeDb(db);
-    const bucket = db.users[userKeyFromClaims(claims)] || null;
-    res.json({ ok: true, profile, isAdmin: isAdminProfile(profile), isModerator: isModeratorBucket(bucket), role: isAdminProfile(profile) ? 'admin' : (isModeratorBucket(bucket) ? 'moderator' : 'member'), onlineCount: getOnlineUsers(db).length, membership: bucket?.membership || getUserMembership(null, profile) });
+    res.json({ ok: true, profile, isAdmin: isAdminProfile(profile), onlineCount: getOnlineUsers(db).length, membership: db.users[userKeyFromClaims(claims)]?.membership || getUserMembership(null, profile) });
   } catch (error) {
     res.status(error.status || 401).json({ ok: false, error: error?.message || "Google sign-in failed." });
   }
@@ -627,8 +519,7 @@ app.get("/api/auth/me", requireGoogleUser, async (req, res) => {
   const db = await readDb();
   touchUser(db, req.stepperUser, userKeyFromClaims(req.stepperClaims));
   await writeDb(db);
-  const bucket = db.users[userKeyFromClaims(req.stepperClaims)] || null;
-  res.json({ ok: true, profile: req.stepperUser, isAdmin: isAdminProfile(req.stepperUser), isModerator: isModeratorBucket(bucket), role: isAdminProfile(req.stepperUser) ? 'admin' : (isModeratorBucket(bucket) ? 'moderator' : 'member'), onlineCount: getOnlineUsers(db).length, membership: bucket?.membership || getUserMembership(null, req.stepperUser) });
+  res.json({ ok: true, profile: req.stepperUser, isAdmin: isAdminProfile(req.stepperUser), onlineCount: getOnlineUsers(db).length, membership: db.users[userKeyFromClaims(req.stepperClaims)]?.membership || getUserMembership(null, req.stepperUser) });
 });
 
 app.get("/api/presence", async (_req, res) => {
@@ -642,8 +533,7 @@ app.post("/api/presence/heartbeat", requireGoogleUser, async (req, res) => {
   touchUser(db, req.stepperUser, userKeyFromClaims(req.stepperClaims));
   await writeDb(db);
   const onlineUsers = getOnlineUsers(db);
-  const bucket = db.users[userKeyFromClaims(req.stepperClaims)] || null;
-  res.json({ ok: true, onlineCount: onlineUsers.length, members: onlineUsers, isAdmin: isAdminProfile(req.stepperUser), isModerator: isModeratorBucket(bucket), role: isAdminProfile(req.stepperUser) ? 'admin' : (isModeratorBucket(bucket) ? 'moderator' : 'member') });
+  res.json({ ok: true, onlineCount: onlineUsers.length, members: onlineUsers, isAdmin: isAdminProfile(req.stepperUser) });
 });
 
 app.get("/api/cloud-saves", requireGoogleUser, async (req, res) => {
@@ -703,10 +593,7 @@ app.post("/api/submissions/request", requireGoogleUser, async (req, res) => {
     choreographer: source.choreographer,
     requestType,
     status: 'pending',
-    priority: isPremiumUser(db.users[key], req.stepperUser),
-    snapshot: source.snapshot,
-    previewSections: source.previewSections,
-    jsonPayload: source.jsonPayload
+    priority: isPremiumUser(db.users[key], req.stepperUser)
   });
   await writeDb(db);
   res.json({ ok: true, submission });
@@ -750,8 +637,7 @@ app.get("/api/admin/dances", requireAdmin, async (_req, res) => {
     .map(item => ({
       ...item,
       isFeatured: featuredIds.has(String(item?.registryId || "")),
-      previewSections: sanitizePreviewSections(item?.previewSections).length ? sanitizePreviewSections(item?.previewSections) : buildPreviewSections(item),
-      jsonPayload: String(item?.jsonPayload || '').trim() || buildStoredJsonPayload(item)
+      previewSections: buildPreviewSections(item)
     }));
   res.json({ ok: true, items, featuredIds: Array.from(featuredIds), adminEmail, onlineCount: getOnlineUsers(db).length });
 });
@@ -768,16 +654,15 @@ app.get("/api/admin/submissions", requireAdmin, async (_req, res) => {
         ...item,
         title: source?.title || item?.title,
         choreographer: source?.choreographer || item?.choreographer || '',
-        country: source?.country || item?.country || '',
-        level: source?.level || item?.level || 'Unlabelled',
-        counts: source?.counts || item?.counts || '-',
-        walls: source?.walls || item?.walls || '-',
-        sections: source?.sections || item?.sections || 0,
-        steps: source?.steps || item?.steps || 0,
+        country: source?.country || '',
+        level: source?.level || 'Unlabelled',
+        counts: source?.counts || '-',
+        walls: source?.walls || '-',
+        sections: source?.sections || 0,
+        steps: source?.steps || 0,
         updatedAt: source?.updatedAt || item?.updatedAt,
-        snapshot: item?.snapshot || source?.snapshot || null,
-        previewSections: sanitizePreviewSections(item?.previewSections).length ? sanitizePreviewSections(item?.previewSections) : (source ? buildPreviewSections(source) : []),
-        jsonPayload: String(item?.jsonPayload || source?.jsonPayload || '').trim() || buildStoredJsonPayload(source || item || {}),
+        snapshot: source?.snapshot || null,
+        previewSections: source ? buildPreviewSections(source) : [],
         isFeatured: featuredIds.has(String(source?.registryId || item?.registryId || '')),
         source
       };
@@ -866,140 +751,13 @@ app.delete("/api/admin/feature/:registryId", requireAdmin, async (req, res) => {
   res.json({ ok: true, registryId });
 });
 
-app.post('/api/moderator/apply', requireGoogleUser, async (req, res) => {
-  const db = await readDb();
-  const key = userKeyFromClaims(req.stepperClaims);
-  const bucket = touchUser(db, req.stepperUser, key);
-  if (isAdminProfile(req.stepperUser) || isModeratorBucket(bucket)) {
-    await writeDb(db);
-    return res.json({ ok: true, alreadyApproved: true, role: isAdminProfile(req.stepperUser) ? 'admin' : 'moderator' });
-  }
-  const list = Array.isArray(db.moderatorApplications) ? db.moderatorApplications : [];
-  const existing = list.find(item => item && item.ownerKey === key && String(item.status || 'pending') === 'pending');
-  if (existing) {
-    await writeDb(db);
-    return res.json({ ok: true, application: existing, alreadyPending: true });
-  }
-  const application = {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    ownerKey: key,
-    ownerEmail: req.stepperUser.email,
-    ownerName: req.stepperUser.name,
-    ownerPicture: req.stepperUser.picture,
-    status: 'pending',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  };
-  list.unshift(application);
-  db.moderatorApplications = list.slice(0, 500);
-  await writeDb(db);
-  res.json({ ok: true, application });
-});
-
-app.get('/api/admin/moderator-applications', requireAdmin, async (_req, res) => {
-  const db = await readDb();
-  const items = (Array.isArray(db.moderatorApplications) ? db.moderatorApplications : [])
-    .filter(item => String(item?.status || 'pending') === 'pending')
-    .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
-  res.json({ ok: true, items });
-});
-
-app.post('/api/admin/moderator-applications/:id/approve', requireAdmin, async (req, res) => {
-  const db = await readDb();
-  const id = String(req.params.id || '').trim();
-  const item = (Array.isArray(db.moderatorApplications) ? db.moderatorApplications : []).find(row => row && row.id === id);
-  if (!item) return res.status(404).json({ ok: false, error: 'Moderator application not found.' });
-  item.status = 'approved';
-  item.updatedAt = new Date().toISOString();
-  const bucket = db.users[item.ownerKey] && typeof db.users[item.ownerKey] === 'object' ? db.users[item.ownerKey] : { profile: { email: item.ownerEmail, name: item.ownerName, picture: item.ownerPicture } };
-  bucket.role = 'moderator';
-  bucket.membership = getUserMembership({ ...bucket, role: 'moderator' }, bucket.profile);
-  db.users[item.ownerKey] = { ...bucket, membership: getUserMembership({ ...bucket, role: 'moderator' }, bucket.profile), role: 'moderator' };
-  pushNotification(db, { userKey: item.ownerKey, email: item.ownerEmail }, {
-    kind: 'Moderator',
-    title: 'Moderator request approved',
-    message: 'You now have moderator access and the premium helper perks, without the Admin tab.'
-  });
-  await writeDb(db);
-  res.json({ ok: true, item, user: db.users[item.ownerKey] });
-});
-
-app.post('/api/admin/moderator-applications/:id/decline', requireAdmin, async (req, res) => {
-  const db = await readDb();
-  const id = String(req.params.id || '').trim();
-  const item = (Array.isArray(db.moderatorApplications) ? db.moderatorApplications : []).find(row => row && row.id === id);
-  if (!item) return res.status(404).json({ ok: false, error: 'Moderator application not found.' });
-  item.status = 'declined';
-  item.updatedAt = new Date().toISOString();
-  pushNotification(db, { userKey: item.ownerKey, email: item.ownerEmail }, {
-    kind: 'Moderator',
-    title: 'Moderator request declined',
-    message: 'The admin declined your moderator request this time.'
-  });
-  await writeDb(db);
-  res.json({ ok: true, item });
-});
-
-app.get('/api/moderator/submissions', requireModerator, async (_req, res) => {
-  const db = await readDb();
-  const registry = Array.isArray(db.danceRegistry) ? db.danceRegistry : [];
-  const items = (Array.isArray(db.submissions) ? db.submissions : [])
-    .filter(item => String(item?.status || 'pending') === 'pending')
-    .map(item => {
-      const source = registry.find(row => row && row.registryId === String(item?.registryId || '').trim()) || null;
-      return {
-        ...item,
-        title: source?.title || item?.title,
-        choreographer: source?.choreographer || item?.choreographer || '',
-        country: source?.country || item?.country || '',
-        level: source?.level || item?.level || 'Unlabelled',
-        counts: source?.counts || item?.counts || '-',
-        walls: source?.walls || item?.walls || '-',
-        sections: source?.sections || item?.sections || 0,
-        steps: source?.steps || item?.steps || 0,
-        updatedAt: source?.updatedAt || item?.updatedAt,
-        snapshot: item?.snapshot || source?.snapshot || null,
-        previewSections: sanitizePreviewSections(item?.previewSections).length ? sanitizePreviewSections(item?.previewSections) : (source ? buildPreviewSections(source) : []),
-        jsonPayload: String(item?.jsonPayload || source?.jsonPayload || '').trim() || buildStoredJsonPayload(source || item || {}),
-        source
-      };
-    })
-    .sort((a, b) => {
-      const ap = a?.priority ? 1 : 0;
-      const bp = b?.priority ? 1 : 0;
-      if (ap !== bp) return bp - ap;
-      return new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0);
-    });
-  res.json({ ok: true, items });
-});
-
-app.post('/api/moderator/submissions/:id/approve', requireModerator, async (req, res) => {
-  const db = await readDb();
-  const id = String(req.params.id || '').trim();
-  const item = (Array.isArray(db.submissions) ? db.submissions : []).find(row => row && row.id === id);
-  if (!item) return res.status(404).json({ ok: false, error: 'Submission not found.' });
-  const decision = String(req.body?.decision || 'approve').trim().toLowerCase() === 'disapprove' ? 'disapprove' : 'approve';
-  const note = String(req.body?.note || '').trim().slice(0, 800);
-  item.moderatorApproved = decision === 'approve';
-  item.moderatorReviewStatus = decision === 'approve' ? 'approved' : 'disapproved';
-  item.moderatorApprovedAt = new Date().toISOString();
-  item.moderatorApprovedBy = {
-    email: String(req.stepperUser?.email || '').trim(),
-    name: String(req.stepperUser?.name || req.stepperUser?.email || '').trim()
-  };
-  item.moderatorNote = note;
-  item.updatedAt = new Date().toISOString();
-  await writeDb(db);
-  res.json({ ok: true, item });
-});
-
 app.get('/api/subscription/status', requireGoogleUser, async (req, res) => {
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);
   const bucket = touchUser(db, req.stepperUser, key);
   await writeDb(db);
   const membership = getUserMembership(bucket, req.stepperUser);
-  res.json({ ok: true, ...membership, role: isAdminProfile(req.stepperUser) ? 'admin' : (isModeratorBucket(bucket) ? 'moderator' : 'member'), isModerator: isModeratorBucket(bucket), stripeEnabled: !!stripeSecretKey, stripePublishableKey });
+  res.json({ ok: true, ...membership, stripeEnabled: !!stripeSecretKey, stripePublishableKey });
 });
 
 app.post('/api/subscription/create-checkout-session', requireGoogleUser, async (req, res) => {
