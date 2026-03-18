@@ -9,6 +9,8 @@
   const SESSION_KEY = 'stepper_google_auth_session_v2';
   const LAST_SAVED_SIGNATURE_KEY = 'stepper_last_saved_signature_v1';
   const API_BASE_KEY = 'stepper_api_base_v1';
+  const ADMIN_DRAFTS_KEY = 'stepper_admin_drafts_v1';
+  const MODERATOR_DRAFTS_KEY = 'stepper_moderator_drafts_v1';
   const SIGNIN_PAGE_ID = 'stepper-google-signin-page';
   const ADMIN_PAGE_ID = 'stepper-google-admin-page';
   const SUBSCRIPTION_PAGE_ID = 'stepper-google-subscription-page';
@@ -49,8 +51,6 @@
     communityGlossaryOpen: false,
     subscription: { isPremium: false, plan: 'free', status: 'free', source: 'unknown' },
     savedDancesUiSignature: '',
-    adminUiDirty: true,
-    adminUiSignature: '',
     suspension: null,
     chatOpen: false,
     chatBusy: false,
@@ -78,6 +78,18 @@
       admin: false,
       feature: false,
       sync: false
+    },
+    render: {
+      adminDataSignature: '',
+      moderatorDataSignature: '',
+      adminUiSignature: '',
+      moderatorUiSignature: '',
+      pendingAdminRender: false,
+      pendingModeratorRender: false
+    },
+    drafts: {
+      admin: readJson(ADMIN_DRAFTS_KEY, {}) || {},
+      moderator: readJson(MODERATOR_DRAFTS_KEY, {}) || {}
     }
   };
 
@@ -410,6 +422,135 @@
       .replace(/'/g, '&#39;');
   }
 
+  function safeStableStringify(value){
+    try {
+      return JSON.stringify(value, (key, inner) => {
+        if (inner && typeof inner === 'object' && !Array.isArray(inner)) {
+          return Object.keys(inner).sort().reduce((acc, currentKey) => {
+            acc[currentKey] = inner[currentKey];
+            return acc;
+          }, {});
+        }
+        return inner;
+      });
+    } catch {
+      return '';
+    }
+  }
+
+  function computeAdminDataSignature(){
+    return safeStableStringify({
+      adminDances: state.adminDances || [],
+      submissions: state.submissions || [],
+      moderatorApplications: state.moderatorApplications || [],
+      activeModerators: state.activeModerators || [],
+      suspensions: state.suspensions || [],
+      securityAlerts: state.securityAlerts || [],
+      glossaryRequests: state.glossaryRequests || [],
+      glossaryApproved: state.glossaryApproved || [],
+      siteMemories: state.siteMemories || [],
+      staffChat: state.staffChat || [],
+      presence: { onlineCount: (state.presence && state.presence.onlineCount) || 0 }
+    });
+  }
+
+  function computeModeratorDataSignature(){
+    return safeStableStringify({
+      moderatorQueue: state.moderatorQueue || [],
+      submissions: state.submissions || [],
+      activeModerators: state.activeModerators || [],
+      moderatorApplications: state.moderatorApplications || [],
+      session: { email: state.session && state.session.profile && state.session.profile.email, isModerator: !!(state.session && state.session.isModerator), role: state.session && state.session.role }
+    });
+  }
+
+  function isInteractiveField(el){
+    return !!(el && el.matches && el.matches('input, textarea, select, [contenteditable]:not([contenteditable="false"])') && !el.disabled && !el.readOnly);
+  }
+
+  function currentProtectedPageName(){
+    return state.activePage === 'admin' ? 'admin' : (state.activePage === 'moderator' ? 'moderator' : '');
+  }
+
+  function fieldDraftKey(el){
+    if (!el) return '';
+    const owner = el.closest('[data-stepper-submission-id], [data-stepper-registry-id], [data-stepper-modapp-id], [data-stepper-active-mod-key], [data-stepper-suspension-key], [data-stepper-site-memory-id], [data-stepper-glossary-request-id], [data-stepper-moderator-id], [data-stepper-staff-chat], [data-stepper-active-moderators], [data-stepper-security-alert-id]');
+    const ownerKey = owner
+      ? Array.from(owner.attributes || []).map(attr => `${attr.name}=${attr.value}`).join('|')
+      : 'page';
+    const selfKey = Array.from(el.attributes || [])
+      .filter(attr => /^data-|name$|placeholder$|type$/i.test(attr.name))
+      .map(attr => `${attr.name}=${attr.value}`)
+      .join('|') || `${el.tagName}:${el.className || ''}`;
+    return `${ownerKey}::${selfKey}`;
+  }
+
+  function persistInteractiveDraft(target){
+    const pageName = currentProtectedPageName();
+    if (!pageName || !isInteractiveField(target)) return;
+    const host = state.ui && state.ui.host;
+    if (!host || !host.contains(target)) return;
+    const key = fieldDraftKey(target);
+    if (!key) return;
+    const value = target.type === 'checkbox' ? !!target.checked : String(target.value == null ? '' : target.value);
+    state.drafts[pageName][key] = value;
+    saveDraftBucket(pageName);
+  }
+
+  function restoreInteractiveDrafts(page, pageName){
+    if (!page || !pageName || !state.drafts[pageName]) return;
+    page.querySelectorAll('input, textarea, select, [contenteditable]:not([contenteditable="false"])').forEach(el => {
+      const key = fieldDraftKey(el);
+      if (!key || !(key in state.drafts[pageName])) return;
+      const value = state.drafts[pageName][key];
+      if (el.type === 'checkbox') el.checked = !!value;
+      else if (String(el.value == null ? '' : el.value) != String(value)) el.value = String(value);
+    });
+  }
+
+  function saveDraftBucket(pageName){
+    const key = pageName === 'admin' ? ADMIN_DRAFTS_KEY : (pageName === 'moderator' ? MODERATOR_DRAFTS_KEY : '');
+    if (!key) return;
+    try { localStorage.setItem(key, JSON.stringify(state.drafts[pageName] || {})); } catch {}
+  }
+
+  function clearInteractiveDrafts(pageName){
+    if (pageName && state.drafts[pageName]) { state.drafts[pageName] = {}; saveDraftBucket(pageName); }
+  }
+
+  function isProtectedTypingActive(){
+    const pageName = currentProtectedPageName();
+    if (!pageName) return false;
+    const host = state.ui && state.ui.host;
+    const active = document.activeElement;
+    return !!(host && active && host.contains(active) && isInteractiveField(active));
+  }
+
+  function markPageDirty(pageName){
+    if (pageName === 'admin') state.render.pendingAdminRender = true;
+    if (pageName === 'moderator') state.render.pendingModeratorRender = true;
+  }
+
+  function flushPendingProtectedRender(){
+    if (isProtectedTypingActive()) return;
+    if (state.activePage === 'admin' && state.render.pendingAdminRender) renderPages({ reason: 'deferred-admin', force: true });
+    if (state.activePage === 'moderator' && state.render.pendingModeratorRender) renderPages({ reason: 'deferred-moderator', force: true });
+  }
+
+  document.addEventListener('input', (event) => {
+    persistInteractiveDraft(event.target);
+  }, true);
+
+  document.addEventListener('change', (event) => {
+    persistInteractiveDraft(event.target);
+  }, true);
+
+  document.addEventListener('focusout', () => {
+    window.requestAnimationFrame(() => {
+      flushPendingProtectedRender();
+    });
+  }, true);
+
   function formatDate(value){
     if (!value) return 'Recently';
     try {
@@ -484,7 +625,8 @@
       #${HOST_ID}[hidden] { display: none !important; }
       .stepper-google-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; }
       .stepper-google-pill { display:inline-flex; align-items:center; gap:.45rem; border-radius:999px; padding:.5rem .85rem; font-size:.72rem; font-weight:900; letter-spacing:.16em; text-transform:uppercase; }
-      .stepper-google-stat { border-radius:1rem; border:1px solid rgba(99,102,241,.16); padding:1rem; }
+      .stepper-google-stat { position:relative; overflow:hidden; border-radius:1rem; border:1px solid rgba(99,102,241,.16); padding:1rem; }
+      .stepper-google-stat::before { content:''; position:absolute; inset:0; background:radial-gradient(circle at top right, rgba(255,255,255,.22), transparent 46%); pointer-events:none; }
       .stepper-google-badge-row { display:flex; flex-wrap:wrap; gap:.65rem; }
       .stepper-google-badge-btn { border-radius:999px; padding:.6rem .95rem; font-weight:900; letter-spacing:.08em; text-transform:uppercase; border:1px solid transparent; transition:transform .18s ease, box-shadow .18s ease, opacity .18s ease; }
       .stepper-google-badge-btn:hover { transform:translateY(-1px); box-shadow:0 10px 24px rgba(0,0,0,.12); }
@@ -495,7 +637,12 @@
       .dark .stepper-google-badge-btn[data-tone="silver"] { background:rgba(148,163,184,.12); color:#e5e7eb; border-color:rgba(148,163,184,.25); }
       .dark .stepper-google-badge-btn[data-tone="gold"] { background:rgba(250,204,21,.16); color:#fde68a; border-color:rgba(250,204,21,.3); }
       .stepper-google-input { width:100%; border-radius:1rem; border:1px solid rgba(148,163,184,.28); padding:.9rem 1rem; background:transparent; }
-      .stepper-google-cta { display:inline-flex; align-items:center; justify-content:center; gap:.65rem; border-radius:1rem; padding:.85rem 1.1rem; font-weight:900; border:1px solid rgba(99,102,241,.18); }
+      .stepper-google-cta { position:relative; overflow:hidden; display:inline-flex; align-items:center; justify-content:center; gap:.65rem; border-radius:1rem; padding:.85rem 1.1rem; font-weight:900; border:1px solid rgba(99,102,241,.18); transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
+      .stepper-google-cta:hover, .stepper-google-badge-btn:hover { transform:translateY(-1px); }
+      .stepper-google-cta:focus-visible, .stepper-google-badge-btn:focus-visible, .stepper-google-input:focus { outline:none; box-shadow:0 0 0 3px rgba(99,102,241,.16), 0 16px 34px rgba(0,0,0,.12); border-color:rgba(99,102,241,.42); }
+      .stepper-google-cta::after, .stepper-google-badge-btn::after { content:''; position:absolute; inset:-120% auto auto -35%; width:36%; height:300%; background:linear-gradient(115deg, transparent 0%, rgba(255,255,255,.0) 30%, rgba(255,255,255,.33) 50%, rgba(255,255,255,0) 70%, transparent 100%); transform:rotate(18deg); opacity:.55; pointer-events:none; animation:stepperAdminGlint 5.8s linear infinite; }
+      .dark .stepper-google-cta::after, .dark .stepper-google-badge-btn::after { background:linear-gradient(115deg, transparent 0%, rgba(255,255,255,.0) 30%, rgba(255,255,255,.2) 50%, rgba(255,255,255,0) 70%, transparent 100%); }
+      @keyframes stepperAdminGlint { 0% { left:-45%; opacity:0; } 8% { opacity:.18; } 18% { opacity:.55; } 30% { left:120%; opacity:0; } 100% { left:120%; opacity:0; } }
       .stepper-google-danger { border-color:rgba(239,68,68,.22); }
       .stepper-google-muted-list { display:grid; gap:.85rem; }
       .stepper-google-member-item { display:flex; align-items:center; justify-content:space-between; gap:1rem; }
@@ -623,7 +770,7 @@
     renderPages();
     updateTabButtons();
     refreshLiveQueues().then(() => {
-      if (state.activePage) renderPages();
+      if (state.activePage) renderPages({ reason: 'open-page', force: true });
     }).catch(() => {});
   }
 
@@ -1164,9 +1311,11 @@
     try {
       const data = await authFetch('/api/admin/dances');
       state.adminDances = Array.isArray(data.items) ? data.items : [];
+      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
       return state.adminDances;
     } catch {
       state.adminDances = [];
+      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
       return [];
     } finally {
       state.busy.admin = false;
@@ -1331,9 +1480,13 @@
     try {
       const data = await authFetch('/api/admin/submissions');
       state.submissions = Array.isArray(data.items) ? data.items : [];
+      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
+      if (computeModeratorDataSignature() !== state.render.moderatorDataSignature) markPageDirty('moderator');
       return state.submissions;
     } catch {
       state.submissions = [];
+      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
+      if (computeModeratorDataSignature() !== state.render.moderatorDataSignature) markPageDirty('moderator');
       return [];
     }
   }
@@ -1427,9 +1580,13 @@
     try {
       const data = await fetchJson('/api/glossary/steps');
       state.glossaryApproved = Array.isArray(data.items) ? data.items : [];
+      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
+      if (computeModeratorDataSignature() !== state.render.moderatorDataSignature) markPageDirty('moderator');
       return state.glossaryApproved;
     } catch {
       state.glossaryApproved = [];
+      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
+      if (computeModeratorDataSignature() !== state.render.moderatorDataSignature) markPageDirty('moderator');
       return [];
     }
   }
@@ -1439,9 +1596,13 @@
     try {
       const data = await fetchJson('/api/site-memory');
       state.siteMemories = Array.isArray(data.items) ? data.items : [];
+      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
+      if (computeModeratorDataSignature() !== state.render.moderatorDataSignature) markPageDirty('moderator');
       return state.siteMemories;
     } catch (_error) {
       state.siteMemories = [];
+      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
+      if (computeModeratorDataSignature() !== state.render.moderatorDataSignature) markPageDirty('moderator');
       return [];
     }
   }
@@ -1479,14 +1640,20 @@
   async function refreshGlossaryRequests(){
     if (!isAdminSession()) {
       state.glossaryRequests = [];
+      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
+      if (computeModeratorDataSignature() !== state.render.moderatorDataSignature) markPageDirty('moderator');
       return [];
     }
     try {
       const data = await authFetch('/api/admin/glossary-requests');
       state.glossaryRequests = Array.isArray(data.items) ? data.items : [];
+      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
+      if (computeModeratorDataSignature() !== state.render.moderatorDataSignature) markPageDirty('moderator');
       return state.glossaryRequests;
     } catch {
       state.glossaryRequests = [];
+      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
+      if (computeModeratorDataSignature() !== state.render.moderatorDataSignature) markPageDirty('moderator');
       return [];
     }
   }
@@ -2159,57 +2326,16 @@
     renderPages();
   }
 
-  function adminPageHasLiveTyping(page){
-    if (!page) return false;
-    const active = document.activeElement;
-    if (!active || !page.contains(active)) return false;
-    return !!(active.matches && active.matches('input, textarea, select, [contenteditable="true"], [contenteditable=""], [contenteditable]'));
-  }
-
-  function adminDataSignature(value){
-    try {
-      return JSON.stringify(value == null ? null : value);
-    } catch (_error) {
-      return String(value == null ? '' : value);
-    }
-  }
-
-  function markAdminUiDirty(){
-    state.adminUiDirty = true;
-    state.adminUiSignature = '';
-  }
-
-  function getAdminUiSignature(){
-    return JSON.stringify({
-      dark: !!(readAppData() && readAppData().isDarkMode),
-      isAdmin: isAdminSession(),
-      activePage: state.activePage || '',
-      adminDances: adminDataSignature(state.adminDances || []),
-      submissions: adminDataSignature(state.submissions || []),
-      moderatorApplications: adminDataSignature(state.moderatorApplications || []),
-      activeModerators: adminDataSignature(state.activeModerators || []),
-      suspensions: adminDataSignature(state.suspensions || []),
-      securityAlerts: adminDataSignature(state.securityAlerts || []),
-      glossaryApproved: adminDataSignature(state.glossaryApproved || []),
-      glossaryRequests: adminDataSignature(state.glossaryRequests || []),
-      siteMemories: adminDataSignature(state.siteMemories || [])
-    });
-  }
-
-  function renderAdminPage(force){
+  function renderAdminPage(options){
+    const opts = options && typeof options === 'object' ? options : {};
     const page = document.getElementById(ADMIN_PAGE_ID);
     if (!page) return;
-    if (!force && state.activePage !== 'admin') return;
     const theme = themeClasses();
-    const uiSignature = getAdminUiSignature();
-    if (!force && adminPageHasLiveTyping(page)) {
-      state.adminUiDirty = true;
-      return;
-    }
-    if (!force && !state.adminUiDirty && state.adminUiSignature === uiSignature) return;
-    state.adminUiDirty = false;
-    state.adminUiSignature = uiSignature;
+    const dataSignature = computeAdminDataSignature();
     if (!isAdminSession()) {
+      clearInteractiveDrafts('admin');
+      state.render.adminUiSignature = '';
+      state.render.adminDataSignature = dataSignature;
       page.className = `rounded-3xl border shadow-sm overflow-hidden ${theme.shell}`;
       page.innerHTML = `
         <div class="px-6 py-5 border-b ${theme.panel}">
@@ -2288,6 +2414,12 @@
       </div>
     `;
 
+    const uiSignature = `${theme.dark ? 'dark' : 'light'}::${dataSignature}`;
+    if (!opts.force && page.dataset.stepperRendered === 'true' && state.render.adminUiSignature === uiSignature) {
+      state.render.adminDataSignature = dataSignature;
+      state.render.pendingAdminRender = false;
+      return;
+    }
     page.className = `rounded-3xl border shadow-sm overflow-hidden ${theme.shell}`;
     page.innerHTML = `
       <div class="px-6 py-5 border-b ${theme.panel}">
@@ -2335,15 +2467,11 @@
       </div>
     `;
 
-    if (!page.dataset.stepperAdminButtonRenderHook) {
-      page.addEventListener('click', (event) => {
-        const target = event.target instanceof Element ? event.target.closest('button, [role="button"], a') : null;
-        if (!target) return;
-        markAdminUiDirty();
-        setTimeout(() => renderAdminPage(true), 0);
-      }, true);
-      page.dataset.stepperAdminButtonRenderHook = 'true';
-    }
+    page.dataset.stepperRendered = 'true';
+    state.render.adminUiSignature = uiSignature;
+    state.render.adminDataSignature = dataSignature;
+    state.render.pendingAdminRender = false;
+    restoreInteractiveDrafts(page, 'admin');
 
     page.querySelectorAll('[data-stepper-submission-id]').forEach(card => {
       const submissionId = card.getAttribute('data-stepper-submission-id');
@@ -2381,14 +2509,14 @@
       const input = page.querySelector('[data-stepper-staff-chat-input="1"]');
       const text = input && input.value;
       sendStaffChat(text);
-      if (input) input.value = '';
+      if (input) { delete state.drafts.admin[fieldDraftKey(input)]; saveDraftBucket('admin'); input.value = ''; }
     });
 
     const addModeratorBtn = page.querySelector('[data-action="add-moderator-email"]');
     if (addModeratorBtn) addModeratorBtn.addEventListener('click', () => {
       const emailEl = page.querySelector('[data-add-moderator-email="1"]');
       addModeratorByEmail(emailEl && emailEl.value);
-      if (emailEl) emailEl.value = '';
+      if (emailEl) { delete state.drafts.admin[fieldDraftKey(emailEl)]; saveDraftBucket('admin'); emailEl.value = ''; }
     });
     const suspendBtn = page.querySelector('[data-action="suspend-person"]');
     if (suspendBtn) suspendBtn.addEventListener('click', () => {
@@ -2410,7 +2538,7 @@
       const input = page.querySelector('[data-stepper-site-memory-input="1"]');
       const value = input ? input.value : '';
       const ok = await addSiteMemory(value);
-      if (ok && input) input.value = '';
+      if (ok && input) { delete state.drafts.admin[fieldDraftKey(input)]; saveDraftBucket('admin'); input.value = ''; }
     });
     page.querySelectorAll('[data-stepper-site-memory-id]').forEach(card => {
       const id = card.getAttribute('data-stepper-site-memory-id') || '';
@@ -2502,12 +2630,17 @@
     observer.observe(page, { childList: true, subtree: true, characterData: true });
   }
 
-  function renderPages(){
+  function renderPages(options){
+    const opts = options && typeof options === 'object' ? options : {};
+    if (isProtectedTypingActive() && !opts.force) {
+      markPageDirty(currentProtectedPageName());
+      return;
+    }
     locateUi();
     ensureHost();
     renderSignInPage();
     renderSubscriptionPage();
-    renderAdminPage();
+    renderAdminPage(opts);
     syncPageVisibility();
     renderPresenceOnly();
     renderSuspensionBanner();
@@ -2550,9 +2683,19 @@
     }
     await refreshGlossaryApproved();
     await syncFeaturedFromBackend();
-    markAdminUiDirty();
     renderPages();
   }
+
+  document.addEventListener('click', (event) => {
+    const button = event.target && event.target.closest ? event.target.closest('button') : null;
+    if (!button) return;
+    const pageName = currentProtectedPageName();
+    if (!pageName) return;
+    const host = state.ui && state.ui.host;
+    if (!host || !host.contains(button)) return;
+    if (pageName === 'admin') state.render.pendingAdminRender = false;
+    if (pageName === 'moderator') state.render.pendingModeratorRender = false;
+  }, true);
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', prime, { once:true });
@@ -2602,8 +2745,9 @@
   window.addEventListener('storage', () => {
     if (state.session && state.session.credential) syncCurrentDanceToBackend(false);
     state.savedDancesUiSignature = '';
-    markAdminUiDirty();
-    renderPages();
+    markPageDirty('admin');
+    markPageDirty('moderator');
+    renderPages({ reason: 'storage' });
   });
 
   async function refreshSubscription(){
@@ -2884,9 +3028,13 @@
     try {
       const data = await authFetch('/api/moderator/submissions');
       state.moderatorQueue = Array.isArray(data.items) ? data.items : [];
+      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
+      if (computeModeratorDataSignature() !== state.render.moderatorDataSignature) markPageDirty('moderator');
       return state.moderatorQueue;
     } catch {
       state.moderatorQueue = [];
+      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
+      if (computeModeratorDataSignature() !== state.render.moderatorDataSignature) markPageDirty('moderator');
       return [];
     }
   }
@@ -2896,9 +3044,13 @@
     try {
       const data = await authFetch('/api/admin/moderator-applications');
       state.moderatorApplications = Array.isArray(data.items) ? data.items : [];
+      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
+      if (computeModeratorDataSignature() !== state.render.moderatorDataSignature) markPageDirty('moderator');
       return state.moderatorApplications;
     } catch {
       state.moderatorApplications = [];
+      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
+      if (computeModeratorDataSignature() !== state.render.moderatorDataSignature) markPageDirty('moderator');
       return [];
     }
   }
@@ -2908,9 +3060,13 @@
     try {
       const data = await authFetch('/api/admin/moderators');
       state.activeModerators = Array.isArray(data.items) ? data.items : [];
+      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
+      if (computeModeratorDataSignature() !== state.render.moderatorDataSignature) markPageDirty('moderator');
       return state.activeModerators;
     } catch {
       state.activeModerators = [];
+      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
+      if (computeModeratorDataSignature() !== state.render.moderatorDataSignature) markPageDirty('moderator');
       return [];
     }
   }
@@ -3136,17 +3292,28 @@
     }
   };
 
-  function renderModeratorPage(){
+  function renderModeratorPage(options){
+    const opts = options && typeof options === 'object' ? options : {};
     const page = document.getElementById(MODERATOR_PAGE_ID);
     if (!page) return;
     const theme = themeClasses();
+    const dataSignature = computeModeratorDataSignature();
     page.className = `rounded-3xl border shadow-sm overflow-hidden ${theme.shell}`;
     if (!(state.session && state.session.credential) || !isModeratorSession()) {
+      clearInteractiveDrafts('moderator');
+      state.render.moderatorUiSignature = '';
+      state.render.moderatorDataSignature = dataSignature;
       page.innerHTML = `
         <div class="px-6 py-5 border-b ${theme.panel}">
           <h2 class="text-2xl font-black tracking-tight uppercase flex items-center gap-2"><span class="stepper-extra-tab-icon">${iconShield()}</span> Moderator</h2>
         </div>
         <div class="p-6 sm:p-8"><div class="rounded-3xl border p-6 sm:p-8 text-center ${theme.soft}"><p class="text-lg font-black">Moderator access only.</p><p class="mt-2 text-sm ${theme.subtle}">Apply in Subscription. Once admin approves it, this tab appears and the premium helper perks come with it.</p></div></div>`;
+      return;
+    }
+    const uiSignature = `${theme.dark ? 'dark' : 'light'}::${dataSignature}`;
+    if (!opts.force && page.dataset.stepperRendered === 'true' && state.render.moderatorUiSignature === uiSignature) {
+      state.render.moderatorDataSignature = dataSignature;
+      state.render.pendingModeratorRender = false;
       return;
     }
     const cards = state.moderatorQueue.length ? state.moderatorQueue.map(item => `
@@ -3185,6 +3352,12 @@
         </div>
         ${cards}
       </div>`;
+    page.dataset.stepperRendered = 'true';
+    state.render.moderatorUiSignature = uiSignature;
+    state.render.moderatorDataSignature = dataSignature;
+    state.render.pendingModeratorRender = false;
+    restoreInteractiveDrafts(page, 'moderator');
+
     page.querySelectorAll('[data-stepper-moderator-id]').forEach(card => {
       const submissionId = card.getAttribute('data-stepper-moderator-id');
       const item = (state.moderatorQueue || []).find(entry => String((entry && entry.id) || '') === String(submissionId || ''));
@@ -3410,20 +3583,15 @@ Newest user question: ${question}`;
   }
 
   const __origRenderPages = renderPages;
-  renderPages = function(){
-    const adminPage = document.getElementById(ADMIN_PAGE_ID);
-    if (state.activePage === 'admin' && adminPageHasLiveTyping(adminPage)) {
-      markAdminUiDirty();
-      ensureHost();
-      setVisibility(adminPage, true);
-      renderPresenceOnly();
-      renderSuspensionBanner();
-      showNotificationToasts();
+  renderPages = function(options){
+    const opts = options && typeof options === 'object' ? options : {};
+    if (isProtectedTypingActive() && !opts.force) {
+      markPageDirty(currentProtectedPageName());
       return;
     }
-    __origRenderPages();
+    __origRenderPages(opts);
     ensureHost();
-    renderModeratorPage();
+    renderModeratorPage(opts);
     decorateSubscriptionPage();
     decorateAdminPage();
     renderCommunityGlossary();
@@ -3446,9 +3614,16 @@ Newest user question: ${question}`;
   setInterval(() => {
     if (__stepperLiveQueueRefreshBusy || !(state.session && state.session.credential)) return;
     __stepperLiveQueueRefreshBusy = true;
+    const beforeAdminSignature = computeAdminDataSignature();
+    const beforeModeratorSignature = computeModeratorDataSignature();
     refreshLiveQueues().then(() => {
-      markAdminUiDirty();
-      if (state.activePage === 'admin' || state.activePage === 'moderator' || state.activePage === 'signin' || state.activePage === 'subscription') renderPages();
+      const adminChanged = computeAdminDataSignature() !== beforeAdminSignature;
+      const moderatorChanged = computeModeratorDataSignature() !== beforeModeratorSignature;
+      if (adminChanged) markPageDirty('admin');
+      if (moderatorChanged) markPageDirty('moderator');
+      if (state.activePage === 'admin' && adminChanged) renderPages({ reason: 'live-queue-admin' });
+      if (state.activePage === 'moderator' && moderatorChanged) renderPages({ reason: 'live-queue-moderator' });
+      if ((state.activePage === 'signin' || state.activePage === 'subscription') && (adminChanged || moderatorChanged)) renderPages({ reason: 'live-queue-surface' });
     }).catch(() => {}).finally(() => { __stepperLiveQueueRefreshBusy = false; });
   }, LIVE_QUEUE_SYNC_INTERVAL_MS);
 
