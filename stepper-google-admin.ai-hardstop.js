@@ -396,7 +396,8 @@
   }
 
   function isAdminSession(){
-    return normalizeEmail(state.session && state.session.profile && state.session.profile.email) === normalizeEmail(ADMIN_EMAIL)
+    const role = String(state.session && state.session.role || '').trim().toLowerCase();
+    return role === 'admin' || normalizeEmail(state.session && state.session.profile && state.session.profile.email) === normalizeEmail(ADMIN_EMAIL)
       || !!(state.session && state.session.isAdmin);
   }
 
@@ -723,8 +724,11 @@
       return await fetchJson(path, Object.assign({}, options || {}, { headers }));
     } catch (error) {
       if (error && error.status === 401) {
-        clearSession();
-        renderPages();
+        const protectedAuthPath = /^\/api\/auth(\/|$)/.test(String(path || ''));
+        if (protectedAuthPath) {
+          clearSession();
+          renderPages();
+        }
       } else if (error && error.status === 403 && error.data && error.data.code === 'SUSPENDED') {
         state.suspension = error.data.suspension || null;
         if (state.session) saveSession(Object.assign({}, state.session, { suspension: state.suspension }));
