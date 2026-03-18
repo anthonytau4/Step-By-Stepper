@@ -40,6 +40,8 @@
     moderatorApplications: [],
     activeModerators: [],
     moderatorQueue: [],
+    suspensions: [],
+    securityAlerts: [],
     glossaryApproved: [],
     glossaryRequests: [],
     siteMemories: [],
@@ -47,6 +49,7 @@
     communityGlossaryOpen: false,
     subscription: { isPremium: false, plan: 'free', status: 'free', source: 'unknown' },
     savedDancesUiSignature: '',
+    suspension: null,
     chatOpen: false,
     chatBusy: false,
     chatMessages: [],
@@ -304,11 +307,13 @@
     state.session = session && typeof session === 'object' ? session : null;
     if (state.session) writeJson(SESSION_KEY, state.session);
     else localStorage.removeItem(SESSION_KEY);
+    state.suspension = state.session && state.session.suspension ? state.session.suspension : null;
     updateAdminTabVisibility();
   }
 
   function clearSession(){
     state.cloudSaves = [];
+    state.suspension = null;
     saveSession(null);
     try {
       if (window.google && window.google.accounts && window.google.accounts.id) {
@@ -316,6 +321,39 @@
       }
     } catch {}
   }
+
+
+  function suspensionMessage(suspension){
+    if (!suspension) return '';
+    const duration = String(suspension.durationLabel || 'a while').trim() || 'a while';
+    const reason = String(suspension.reason || 'an admin decision').trim() || 'an admin decision';
+    return `You have been barred for ${duration} long because of ${reason}`;
+  }
+
+  function renderSuspensionBanner(){
+    const anchor = state.ui.tabStrip && state.ui.tabStrip.parentNode ? state.ui.tabStrip.parentNode : null;
+    if (!anchor) return;
+    let banner = document.getElementById('stepper-suspension-banner');
+    if (!state.suspension) {
+      if (banner) banner.remove();
+      return;
+    }
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'stepper-suspension-banner';
+      banner.style.margin = '10px 0 0';
+      banner.style.borderRadius = '18px';
+      banner.style.padding = '12px 16px';
+      banner.style.fontWeight = '800';
+      banner.style.lineHeight = '1.35';
+      anchor.insertAdjacentElement('afterend', banner);
+    }
+    banner.style.background = '#fee2e2';
+    banner.style.border = '1px solid #ef4444';
+    banner.style.color = '#7f1d1d';
+    banner.textContent = suspensionMessage(state.suspension);
+  }
+
 
   function getCurrentRegistryId(){
     return String(localStorage.getItem(CURRENT_REGISTRY_KEY) || '').trim();
@@ -626,6 +664,7 @@
         const error = new Error(message);
         error.status = response.status;
         error.base = base;
+        error.data = data;
         lastError = error;
         if (retryableStatuses.has(Number(response.status)) && base !== bases[bases.length - 1]) continue;
         throw error;
@@ -655,6 +694,10 @@
     } catch (error) {
       if (error && error.status === 401) {
         clearSession();
+        renderPages();
+      } else if (error && error.status === 403 && error.data && error.data.code === 'SUSPENDED') {
+        state.suspension = error.data.suspension || null;
+        if (state.session) saveSession(Object.assign({}, state.session, { suspension: state.suspension }));
         renderPages();
       }
       throw error;
@@ -703,6 +746,7 @@
         isAdmin: !!data.isAdmin,
         isModerator: !!data.isModerator,
         role: data.role || (data.isAdmin ? 'admin' : (data.isModerator ? 'moderator' : 'member')),
+        suspension: data.suspension || null,
         updatedAt: new Date().toISOString()
       });
       return data;
@@ -723,6 +767,7 @@
           isAdmin: !!data.isAdmin,
           isModerator: !!data.isModerator,
           role: data.role || (data.isAdmin ? 'admin' : (data.isModerator ? 'moderator' : 'member')),
+          suspension: data.suspension || null,
           updatedAt: new Date().toISOString()
         }));
       }
@@ -778,6 +823,9 @@
         credential,
         profile: data.profile,
         isAdmin: !!data.isAdmin,
+        isModerator: !!data.isModerator,
+        role: data.role || (data.isAdmin ? 'admin' : (data.isModerator ? 'moderator' : 'member')),
+        suspension: data.suspension || null,
         updatedAt: new Date().toISOString()
       });
       await refreshSession();
@@ -2177,7 +2225,7 @@
               <div class="flex flex-wrap gap-3"><button type="button" class="stepper-google-cta ${theme.button}" data-action="approve-modapp">Approve moderator</button><button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="decline-modapp">Decline</button></div>
             </div>
           </article>`).join('') : `<p class="text-sm ${theme.subtle}">No pending moderator applications.</p>`}</div></div>
-        <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-active-moderators="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Active moderators</div><p class="mt-1 text-sm ${theme.subtle}">Delete moderator access immediately. They lose the Moderator tab on the next live refresh and see your note on startup.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.activeModerators || []).length))} active</span></div><div class="mt-4 grid gap-3">${(state.activeModerators || []).length ? state.activeModerators.map(item => `
+        <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-active-moderators="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Moderator management</div><p class="mt-1 text-sm ${theme.subtle}">Add moderators by Google email, approve applications, or remove moderators immediately.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.activeModerators || []).length))} active</span></div><div class="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]"><input data-add-moderator-email="1" class="stepper-google-input" placeholder="person@gmail.com" /><button type="button" class="stepper-google-cta ${theme.button}" data-action="add-moderator-email">Add moderator from Gmail</button></div><div class="mt-4 grid gap-3">${(state.activeModerators || []).length ? state.activeModerators.map(item => `
           <article class="rounded-2xl border p-4 ${theme.soft}" data-stepper-active-mod-key="${escapeHtml(item.userKey)}">
             <div class="flex flex-wrap items-center justify-between gap-3">
               <div><div class="text-base font-black">${escapeHtml(item.name || item.email || 'Moderator')}</div><p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.email || '')}</p></div>
@@ -2186,6 +2234,8 @@
             <div class="mt-4 ${theme.panel} rounded-2xl border p-4"><label class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Removal note</label><textarea data-remove-mod-note="1" class="stepper-google-input mt-3" rows="3" placeholder="Tell them why they were removed as moderator."></textarea></div>
             <div class="mt-4 flex flex-wrap gap-3"><button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="remove-moderator">Delete moderator</button></div>
           </article>`).join('') : `<p class="text-sm ${theme.subtle}">No active moderators yet.</p>`}</div></div>
+        <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-suspension-management="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Suspend persons</div><p class="mt-1 text-sm ${theme.subtle}">Enter a Google email to bar someone for a set time. Admins cannot be banned.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.suspensions || []).length))} barred</span></div><div class="mt-4 grid gap-3 sm:grid-cols-2"><input data-suspend-email="1" class="stepper-google-input" placeholder="person@gmail.com" /><select data-suspend-duration="1" class="stepper-google-input"><option value="300000">5 minutes</option><option value="1200000">20 minutes</option><option value="3600000">1 hour</option><option value="18000000">5 hours</option><option value="86400000">1 day</option><option value="259200000">3 days</option><option value="604800000">1 week</option><option value="1814400000">3 weeks</option><option value="2592000000">1 month</option><option value="5184000000">2 months</option><option value="31536000000">1 Year</option><option value="157680000000">5 years</option></select></div><div class="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]"><textarea data-suspend-reason="1" class="stepper-google-input" rows="3" placeholder="Reason for the bar"></textarea><button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="suspend-person">Bar account</button></div><div class="mt-4 grid gap-3">${(state.suspensions || []).length ? state.suspensions.map(item => `<article class="rounded-2xl border p-4 ${theme.soft}" data-stepper-suspension-key="${escapeHtml(item.userKey)}"><div class="flex flex-wrap items-center justify-between gap-3"><div><div class="text-base font-black">${escapeHtml(item.name || item.email || 'Member')}</div><p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.email || '')}</p><p class="mt-2 text-xs font-semibold ${theme.subtle}">${escapeHtml((item.suspension && item.suspension.durationLabel) || '')} • ${escapeHtml((item.suspension && item.suspension.reason) || '')}</p></div><button type="button" class="stepper-google-cta ${theme.button}" data-action="lift-suspension">Turn back on</button></div></article>`).join('') : `<p class="text-sm ${theme.subtle}">Nobody is currently barred.</p>`}</div></div>
+        <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-security-alerts="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Security alerts</div><p class="mt-1 text-sm ${theme.subtle}">Client-side inspection warnings show here after 3 strikes. This is only a nuisance detector, not perfect protection.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.securityAlerts || []).length))} alerts</span></div><div class="mt-4 grid gap-3">${(state.securityAlerts || []).length ? state.securityAlerts.slice(0,20).map(item => `<article class="rounded-2xl border p-4 ${theme.soft}"><div class="flex flex-wrap items-center justify-between gap-3"><div><div class="text-base font-black">${escapeHtml(item.name || item.email || 'User')}</div><p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.email || '')}</p><p class="mt-2 text-xs font-semibold ${theme.subtle}">${escapeHtml(item.reason || '')} • ${escapeHtml(String(item.strikeCount || 0))} strikes</p></div></div>${item.detail ? `<p class="mt-3 text-sm ${theme.subtle}">${escapeHtml(item.detail)}</p>` : ''}</article>`).join('') : `<p class="text-sm ${theme.subtle}">No security alerts yet.</p>`}</div></div>
         ${cards}
 
         <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-site-memory="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Helper memory</div><p class="mt-1 text-sm ${theme.subtle}">Add site facts or rules the AI helper should keep using for everyone. This is how the website learns approved things over time.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.siteMemories || []).length))} learned</span></div><div class="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]"><textarea data-stepper-site-memory-input="1" class="stepper-google-input" rows="3" placeholder="Example: Featured dances should feel polished but not over-written. Counts should be generated in 8-count blocks whenever possible."></textarea><button type="button" class="stepper-google-cta ${theme.button}" data-action="add-site-memory">Add memory</button></div><div class="mt-4 grid gap-3">${(state.siteMemories || []).length ? state.siteMemories.slice(0,30).map(item => `<div class="rounded-2xl border p-4 ${theme.soft}" data-stepper-site-memory-id="${escapeHtml(item.id)}"><div class="flex flex-wrap items-start justify-between gap-3"><div><div class="text-sm font-black">${escapeHtml(item.text || '')}</div><p class="mt-1 text-xs ${theme.subtle}">${escapeHtml(item.createdByName || item.createdByEmail || 'Admin')}</p></div><button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="delete-site-memory">Delete</button></div></div>`).join('') : `<p class="text-sm ${theme.subtle}">No saved helper memory yet.</p>`}</div></div>
@@ -2225,6 +2275,26 @@
       const noteEl = card.querySelector('[data-remove-mod-note="1"]');
       const removeBtn = card.querySelector('[data-action="remove-moderator"]');
       if (removeBtn) removeBtn.addEventListener('click', () => removeModeratorAccess(userKey, noteEl && noteEl.value));
+    });
+    const addModeratorBtn = page.querySelector('[data-action="add-moderator-email"]');
+    if (addModeratorBtn) addModeratorBtn.addEventListener('click', () => {
+      const emailEl = page.querySelector('[data-add-moderator-email="1"]');
+      addModeratorByEmail(emailEl && emailEl.value);
+      if (emailEl) emailEl.value = '';
+    });
+    const suspendBtn = page.querySelector('[data-action="suspend-person"]');
+    if (suspendBtn) suspendBtn.addEventListener('click', () => {
+      const emailEl = page.querySelector('[data-suspend-email="1"]');
+      const durationEl = page.querySelector('[data-suspend-duration="1"]');
+      const reasonEl = page.querySelector('[data-suspend-reason="1"]');
+      const durationMs = Number(durationEl && durationEl.value || 300000);
+      const durationLabel = durationEl && durationEl.options && durationEl.selectedIndex >= 0 ? durationEl.options[durationEl.selectedIndex].text : '5 minutes';
+      suspendMember(emailEl && emailEl.value, durationMs, durationLabel, reasonEl && reasonEl.value);
+    });
+    page.querySelectorAll('[data-stepper-suspension-key]').forEach(card => {
+      const userKey = card.getAttribute('data-stepper-suspension-key');
+      const btn = card.querySelector('[data-action="lift-suspension"]');
+      if (btn) btn.addEventListener('click', () => liftSuspension(userKey));
     });
 
     const addMemoryBtn = page.querySelector('[data-action="add-site-memory"]');
@@ -2323,6 +2393,7 @@
     renderAdminPage();
     syncPageVisibility();
     renderPresenceOnly();
+    renderSuspensionBanner();
     patchFeaturedPageCopy();
     updateAdminTabVisibility();
     updateTabButtons();
@@ -2345,6 +2416,7 @@
     if (!locateUi()) return;
     ensureHost();
     wireStartupBackendBase();
+    wireSecurityDeterrent();
     await refreshConfig();
     await refreshPresence();
     if (state.session && state.session.credential) {
@@ -2374,9 +2446,11 @@
     if (!locateUi()) return;
     ensureHost();
     wireStartupBackendBase();
+    wireSecurityDeterrent();
     updateAdminTabVisibility();
     updateTabButtons();
     renderPresenceOnly();
+    renderSuspensionBanner();
     patchFeaturedPageCopy();
     patchSavedDancesPage();
     renderSaveButton();
@@ -2679,6 +2753,8 @@
     if (isAdminSession()) {
       await refreshModeratorApplications().catch(() => []);
       await refreshActiveModerators().catch(() => []);
+      await refreshSuspensions().catch(() => []);
+      await refreshSecurityAlerts().catch(() => []);
     }
     renderPages();
   };
@@ -2718,6 +2794,100 @@
       return [];
     }
   }
+
+  async function refreshSuspensions(){
+    if (!isAdminSession()) { state.suspensions = []; return []; }
+    try {
+      const data = await authFetch('/api/admin/suspensions');
+      state.suspensions = Array.isArray(data.items) ? data.items : [];
+      return state.suspensions;
+    } catch {
+      state.suspensions = [];
+      return [];
+    }
+  }
+
+  async function refreshSecurityAlerts(){
+    if (!isAdminSession()) { state.securityAlerts = []; return []; }
+    try {
+      const data = await authFetch('/api/admin/security-alerts');
+      state.securityAlerts = Array.isArray(data.items) ? data.items : [];
+      return state.securityAlerts;
+    } catch {
+      state.securityAlerts = [];
+      return [];
+    }
+  }
+
+  async function suspendMember(email, durationMs, durationLabel, reason){
+    try {
+      await authFetch('/api/admin/suspend', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ email, durationMs, durationLabel, reason })
+      });
+      await Promise.all([refreshSuspensions(), refreshSecurityAlerts()]);
+      renderPages();
+      alert('Bar saved.');
+    } catch (error) {
+      alert(error.message || 'Could not bar that person.');
+    }
+  }
+
+  async function liftSuspension(userKey){
+    try {
+      await authFetch(`/api/admin/suspensions/${encodeURIComponent(userKey)}/lift`, { method:'POST' });
+      await refreshSuspensions();
+      renderPages();
+    } catch (error) {
+      alert(error.message || 'Could not lift that bar.');
+    }
+  }
+
+  async function addModeratorByEmail(email){
+    try {
+      await authFetch('/api/admin/moderators/add', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ email })
+      });
+      await Promise.all([refreshActiveModerators(), refreshModeratorApplications()]);
+      renderPages();
+      alert('Moderator added.');
+    } catch (error) {
+      alert(error.message || 'Could not add moderator.');
+    }
+  }
+
+  let __stepperSecuritySent = false;
+  async function sendSecurityStrike(trigger, detail){
+    if (__stepperSecuritySent) return;
+    __stepperSecuritySent = true;
+    try {
+      await authFetch('/api/security-alerts/strike', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ trigger, detail })
+      });
+    } catch {}
+    setTimeout(() => { __stepperSecuritySent = false; }, 8000);
+  }
+
+  function wireSecurityDeterrent(){
+    if (window.__stepperSecurityDeterrentWired) return;
+    window.__stepperSecurityDeterrentWired = true;
+    const strike = (trigger, detail) => {
+      if (!state.session || !state.session.credential || isAdminSession()) return;
+      sendSecurityStrike(trigger, detail);
+    };
+    window.addEventListener('keydown', (event) => {
+      const key = String(event.key || '').toLowerCase();
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && (key === 'i' || key === 'j' || key === 'c')) strike('devtools-shortcut', `${key} shortcut`);
+      if ((event.ctrlKey || event.metaKey) && key === 'u') strike('view-source-shortcut', 'Ctrl/Cmd+U');
+    }, true);
+    window.addEventListener('contextmenu', () => strike('contextmenu', 'Right click on live site'), true);
+  }
+
 
   async function removeModeratorAccess(userKey, reason){
     const note = String(reason || '').trim();

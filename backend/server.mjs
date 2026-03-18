@@ -195,6 +195,69 @@ function isPremiumUser(bucket, profile = null) {
   return !!membership.isPremium;
 }
 
+function clearExpiredSuspension(bucket) {
+  if (!bucket || typeof bucket !== 'object') return null;
+  const suspension = bucket.suspension && typeof bucket.suspension === 'object' ? bucket.suspension : null;
+  if (!suspension) return null;
+  const untilMs = Date.parse(suspension.untilAt || 0);
+  if (Number.isFinite(untilMs) && untilMs > Date.now()) return suspension;
+  bucket.suspension = null;
+  return null;
+}
+
+function getActiveSuspension(bucket, profile = null) {
+  if (isAdminProfile(profile || bucket?.profile)) return null;
+  return clearExpiredSuspension(bucket);
+}
+
+function suspensionPayload(bucket) {
+  const suspension = bucket && bucket.suspension && typeof bucket.suspension === 'object' ? bucket.suspension : null;
+  if (!suspension) return null;
+  return {
+    reason: String(suspension.reason || '').trim(),
+    untilAt: String(suspension.untilAt || '').trim() || null,
+    startedAt: String(suspension.startedAt || '').trim() || null,
+    durationLabel: String(suspension.durationLabel || '').trim() || null,
+    byEmail: String(suspension.byEmail || '').trim() || null,
+    active: true
+  };
+}
+
+function assertNotSuspended(bucket, profile = null) {
+  const suspension = getActiveSuspension(bucket, profile);
+  if (!suspension) return;
+  const error = new Error(`You have been barred for ${String(suspension.durationLabel || 'a while')} because of ${String(suspension.reason || 'an admin decision')}`);
+  error.status = 403;
+  error.code = 'SUSPENDED';
+  error.suspension = suspensionPayload({ suspension });
+  throw error;
+}
+
+function getRoleForBucket(bucket, profile = null) {
+  if (isAdminProfile(profile || bucket?.profile)) return 'admin';
+  return isModeratorBucket(bucket) ? 'moderator' : 'member';
+}
+
+function createSecurityAlert(db, payload = {}) {
+  if (!Array.isArray(db.securityAlerts)) db.securityAlerts = [];
+  const item = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    status: 'open',
+    email: String(payload.email || '').trim(),
+    name: String(payload.name || payload.email || '').trim(),
+    userKey: String(payload.userKey || '').trim(),
+    reason: String(payload.reason || 'Security warning').trim(),
+    detail: String(payload.detail || '').trim().slice(0, 1200),
+    createdAt: new Date().toISOString(),
+    strikeCount: Math.max(0, Number(payload.strikeCount || 0)),
+    trigger: String(payload.trigger || '').trim().slice(0, 120),
+    notes: []
+  };
+  db.securityAlerts.unshift(item);
+  db.securityAlerts = db.securityAlerts.slice(0, 500);
+  return item;
+}
+
 function parseAllowedOrigins(value) {
   const raw = String(value || '*').trim();
   if (!raw || raw === '*') return '*';
@@ -228,7 +291,8 @@ function emptyDb() {
     moderatorApplications: [],
     glossaryRequests: [],
     approvedGlossarySteps: [],
-    siteMemory: []
+    siteMemory: [],
+    securityAlerts: []
   };
 }
 
@@ -255,6 +319,7 @@ async function readDb() {
     if (!Array.isArray(parsed.glossaryRequests)) parsed.glossaryRequests = [];
     if (!Array.isArray(parsed.approvedGlossarySteps)) parsed.approvedGlossarySteps = [];
     if (!Array.isArray(parsed.siteMemory)) parsed.siteMemory = [];
+    if (!Array.isArray(parsed.securityAlerts)) parsed.securityAlerts = [];
     return parsed;
   } catch {
     return emptyDb();
@@ -325,11 +390,19 @@ async function requireGoogleUser(req, res, next) {
     req.stepperUser = pickProfile(claims);
     req.stepperClaims = claims;
     req.stepperToken = token;
+    const db = await readDb();
+    const key = userKeyFromClaims(claims);
+    const bucket = touchUser(db, req.stepperUser, key);
+    assertNotSuspended(bucket, req.stepperUser);
+    await writeDb(db);
+    req.stepperUserBucket = bucket;
     next();
   } catch (error) {
     res.status(error.status || 401).json({
       ok: false,
-      error: error?.message || "Google authentication failed."
+      error: error?.message || "Google authentication failed.",
+      code: error?.code || '',
+      suspension: error?.suspension || null
     });
   }
 }
@@ -354,6 +427,7 @@ async function requireModerator(req, res, next) {
     const db = await readDb();
     const key = userKeyFromClaims(claims);
     const bucket = touchUser(db, req.stepperUser, key);
+    assertNotSuspended(bucket, req.stepperUser);
     await writeDb(db);
     if (isAdminProfile(req.stepperUser) || isModeratorBucket(bucket)) {
       req.stepperUserBucket = bucket;
@@ -362,7 +436,7 @@ async function requireModerator(req, res, next) {
     }
     res.status(403).json({ ok: false, error: 'Moderator access only.' });
   } catch (error) {
-    res.status(error.status || 401).json({ ok: false, error: error?.message || 'Google authentication failed.' });
+    res.status(error.status || 401).json({ ok: false, error: error?.message || 'Google authentication failed.', code: error?.code || '', suspension: error?.suspension || null });
   }
 }
 
@@ -551,7 +625,9 @@ function touchUser(db, profile, userKey) {
     cloudSaves: Array.isArray(bucket.cloudSaves) ? bucket.cloudSaves : [],
     notifications: Array.isArray(bucket.notifications) ? bucket.notifications : [],
     role: isModeratorBucket(bucket) ? 'moderator' : '',
-    membership: getUserMembership(bucket, profile)
+    membership: getUserMembership(bucket, profile),
+    suspension: bucket.suspension && typeof bucket.suspension === 'object' ? bucket.suspension : null,
+    securityStrikes: Math.max(0, Number(bucket.securityStrikes || 0))
   };
   return db.users[key];
 }
@@ -849,10 +925,11 @@ app.post("/api/auth/google", async (req, res) => {
     const claims = await verifyGoogleToken(credential);
     const profile = pickProfile(claims);
     const db = await readDb();
-    touchUser(db, profile, userKeyFromClaims(claims));
+    const userKey = userKeyFromClaims(claims);
+    const bucket = touchUser(db, profile, userKey);
+    assertNotSuspended(bucket, profile);
     await writeDb(db);
-    const bucket = db.users[userKeyFromClaims(claims)] || null;
-    res.json({ ok: true, profile, isAdmin: isAdminProfile(profile), isModerator: isModeratorBucket(bucket), role: isAdminProfile(profile) ? 'admin' : (isModeratorBucket(bucket) ? 'moderator' : 'member'), onlineCount: getOnlineUsers(db).length, membership: bucket?.membership || getUserMembership(null, profile) });
+    res.json({ ok: true, profile, isAdmin: isAdminProfile(profile), isModerator: isModeratorBucket(bucket), role: getRoleForBucket(bucket, profile), onlineCount: getOnlineUsers(db).length, membership: bucket?.membership || getUserMembership(null, profile), suspension: suspensionPayload(bucket) });
   } catch (error) {
     res.status(error.status || 401).json({ ok: false, error: error?.message || "Google sign-in failed." });
   }
@@ -860,10 +937,10 @@ app.post("/api/auth/google", async (req, res) => {
 
 app.get("/api/auth/me", requireGoogleUser, async (req, res) => {
   const db = await readDb();
-  touchUser(db, req.stepperUser, userKeyFromClaims(req.stepperClaims));
+  const bucket = touchUser(db, req.stepperUser, userKeyFromClaims(req.stepperClaims));
+  assertNotSuspended(bucket, req.stepperUser);
   await writeDb(db);
-  const bucket = db.users[userKeyFromClaims(req.stepperClaims)] || null;
-  res.json({ ok: true, profile: req.stepperUser, isAdmin: isAdminProfile(req.stepperUser), isModerator: isModeratorBucket(bucket), role: isAdminProfile(req.stepperUser) ? 'admin' : (isModeratorBucket(bucket) ? 'moderator' : 'member'), onlineCount: getOnlineUsers(db).length, membership: bucket?.membership || getUserMembership(null, req.stepperUser) });
+  res.json({ ok: true, profile: req.stepperUser, isAdmin: isAdminProfile(req.stepperUser), isModerator: isModeratorBucket(bucket), role: getRoleForBucket(bucket, req.stepperUser), onlineCount: getOnlineUsers(db).length, membership: bucket?.membership || getUserMembership(null, req.stepperUser), suspension: suspensionPayload(bucket) });
 });
 
 app.get("/api/presence", async (_req, res) => {
@@ -878,7 +955,7 @@ app.post("/api/presence/heartbeat", requireGoogleUser, async (req, res) => {
   await writeDb(db);
   const onlineUsers = getOnlineUsers(db);
   const bucket = db.users[userKeyFromClaims(req.stepperClaims)] || null;
-  res.json({ ok: true, onlineCount: onlineUsers.length, members: onlineUsers, isAdmin: isAdminProfile(req.stepperUser), isModerator: isModeratorBucket(bucket), role: isAdminProfile(req.stepperUser) ? 'admin' : (isModeratorBucket(bucket) ? 'moderator' : 'member') });
+  res.json({ ok: true, onlineCount: onlineUsers.length, members: onlineUsers, isAdmin: isAdminProfile(req.stepperUser), isModerator: isModeratorBucket(bucket), role: getRoleForBucket(bucket, req.stepperUser), suspension: suspensionPayload(bucket) });
 });
 
 app.get("/api/cloud-saves", requireGoogleUser, async (req, res) => {
@@ -1175,6 +1252,163 @@ app.post('/api/admin/moderator-applications/:id/decline', requireAdmin, async (r
   res.json({ ok: true, item });
 });
 
+
+app.get('/api/admin/moderators', requireAdmin, async (_req, res) => {
+  const db = await readDb();
+  const items = Object.entries(db.users || {}).map(([userKey, bucket]) => {
+    const profile = bucket?.profile || {};
+    const activeSuspension = getActiveSuspension(bucket, profile);
+    return {
+      userKey,
+      email: String(profile.email || '').trim(),
+      name: String(profile.name || profile.email || '').trim(),
+      role: getRoleForBucket(bucket, profile),
+      suspension: activeSuspension ? suspensionPayload({ suspension: activeSuspension }) : null
+    };
+  }).filter(item => item.role === 'moderator').sort((a, b) => a.name.localeCompare(b.name));
+  await writeDb(db);
+  res.json({ ok: true, items });
+});
+
+app.post('/api/admin/moderators/add', requireAdmin, async (req, res) => {
+  const email = normalizeEmail(req.body?.email);
+  if (!email) return res.status(400).json({ ok: false, error: 'Enter a Google email address.' });
+  if (email === adminEmail) return res.status(400).json({ ok: false, error: 'Admin already has admin access.' });
+  const db = await readDb();
+  const userKey = findUserKeyByEmail(db, email);
+  const bucket = userKey && db.users[userKey] && typeof db.users[userKey] === 'object' ? db.users[userKey] : null;
+  if (!bucket) return res.status(404).json({ ok: false, error: 'That Google account has not signed into the site yet.' });
+  bucket.role = 'moderator';
+  bucket.membership = getUserMembership({ ...bucket, role: 'moderator' }, bucket.profile);
+  bucket.suspension = null;
+  db.users[userKey] = { ...bucket, role: 'moderator', membership: bucket.membership };
+  pushNotification(db, { userKey, email }, {
+    kind: 'Moderator',
+    title: 'Moderator access granted',
+    message: 'Admin added moderator access to your account.'
+  });
+  await writeDb(db);
+  res.json({ ok: true, item: { userKey, email, name: String(bucket.profile?.name || email).trim(), role: 'moderator' } });
+});
+
+app.post('/api/admin/moderators/:userKey/remove', requireAdmin, async (req, res) => {
+  const db = await readDb();
+  const userKey = String(req.params.userKey || '').trim();
+  const bucket = db.users[userKey] && typeof db.users[userKey] === 'object' ? db.users[userKey] : null;
+  if (!bucket) return res.status(404).json({ ok: false, error: 'Moderator not found.' });
+  if (isAdminProfile(bucket.profile)) return res.status(400).json({ ok: false, error: 'Admins cannot be removed here.' });
+  const note = String(req.body?.note || '').trim().slice(0, 800);
+  bucket.role = '';
+  bucket.membership = getUserMembership({ ...bucket, role: '' }, bucket.profile);
+  db.users[userKey] = { ...bucket, role: '', membership: bucket.membership };
+  pushNotification(db, { userKey, email: bucket.profile?.email }, {
+    kind: 'Moderator',
+    title: 'Moderator access removed',
+    message: `You were removed as moderator because: ${note || 'No admin reason was supplied.'}`
+  });
+  await writeDb(db);
+  res.json({ ok: true });
+});
+
+app.get('/api/admin/suspensions', requireAdmin, async (_req, res) => {
+  const db = await readDb();
+  const items = Object.entries(db.users || {}).map(([userKey, bucket]) => {
+    const profile = bucket?.profile || {};
+    const suspension = getActiveSuspension(bucket, profile);
+    if (!suspension) return null;
+    return {
+      userKey,
+      email: String(profile.email || '').trim(),
+      name: String(profile.name || profile.email || '').trim(),
+      suspension: suspensionPayload({ suspension })
+    };
+  }).filter(Boolean).sort((a, b) => new Date(b.suspension?.startedAt || 0) - new Date(a.suspension?.startedAt || 0));
+  await writeDb(db);
+  res.json({ ok: true, items });
+});
+
+app.post('/api/admin/suspend', requireAdmin, async (req, res) => {
+  const email = normalizeEmail(req.body?.email);
+  const durationMs = Math.max(60_000, Number(req.body?.durationMs || 300_000));
+  const durationLabel = String(req.body?.durationLabel || '').trim() || `${Math.round(durationMs / 60000)} minutes`;
+  const reason = String(req.body?.reason || '').trim().slice(0, 800);
+  if (!email) return res.status(400).json({ ok: false, error: 'Enter a Google email address.' });
+  if (email === adminEmail) return res.status(400).json({ ok: false, error: 'Admins cannot be banned.' });
+  const db = await readDb();
+  const userKey = findUserKeyByEmail(db, email);
+  const bucket = userKey && db.users[userKey] && typeof db.users[userKey] === 'object' ? db.users[userKey] : null;
+  if (!bucket) return res.status(404).json({ ok: false, error: 'That Google account has not signed into the site yet.' });
+  const untilAt = new Date(Date.now() + durationMs).toISOString();
+  bucket.suspension = {
+    startedAt: new Date().toISOString(),
+    untilAt,
+    reason: reason || 'an admin decision',
+    durationLabel,
+    byEmail: String(req.stepperUser?.email || '').trim()
+  };
+  db.users[userKey] = bucket;
+  pushNotification(db, { userKey, email }, {
+    kind: 'Suspension',
+    title: 'You were barred',
+    message: `You have been barred for ${durationLabel} long because of ${reason || 'an admin decision'}`
+  });
+  await writeDb(db);
+  res.json({ ok: true, item: { userKey, email, name: String(bucket.profile?.name || email).trim(), suspension: suspensionPayload(bucket) } });
+});
+
+app.post('/api/admin/suspensions/:userKey/lift', requireAdmin, async (req, res) => {
+  const db = await readDb();
+  const userKey = String(req.params.userKey || '').trim();
+  const bucket = db.users[userKey] && typeof db.users[userKey] === 'object' ? db.users[userKey] : null;
+  if (!bucket) return res.status(404).json({ ok: false, error: 'Suspended user not found.' });
+  bucket.suspension = null;
+  db.users[userKey] = bucket;
+  pushNotification(db, { userKey, email: bucket.profile?.email }, {
+    kind: 'Suspension',
+    title: 'Bar lifted',
+    message: 'Admin restored access to your account.'
+  });
+  await writeDb(db);
+  res.json({ ok: true });
+});
+
+app.get('/api/admin/security-alerts', requireAdmin, async (_req, res) => {
+  const db = await readDb();
+  const items = (Array.isArray(db.securityAlerts) ? db.securityAlerts : []).slice().sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  res.json({ ok: true, items });
+});
+
+app.post('/api/security-alerts/strike', requireGoogleUser, async (req, res) => {
+  const db = await readDb();
+  const key = userKeyFromClaims(req.stepperClaims);
+  const bucket = touchUser(db, req.stepperUser, key);
+  if (isAdminProfile(req.stepperUser)) return res.json({ ok: true, strikeCount: 0, alert: null });
+  const trigger = String(req.body?.trigger || 'client-inspection').trim().slice(0, 120);
+  const detail = String(req.body?.detail || '').trim().slice(0, 1200);
+  bucket.securityStrikes = Math.max(0, Number(bucket.securityStrikes || 0)) + 1;
+  let alert = null;
+  if (bucket.securityStrikes >= 3) {
+    alert = createSecurityAlert(db, {
+      userKey: key,
+      email: req.stepperUser?.email,
+      name: req.stepperUser?.name,
+      strikeCount: bucket.securityStrikes,
+      reason: 'Possible code inspection on the live site',
+      detail,
+      trigger
+    });
+    bucket.securityStrikes = 0;
+    pushNotification(db, { email: adminEmail }, {
+      kind: 'Security',
+      title: 'Security alert',
+      message: `${req.stepperUser?.email || 'A user'} hit 3 client-side inspection strikes.`
+    });
+  }
+  db.users[key] = bucket;
+  await writeDb(db);
+  res.json({ ok: true, strikeCount: bucket.securityStrikes, alert });
+});
+
 app.get('/api/moderator/submissions', requireModerator, async (_req, res) => {
   const db = await readDb();
   const registry = Array.isArray(db.danceRegistry) ? db.danceRegistry : [];
@@ -1234,7 +1468,7 @@ app.get('/api/subscription/status', requireGoogleUser, async (req, res) => {
   const bucket = touchUser(db, req.stepperUser, key);
   await writeDb(db);
   const membership = getUserMembership(bucket, req.stepperUser);
-  res.json({ ok: true, ...membership, role: isAdminProfile(req.stepperUser) ? 'admin' : (isModeratorBucket(bucket) ? 'moderator' : 'member'), isModerator: isModeratorBucket(bucket), stripeEnabled: !!stripeSecretKey, stripePublishableKey });
+  res.json({ ok: true, ...membership, role: getRoleForBucket(bucket, req.stepperUser), isModerator: isModeratorBucket(bucket), stripeEnabled: !!stripeSecretKey, stripePublishableKey, suspension: suspensionPayload(bucket) });
 });
 
 app.post('/api/subscription/create-checkout-session', requireGoogleUser, async (req, res) => {
