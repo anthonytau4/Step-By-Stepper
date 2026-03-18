@@ -1285,6 +1285,15 @@
     }
   }
 
+  function getSiteHelperTopOffset(){
+    const strip = state.ui && state.ui.tabStrip ? state.ui.tabStrip : null;
+    if (strip && strip.getBoundingClientRect) {
+      const rect = strip.getBoundingClientRect();
+      return `${Math.max(18, Math.round(rect.bottom + 12))}px`;
+    }
+    return '96px';
+  }
+
   function ensureSiteHelperHost(){
     let host = document.getElementById('stepper-site-helper-host');
     if (host) return host;
@@ -1292,7 +1301,8 @@
     host.id = 'stepper-site-helper-host';
     host.style.position = 'fixed';
     host.style.right = '14px';
-    host.style.bottom = '96px';
+    host.style.top = getSiteHelperTopOffset();
+    host.style.bottom = 'auto';
     host.style.zIndex = '8700';
     document.body.appendChild(host);
     return host;
@@ -1303,7 +1313,8 @@
     if (state.chatOpen && activeInput && activeInput.matches && activeInput.matches('[data-chat-input=\"1\"]')) return;
     const host = ensureSiteHelperHost();
     host.style.right = '14px';
-    host.style.bottom = '20px';
+    host.style.top = getSiteHelperTopOffset();
+    host.style.bottom = 'auto';
     host.style.zIndex = '8700';
     if (!state.chatMessages.length) {
       state.chatMessages = [{ role:'assistant', text:'Need help using the site? Ask me what tab to use, how featuring works, or how to save your dance.' }];
@@ -1440,6 +1451,11 @@
     const session = state.session;
     const profile = session && session.profile ? session.profile : null;
     const onlineCount = (state.presence && state.presence.onlineCount) || 0;
+    const moderatorStatus = isAdminSession()
+      ? 'Admin already has the full site controls.'
+      : (isModeratorSession()
+        ? 'This account already has moderator access and premium helper perks.'
+        : 'Apply for moderator here. A Google account is required before the request can be sent.');
 
     page.className = `rounded-3xl border shadow-sm overflow-hidden ${theme.shell}`;
 
@@ -1448,7 +1464,19 @@
         <div class="px-6 py-5 border-b ${theme.panel}">
           <h2 class="text-2xl font-black tracking-tight uppercase flex items-center gap-2"><span class="stepper-extra-tab-icon">${iconUser()}</span> Sign In</h2>
         </div>
-        <div class="p-6 sm:p-8">
+        <div class="p-6 sm:p-8 space-y-5">
+          <div class="mx-auto max-w-3xl rounded-3xl border p-5 sm:p-6 ${theme.soft}">
+            <div class="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <div class="text-lg font-black tracking-tight">Apply for moderator</div>
+                <p class="mt-2 text-sm ${theme.subtle}">${escapeHtml(moderatorStatus)}</p>
+              </div>
+              <div class="flex flex-wrap gap-3">
+                ${isAdminSession() ? `<span class="stepper-google-pill ${theme.orange}">${iconShield()} Admin</span>` : ''}
+                ${isModeratorSession() ? `<span class="stepper-google-pill ${theme.orange}">${iconShield()} Moderator</span>` : `<button type="button" data-stepper-action="apply-moderator" class="stepper-google-cta ${theme.button}">Apply for moderator</button>`}
+              </div>
+            </div>
+          </div>
           <div class="mx-auto max-w-3xl rounded-3xl border p-5 sm:p-6 ${theme.soft}">
             <div class="flex flex-wrap items-start justify-between gap-4">
               <div>
@@ -1476,7 +1504,16 @@
         <div class="px-6 py-5 border-b ${theme.panel}">
           <h2 class="text-2xl font-black tracking-tight uppercase flex items-center gap-2"><span class="stepper-extra-tab-icon">${iconUser()}</span> Sign In</h2>
         </div>
-        <div class="p-6 sm:p-8">
+        <div class="p-6 sm:p-8 space-y-5">
+          <div class="mx-auto max-w-2xl rounded-3xl border p-5 sm:p-6 ${theme.soft}">
+            <div class="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <div class="text-lg font-black tracking-tight">Apply for moderator</div>
+                <p class="mt-2 text-sm ${theme.subtle}">Must have a Google account to do so. Sign in first, then send the moderator request from this same page.</p>
+              </div>
+              <button type="button" data-stepper-action="apply-moderator-needs-signin" class="stepper-google-cta ${theme.button}">Apply for moderator</button>
+            </div>
+          </div>
           <div class="mx-auto max-w-2xl rounded-3xl border p-6 sm:p-8 ${theme.soft}">
             <div class="text-center">
               <div class="text-2xl font-black tracking-tight">Sign in with Google</div>
@@ -1501,6 +1538,10 @@
     if (uploadSiteBtn) uploadSiteBtn.addEventListener('click', () => requestModeration('site'));
     const openSubBtn = page.querySelector('[data-stepper-action="open-subscription"]');
     if (openSubBtn) openSubBtn.addEventListener('click', () => { openPage('subscription'); renderPages(); });
+    const applyModBtn = page.querySelector('[data-stepper-action="apply-moderator"]');
+    if (applyModBtn) applyModBtn.addEventListener('click', () => applyForModerator());
+    const applyNeedsSignInBtn = page.querySelector('[data-stepper-action="apply-moderator-needs-signin"]');
+    if (applyNeedsSignInBtn) applyNeedsSignInBtn.addEventListener('click', () => { alert('Sign in with Google first, then press Apply for moderator.'); });
 
     renderGoogleButton();
     renderPresenceOnly();
@@ -2327,11 +2368,34 @@
   }
 
   const __origAskSiteHelper = askSiteHelper;
+
+  function buildAiHelperSystemPrompt(){
+    return 'You are the premium Step By Stepper site helper. Reply like a natural AI assistant, not a canned bot. Stay focused on this site only. Give specific, practical guidance using the real tabs and buttons: Build, Sheet, Sign In, My Saved Dances, Featured Choreo, Subscription, Admin, Moderator, Save Changes, Send to host for featuring, Upload to site, and Apply for moderator. Mention cloud saving, moderator rules, badges, and premium perks when relevant. Keep answers helpful and concrete.';
+  }
+
+  function buildAiHelperPrompt(question, payload){
+    const historyText = (payload.history || []).map(message => `${message.role}: ${message.text}`).join('\n') || '(none)';
+    return `Current tab: ${payload.context.currentTab}
+Signed in: ${payload.context.signedIn ? 'yes' : 'no'}
+Admin: ${payload.context.isAdmin ? 'yes' : 'no'}
+Moderator: ${payload.context.isModerator ? 'yes' : 'no'}
+Premium: ${payload.context.isPremium ? 'yes' : 'no'}
+Online count: ${payload.context.onlineCount}
+Current dance title: ${payload.context.currentDanceTitle || 'none'}
+Current dance has unsaved changes: ${payload.context.hasUnsavedChanges ? 'yes' : 'no'}
+Conversation so far:
+${historyText}
+
+Newest user question: ${question}`;
+  }
+
   askSiteHelper = async function(question){
     const prompt = String(question || '').trim();
     if (!prompt) return;
     state.chatBusy = true;
     renderSiteHelper();
+    await refreshSession().catch(() => null);
+    await refreshSubscription().catch(() => null);
     const currentTab = state.activePage || 'main';
     const appData = readAppData();
     const payload = {
@@ -2342,37 +2406,59 @@
         signedIn: !!(state.session && state.session.credential),
         isAdmin: isAdminSession(),
         isModerator: isModeratorSession(),
+        isPremium: isPremiumSession(),
         onlineCount: (state.presence && state.presence.onlineCount) || 0,
-        currentDanceTitle: appData && appData.meta ? String(appData.meta.title || '').trim() : ''
+        currentDanceTitle: appData && appData.meta ? String(appData.meta.title || '').trim() : '',
+        hasUnsavedChanges: hasUnsavedChanges()
       }
     };
     try {
       let text = '';
-      try {
-        if (state.session && state.session.credential) {
+      let primaryError = null;
+      if (!payload.context.signedIn) {
+        text = 'Sign in with Google first. The AI helper and moderator applications both need a signed-in Google account.';
+      } else if (!(payload.context.isPremium || payload.context.isModerator || payload.context.isAdmin)) {
+        text = 'Premium or moderator access is needed for the AI helper. Open Subscription to upgrade, or apply for moderator from the top of the Sign In page.';
+      } else {
+        try {
           const data = await authFetch('/api/chatbot/help', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
           });
-          text = String(data.text || '').trim();
-        } else {
-          const data = await fetchJson('/api/openai/respond', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              system: 'You are the Step By Stepper site helper. Answer practically like ChatGPT about this site only. Mention exact tabs and buttons. Mention moderator rules and Subscription when useful.',
-              prompt: `Current tab: ${currentTab}\nSigned in: ${payload.context.signedIn ? 'yes' : 'no'}\nAdmin: ${payload.context.isAdmin ? 'yes' : 'no'}\nModerator: ${payload.context.isModerator ? 'yes' : 'no'}\nQuestion: ${prompt}`
-            })
-          });
-          text = String(data.text || '').trim();
+          text = String((data && data.text) || '').trim();
+        } catch (error) {
+          primaryError = error;
         }
-      } catch {
-        return __origAskSiteHelper(prompt);
+        if (!text) {
+          try {
+            const backup = await authFetch('/api/openai/respond', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                system: buildAiHelperSystemPrompt(),
+                prompt: buildAiHelperPrompt(prompt, payload)
+              })
+            });
+            text = String((backup && (backup.text || backup.output_text)) || '').trim();
+          } catch (error) {
+            if (!primaryError) primaryError = error;
+          }
+        }
+        if (!text && primaryError) {
+          if (Number(primaryError.status || 0) === 402) {
+            text = 'Premium helper access has not synced on the backend yet. Open Subscription once, wait a moment, then try the helper again.';
+          } else if (Number(primaryError.status || 0) === 401) {
+            text = 'Your Google sign-in expired. Sign in again, then ask the helper once more.';
+          } else {
+            throw primaryError;
+          }
+        }
       }
       state.chatMessages.push({ role:'assistant', text: text || localSiteHelp(prompt) });
-    } catch {
-      state.chatMessages.push({ role:'assistant', text: localSiteHelp(prompt) });
+    } catch (error) {
+      const message = String(error && error.message || '').trim();
+      state.chatMessages.push({ role:'assistant', text: message ? `The AI helper could not reach the backend just now: ${message}` : localSiteHelp(prompt) });
     } finally {
       state.chatBusy = false;
       renderSiteHelper();
