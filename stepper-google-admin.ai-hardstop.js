@@ -9,8 +9,6 @@
   const SESSION_KEY = 'stepper_google_auth_session_v2';
   const LAST_SAVED_SIGNATURE_KEY = 'stepper_last_saved_signature_v1';
   const API_BASE_KEY = 'stepper_api_base_v1';
-  const ADMIN_DRAFTS_KEY = 'stepper_admin_drafts_v1';
-  const MODERATOR_DRAFTS_KEY = 'stepper_moderator_drafts_v1';
   const SIGNIN_PAGE_ID = 'stepper-google-signin-page';
   const ADMIN_PAGE_ID = 'stepper-google-admin-page';
   const SUBSCRIPTION_PAGE_ID = 'stepper-google-subscription-page';
@@ -78,20 +76,9 @@
       admin: false,
       feature: false,
       sync: false
-    },
-    render: {
-      adminDataSignature: '',
-      moderatorDataSignature: '',
-      adminUiSignature: '',
-      moderatorUiSignature: '',
-      pendingAdminRender: false,
-      pendingModeratorRender: false
-    },
-    drafts: {
-      admin: readJson(ADMIN_DRAFTS_KEY, {}) || {},
-      moderator: readJson(MODERATOR_DRAFTS_KEY, {}) || {}
     }
   };
+  window.__stepperGoogleAdminState = state;
 
   function normalizeEmail(value){
     return String(value || '').trim().toLowerCase();
@@ -422,135 +409,6 @@
       .replace(/'/g, '&#39;');
   }
 
-  function safeStableStringify(value){
-    try {
-      return JSON.stringify(value, (key, inner) => {
-        if (inner && typeof inner === 'object' && !Array.isArray(inner)) {
-          return Object.keys(inner).sort().reduce((acc, currentKey) => {
-            acc[currentKey] = inner[currentKey];
-            return acc;
-          }, {});
-        }
-        return inner;
-      });
-    } catch {
-      return '';
-    }
-  }
-
-  function computeAdminDataSignature(){
-    return safeStableStringify({
-      adminDances: state.adminDances || [],
-      submissions: state.submissions || [],
-      moderatorApplications: state.moderatorApplications || [],
-      activeModerators: state.activeModerators || [],
-      suspensions: state.suspensions || [],
-      securityAlerts: state.securityAlerts || [],
-      glossaryRequests: state.glossaryRequests || [],
-      glossaryApproved: state.glossaryApproved || [],
-      siteMemories: state.siteMemories || [],
-      staffChat: state.staffChat || [],
-      presence: { onlineCount: (state.presence && state.presence.onlineCount) || 0 }
-    });
-  }
-
-  function computeModeratorDataSignature(){
-    return safeStableStringify({
-      moderatorQueue: state.moderatorQueue || [],
-      submissions: state.submissions || [],
-      activeModerators: state.activeModerators || [],
-      moderatorApplications: state.moderatorApplications || [],
-      session: { email: state.session && state.session.profile && state.session.profile.email, isModerator: !!(state.session && state.session.isModerator), role: state.session && state.session.role }
-    });
-  }
-
-  function isInteractiveField(el){
-    return !!(el && el.matches && el.matches('input, textarea, select, [contenteditable]:not([contenteditable="false"])') && !el.disabled && !el.readOnly);
-  }
-
-  function currentProtectedPageName(){
-    return state.activePage === 'admin' ? 'admin' : (state.activePage === 'moderator' ? 'moderator' : '');
-  }
-
-  function fieldDraftKey(el){
-    if (!el) return '';
-    const owner = el.closest('[data-stepper-submission-id], [data-stepper-registry-id], [data-stepper-modapp-id], [data-stepper-active-mod-key], [data-stepper-suspension-key], [data-stepper-site-memory-id], [data-stepper-glossary-request-id], [data-stepper-moderator-id], [data-stepper-staff-chat], [data-stepper-active-moderators], [data-stepper-security-alert-id]');
-    const ownerKey = owner
-      ? Array.from(owner.attributes || []).map(attr => `${attr.name}=${attr.value}`).join('|')
-      : 'page';
-    const selfKey = Array.from(el.attributes || [])
-      .filter(attr => /^data-|name$|placeholder$|type$/i.test(attr.name))
-      .map(attr => `${attr.name}=${attr.value}`)
-      .join('|') || `${el.tagName}:${el.className || ''}`;
-    return `${ownerKey}::${selfKey}`;
-  }
-
-  function persistInteractiveDraft(target){
-    const pageName = currentProtectedPageName();
-    if (!pageName || !isInteractiveField(target)) return;
-    const host = state.ui && state.ui.host;
-    if (!host || !host.contains(target)) return;
-    const key = fieldDraftKey(target);
-    if (!key) return;
-    const value = target.type === 'checkbox' ? !!target.checked : String(target.value == null ? '' : target.value);
-    state.drafts[pageName][key] = value;
-    saveDraftBucket(pageName);
-  }
-
-  function restoreInteractiveDrafts(page, pageName){
-    if (!page || !pageName || !state.drafts[pageName]) return;
-    page.querySelectorAll('input, textarea, select, [contenteditable]:not([contenteditable="false"])').forEach(el => {
-      const key = fieldDraftKey(el);
-      if (!key || !(key in state.drafts[pageName])) return;
-      const value = state.drafts[pageName][key];
-      if (el.type === 'checkbox') el.checked = !!value;
-      else if (String(el.value == null ? '' : el.value) != String(value)) el.value = String(value);
-    });
-  }
-
-  function saveDraftBucket(pageName){
-    const key = pageName === 'admin' ? ADMIN_DRAFTS_KEY : (pageName === 'moderator' ? MODERATOR_DRAFTS_KEY : '');
-    if (!key) return;
-    try { localStorage.setItem(key, JSON.stringify(state.drafts[pageName] || {})); } catch {}
-  }
-
-  function clearInteractiveDrafts(pageName){
-    if (pageName && state.drafts[pageName]) { state.drafts[pageName] = {}; saveDraftBucket(pageName); }
-  }
-
-  function isProtectedTypingActive(){
-    const pageName = currentProtectedPageName();
-    if (!pageName) return false;
-    const host = state.ui && state.ui.host;
-    const active = document.activeElement;
-    return !!(host && active && host.contains(active) && isInteractiveField(active));
-  }
-
-  function markPageDirty(pageName){
-    if (pageName === 'admin') state.render.pendingAdminRender = true;
-    if (pageName === 'moderator') state.render.pendingModeratorRender = true;
-  }
-
-  function flushPendingProtectedRender(){
-    if (isProtectedTypingActive()) return;
-    if (state.activePage === 'admin' && state.render.pendingAdminRender) renderPages({ reason: 'deferred-admin', force: true });
-    if (state.activePage === 'moderator' && state.render.pendingModeratorRender) renderPages({ reason: 'deferred-moderator', force: true });
-  }
-
-  document.addEventListener('input', (event) => {
-    persistInteractiveDraft(event.target);
-  }, true);
-
-  document.addEventListener('change', (event) => {
-    persistInteractiveDraft(event.target);
-  }, true);
-
-  document.addEventListener('focusout', () => {
-    window.requestAnimationFrame(() => {
-      flushPendingProtectedRender();
-    });
-  }, true);
-
   function formatDate(value){
     if (!value) return 'Recently';
     try {
@@ -625,8 +483,7 @@
       #${HOST_ID}[hidden] { display: none !important; }
       .stepper-google-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; }
       .stepper-google-pill { display:inline-flex; align-items:center; gap:.45rem; border-radius:999px; padding:.5rem .85rem; font-size:.72rem; font-weight:900; letter-spacing:.16em; text-transform:uppercase; }
-      .stepper-google-stat { position:relative; overflow:hidden; border-radius:1rem; border:1px solid rgba(99,102,241,.16); padding:1rem; }
-      .stepper-google-stat::before { content:''; position:absolute; inset:0; background:radial-gradient(circle at top right, rgba(255,255,255,.22), transparent 46%); pointer-events:none; }
+      .stepper-google-stat { border-radius:1rem; border:1px solid rgba(99,102,241,.16); padding:1rem; }
       .stepper-google-badge-row { display:flex; flex-wrap:wrap; gap:.65rem; }
       .stepper-google-badge-btn { border-radius:999px; padding:.6rem .95rem; font-weight:900; letter-spacing:.08em; text-transform:uppercase; border:1px solid transparent; transition:transform .18s ease, box-shadow .18s ease, opacity .18s ease; }
       .stepper-google-badge-btn:hover { transform:translateY(-1px); box-shadow:0 10px 24px rgba(0,0,0,.12); }
@@ -637,12 +494,7 @@
       .dark .stepper-google-badge-btn[data-tone="silver"] { background:rgba(148,163,184,.12); color:#e5e7eb; border-color:rgba(148,163,184,.25); }
       .dark .stepper-google-badge-btn[data-tone="gold"] { background:rgba(250,204,21,.16); color:#fde68a; border-color:rgba(250,204,21,.3); }
       .stepper-google-input { width:100%; border-radius:1rem; border:1px solid rgba(148,163,184,.28); padding:.9rem 1rem; background:transparent; }
-      .stepper-google-cta { position:relative; overflow:hidden; display:inline-flex; align-items:center; justify-content:center; gap:.65rem; border-radius:1rem; padding:.85rem 1.1rem; font-weight:900; border:1px solid rgba(99,102,241,.18); transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
-      .stepper-google-cta:hover, .stepper-google-badge-btn:hover { transform:translateY(-1px); }
-      .stepper-google-cta:focus-visible, .stepper-google-badge-btn:focus-visible, .stepper-google-input:focus { outline:none; box-shadow:0 0 0 3px rgba(99,102,241,.16), 0 16px 34px rgba(0,0,0,.12); border-color:rgba(99,102,241,.42); }
-      .stepper-google-cta::after, .stepper-google-badge-btn::after { content:''; position:absolute; inset:-120% auto auto -35%; width:36%; height:300%; background:linear-gradient(115deg, transparent 0%, rgba(255,255,255,.0) 30%, rgba(255,255,255,.33) 50%, rgba(255,255,255,0) 70%, transparent 100%); transform:rotate(18deg); opacity:.55; pointer-events:none; animation:stepperAdminGlint 5.8s linear infinite; }
-      .dark .stepper-google-cta::after, .dark .stepper-google-badge-btn::after { background:linear-gradient(115deg, transparent 0%, rgba(255,255,255,.0) 30%, rgba(255,255,255,.2) 50%, rgba(255,255,255,0) 70%, transparent 100%); }
-      @keyframes stepperAdminGlint { 0% { left:-45%; opacity:0; } 8% { opacity:.18; } 18% { opacity:.55; } 30% { left:120%; opacity:0; } 100% { left:120%; opacity:0; } }
+      .stepper-google-cta { display:inline-flex; align-items:center; justify-content:center; gap:.65rem; border-radius:1rem; padding:.85rem 1.1rem; font-weight:900; border:1px solid rgba(99,102,241,.18); }
       .stepper-google-danger { border-color:rgba(239,68,68,.22); }
       .stepper-google-muted-list { display:grid; gap:.85rem; }
       .stepper-google-member-item { display:flex; align-items:center; justify-content:space-between; gap:1rem; }
@@ -770,7 +622,7 @@
     renderPages();
     updateTabButtons();
     refreshLiveQueues().then(() => {
-      if (state.activePage) renderPages({ reason: 'open-page', force: true });
+      if (state.activePage) renderPages();
     }).catch(() => {});
   }
 
@@ -1311,11 +1163,9 @@
     try {
       const data = await authFetch('/api/admin/dances');
       state.adminDances = Array.isArray(data.items) ? data.items : [];
-      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
       return state.adminDances;
     } catch {
       state.adminDances = [];
-      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
       return [];
     } finally {
       state.busy.admin = false;
@@ -1480,13 +1330,9 @@
     try {
       const data = await authFetch('/api/admin/submissions');
       state.submissions = Array.isArray(data.items) ? data.items : [];
-      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
-      if (computeModeratorDataSignature() !== state.render.moderatorDataSignature) markPageDirty('moderator');
       return state.submissions;
     } catch {
       state.submissions = [];
-      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
-      if (computeModeratorDataSignature() !== state.render.moderatorDataSignature) markPageDirty('moderator');
       return [];
     }
   }
@@ -1580,13 +1426,9 @@
     try {
       const data = await fetchJson('/api/glossary/steps');
       state.glossaryApproved = Array.isArray(data.items) ? data.items : [];
-      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
-      if (computeModeratorDataSignature() !== state.render.moderatorDataSignature) markPageDirty('moderator');
       return state.glossaryApproved;
     } catch {
       state.glossaryApproved = [];
-      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
-      if (computeModeratorDataSignature() !== state.render.moderatorDataSignature) markPageDirty('moderator');
       return [];
     }
   }
@@ -1596,13 +1438,9 @@
     try {
       const data = await fetchJson('/api/site-memory');
       state.siteMemories = Array.isArray(data.items) ? data.items : [];
-      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
-      if (computeModeratorDataSignature() !== state.render.moderatorDataSignature) markPageDirty('moderator');
       return state.siteMemories;
     } catch (_error) {
       state.siteMemories = [];
-      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
-      if (computeModeratorDataSignature() !== state.render.moderatorDataSignature) markPageDirty('moderator');
       return [];
     }
   }
@@ -1640,20 +1478,14 @@
   async function refreshGlossaryRequests(){
     if (!isAdminSession()) {
       state.glossaryRequests = [];
-      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
-      if (computeModeratorDataSignature() !== state.render.moderatorDataSignature) markPageDirty('moderator');
       return [];
     }
     try {
       const data = await authFetch('/api/admin/glossary-requests');
       state.glossaryRequests = Array.isArray(data.items) ? data.items : [];
-      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
-      if (computeModeratorDataSignature() !== state.render.moderatorDataSignature) markPageDirty('moderator');
       return state.glossaryRequests;
     } catch {
       state.glossaryRequests = [];
-      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
-      if (computeModeratorDataSignature() !== state.render.moderatorDataSignature) markPageDirty('moderator');
       return [];
     }
   }
@@ -2326,16 +2158,11 @@
     renderPages();
   }
 
-  function renderAdminPage(options){
-    const opts = options && typeof options === 'object' ? options : {};
+  function renderAdminPage(){
     const page = document.getElementById(ADMIN_PAGE_ID);
     if (!page) return;
     const theme = themeClasses();
-    const dataSignature = computeAdminDataSignature();
     if (!isAdminSession()) {
-      clearInteractiveDrafts('admin');
-      state.render.adminUiSignature = '';
-      state.render.adminDataSignature = dataSignature;
       page.className = `rounded-3xl border shadow-sm overflow-hidden ${theme.shell}`;
       page.innerHTML = `
         <div class="px-6 py-5 border-b ${theme.panel}">
@@ -2414,12 +2241,6 @@
       </div>
     `;
 
-    const uiSignature = `${theme.dark ? 'dark' : 'light'}::${dataSignature}`;
-    if (!opts.force && page.dataset.stepperRendered === 'true' && state.render.adminUiSignature === uiSignature) {
-      state.render.adminDataSignature = dataSignature;
-      state.render.pendingAdminRender = false;
-      return;
-    }
     page.className = `rounded-3xl border shadow-sm overflow-hidden ${theme.shell}`;
     page.innerHTML = `
       <div class="px-6 py-5 border-b ${theme.panel}">
@@ -2467,12 +2288,6 @@
       </div>
     `;
 
-    page.dataset.stepperRendered = 'true';
-    state.render.adminUiSignature = uiSignature;
-    state.render.adminDataSignature = dataSignature;
-    state.render.pendingAdminRender = false;
-    restoreInteractiveDrafts(page, 'admin');
-
     page.querySelectorAll('[data-stepper-submission-id]').forEach(card => {
       const submissionId = card.getAttribute('data-stepper-submission-id');
       const registryId = card.getAttribute('data-stepper-submission-registry-id');
@@ -2509,14 +2324,14 @@
       const input = page.querySelector('[data-stepper-staff-chat-input="1"]');
       const text = input && input.value;
       sendStaffChat(text);
-      if (input) { delete state.drafts.admin[fieldDraftKey(input)]; saveDraftBucket('admin'); input.value = ''; }
+      if (input) input.value = '';
     });
 
     const addModeratorBtn = page.querySelector('[data-action="add-moderator-email"]');
     if (addModeratorBtn) addModeratorBtn.addEventListener('click', () => {
       const emailEl = page.querySelector('[data-add-moderator-email="1"]');
       addModeratorByEmail(emailEl && emailEl.value);
-      if (emailEl) { delete state.drafts.admin[fieldDraftKey(emailEl)]; saveDraftBucket('admin'); emailEl.value = ''; }
+      if (emailEl) emailEl.value = '';
     });
     const suspendBtn = page.querySelector('[data-action="suspend-person"]');
     if (suspendBtn) suspendBtn.addEventListener('click', () => {
@@ -2538,7 +2353,7 @@
       const input = page.querySelector('[data-stepper-site-memory-input="1"]');
       const value = input ? input.value : '';
       const ok = await addSiteMemory(value);
-      if (ok && input) { delete state.drafts.admin[fieldDraftKey(input)]; saveDraftBucket('admin'); input.value = ''; }
+      if (ok && input) input.value = '';
     });
     page.querySelectorAll('[data-stepper-site-memory-id]').forEach(card => {
       const id = card.getAttribute('data-stepper-site-memory-id') || '';
@@ -2630,17 +2445,12 @@
     observer.observe(page, { childList: true, subtree: true, characterData: true });
   }
 
-  function renderPages(options){
-    const opts = options && typeof options === 'object' ? options : {};
-    if (isProtectedTypingActive() && !opts.force) {
-      markPageDirty(currentProtectedPageName());
-      return;
-    }
+  function renderPages(){
     locateUi();
     ensureHost();
     renderSignInPage();
     renderSubscriptionPage();
-    renderAdminPage(opts);
+    renderAdminPage();
     syncPageVisibility();
     renderPresenceOnly();
     renderSuspensionBanner();
@@ -2685,17 +2495,6 @@
     await syncFeaturedFromBackend();
     renderPages();
   }
-
-  document.addEventListener('click', (event) => {
-    const button = event.target && event.target.closest ? event.target.closest('button') : null;
-    if (!button) return;
-    const pageName = currentProtectedPageName();
-    if (!pageName) return;
-    const host = state.ui && state.ui.host;
-    if (!host || !host.contains(button)) return;
-    if (pageName === 'admin') state.render.pendingAdminRender = false;
-    if (pageName === 'moderator') state.render.pendingModeratorRender = false;
-  }, true);
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', prime, { once:true });
@@ -2745,9 +2544,7 @@
   window.addEventListener('storage', () => {
     if (state.session && state.session.credential) syncCurrentDanceToBackend(false);
     state.savedDancesUiSignature = '';
-    markPageDirty('admin');
-    markPageDirty('moderator');
-    renderPages({ reason: 'storage' });
+    renderPages();
   });
 
   async function refreshSubscription(){
@@ -3028,13 +2825,9 @@
     try {
       const data = await authFetch('/api/moderator/submissions');
       state.moderatorQueue = Array.isArray(data.items) ? data.items : [];
-      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
-      if (computeModeratorDataSignature() !== state.render.moderatorDataSignature) markPageDirty('moderator');
       return state.moderatorQueue;
     } catch {
       state.moderatorQueue = [];
-      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
-      if (computeModeratorDataSignature() !== state.render.moderatorDataSignature) markPageDirty('moderator');
       return [];
     }
   }
@@ -3044,13 +2837,9 @@
     try {
       const data = await authFetch('/api/admin/moderator-applications');
       state.moderatorApplications = Array.isArray(data.items) ? data.items : [];
-      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
-      if (computeModeratorDataSignature() !== state.render.moderatorDataSignature) markPageDirty('moderator');
       return state.moderatorApplications;
     } catch {
       state.moderatorApplications = [];
-      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
-      if (computeModeratorDataSignature() !== state.render.moderatorDataSignature) markPageDirty('moderator');
       return [];
     }
   }
@@ -3060,13 +2849,9 @@
     try {
       const data = await authFetch('/api/admin/moderators');
       state.activeModerators = Array.isArray(data.items) ? data.items : [];
-      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
-      if (computeModeratorDataSignature() !== state.render.moderatorDataSignature) markPageDirty('moderator');
       return state.activeModerators;
     } catch {
       state.activeModerators = [];
-      if (computeAdminDataSignature() !== state.render.adminDataSignature) markPageDirty('admin');
-      if (computeModeratorDataSignature() !== state.render.moderatorDataSignature) markPageDirty('moderator');
       return [];
     }
   }
@@ -3292,28 +3077,17 @@
     }
   };
 
-  function renderModeratorPage(options){
-    const opts = options && typeof options === 'object' ? options : {};
+  function renderModeratorPage(){
     const page = document.getElementById(MODERATOR_PAGE_ID);
     if (!page) return;
     const theme = themeClasses();
-    const dataSignature = computeModeratorDataSignature();
     page.className = `rounded-3xl border shadow-sm overflow-hidden ${theme.shell}`;
     if (!(state.session && state.session.credential) || !isModeratorSession()) {
-      clearInteractiveDrafts('moderator');
-      state.render.moderatorUiSignature = '';
-      state.render.moderatorDataSignature = dataSignature;
       page.innerHTML = `
         <div class="px-6 py-5 border-b ${theme.panel}">
           <h2 class="text-2xl font-black tracking-tight uppercase flex items-center gap-2"><span class="stepper-extra-tab-icon">${iconShield()}</span> Moderator</h2>
         </div>
         <div class="p-6 sm:p-8"><div class="rounded-3xl border p-6 sm:p-8 text-center ${theme.soft}"><p class="text-lg font-black">Moderator access only.</p><p class="mt-2 text-sm ${theme.subtle}">Apply in Subscription. Once admin approves it, this tab appears and the premium helper perks come with it.</p></div></div>`;
-      return;
-    }
-    const uiSignature = `${theme.dark ? 'dark' : 'light'}::${dataSignature}`;
-    if (!opts.force && page.dataset.stepperRendered === 'true' && state.render.moderatorUiSignature === uiSignature) {
-      state.render.moderatorDataSignature = dataSignature;
-      state.render.pendingModeratorRender = false;
       return;
     }
     const cards = state.moderatorQueue.length ? state.moderatorQueue.map(item => `
@@ -3352,12 +3126,6 @@
         </div>
         ${cards}
       </div>`;
-    page.dataset.stepperRendered = 'true';
-    state.render.moderatorUiSignature = uiSignature;
-    state.render.moderatorDataSignature = dataSignature;
-    state.render.pendingModeratorRender = false;
-    restoreInteractiveDrafts(page, 'moderator');
-
     page.querySelectorAll('[data-stepper-moderator-id]').forEach(card => {
       const submissionId = card.getAttribute('data-stepper-moderator-id');
       const item = (state.moderatorQueue || []).find(entry => String((entry && entry.id) || '') === String(submissionId || ''));
@@ -3583,15 +3351,10 @@ Newest user question: ${question}`;
   }
 
   const __origRenderPages = renderPages;
-  renderPages = function(options){
-    const opts = options && typeof options === 'object' ? options : {};
-    if (isProtectedTypingActive() && !opts.force) {
-      markPageDirty(currentProtectedPageName());
-      return;
-    }
-    __origRenderPages(opts);
+  renderPages = function(){
+    __origRenderPages();
     ensureHost();
-    renderModeratorPage(opts);
+    renderModeratorPage();
     decorateSubscriptionPage();
     decorateAdminPage();
     renderCommunityGlossary();
@@ -3614,17 +3377,161 @@ Newest user question: ${question}`;
   setInterval(() => {
     if (__stepperLiveQueueRefreshBusy || !(state.session && state.session.credential)) return;
     __stepperLiveQueueRefreshBusy = true;
-    const beforeAdminSignature = computeAdminDataSignature();
-    const beforeModeratorSignature = computeModeratorDataSignature();
     refreshLiveQueues().then(() => {
-      const adminChanged = computeAdminDataSignature() !== beforeAdminSignature;
-      const moderatorChanged = computeModeratorDataSignature() !== beforeModeratorSignature;
-      if (adminChanged) markPageDirty('admin');
-      if (moderatorChanged) markPageDirty('moderator');
-      if (state.activePage === 'admin' && adminChanged) renderPages({ reason: 'live-queue-admin' });
-      if (state.activePage === 'moderator' && moderatorChanged) renderPages({ reason: 'live-queue-moderator' });
-      if ((state.activePage === 'signin' || state.activePage === 'subscription') && (adminChanged || moderatorChanged)) renderPages({ reason: 'live-queue-surface' });
+      if (state.activePage === 'admin' || state.activePage === 'moderator' || state.activePage === 'signin' || state.activePage === 'subscription') renderPages();
     }).catch(() => {}).finally(() => { __stepperLiveQueueRefreshBusy = false; });
   }, LIVE_QUEUE_SYNC_INTERVAL_MS);
 
+
+  state.pendingModeratorInvites = Array.isArray(state.pendingModeratorInvites) ? state.pendingModeratorInvites : [];
+
+  function hasDangerousTypingFocus(){
+    const el = document.activeElement;
+    if (!el) return false;
+    const editable = el instanceof HTMLTextAreaElement
+      || el instanceof HTMLSelectElement
+      || (el instanceof HTMLInputElement && !['button','submit','reset','checkbox','radio','file','color','range'].includes(String(el.type || 'text').toLowerCase()))
+      || !!(el.closest && el.closest('[contenteditable="true"]'));
+    if (!editable) return false;
+    return !!(el.closest && el.closest('#' + ADMIN_PAGE_ID + ', #' + MODERATOR_PAGE_ID + ', #' + SIGNIN_PAGE_ID + ', #' + SUBSCRIPTION_PAGE_ID));
+  }
+
+  let __stepperPendingDangerRender = false;
+  const __dangerRenderPages = renderPages;
+  renderPages = function(){
+    if (hasDangerousTypingFocus()) {
+      __stepperPendingDangerRender = true;
+      return;
+    }
+    __stepperPendingDangerRender = false;
+    __dangerRenderPages();
+
+    const signinPage = document.getElementById(SIGNIN_PAGE_ID);
+    if (signinPage) {
+      const applyBtn = signinPage.querySelector('[data-stepper-action="apply-moderator"]');
+      const applyCard = applyBtn ? applyBtn.closest('.rounded-3xl.border') : null;
+      if (applyCard) {
+        const title = applyCard.querySelector('.text-lg.font-black.tracking-tight');
+        const subtle = applyCard.querySelector('p');
+        if (title) title.textContent = 'Staff access';
+        if (subtle) subtle.textContent = 'Moderator access is invite-only now. Admin can approve a Gmail in the database first, and it will unlock automatically on sign-in.';
+        if (applyBtn.parentElement) applyBtn.parentElement.innerHTML = '<span class="stepper-google-pill ' + themeClasses().orange + '">Invite only</span>';
+      }
+    }
+
+    const adminPage = document.getElementById(ADMIN_PAGE_ID);
+    if (adminPage) {
+      const activeSection = adminPage.querySelector('[data-stepper-active-moderators="1"]');
+      if (activeSection) {
+        let wrap = activeSection.querySelector('[data-stepper-pending-invites="1"]');
+        const theme = themeClasses();
+        if (!wrap) {
+          wrap = document.createElement('div');
+          wrap.setAttribute('data-stepper-pending-invites', '1');
+          wrap.className = 'mt-4 rounded-2xl border p-4 ' + theme.soft;
+          activeSection.appendChild(wrap);
+        }
+        const pending = Array.isArray(state.pendingModeratorInvites) ? state.pendingModeratorInvites : [];
+        wrap.innerHTML = `
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div class="text-sm font-black uppercase tracking-widest">Invite-only roadblock</div>
+              <p class="mt-1 text-sm ${theme.subtle}">If the Gmail has never signed in yet, the invite stays in the database and auto-activates later.</p>
+            </div>
+            <span class="stepper-google-pill ${theme.orange}">${escapeHtml(String(pending.length))} waiting</span>
+          </div>
+          <div class="mt-4 grid gap-3">${pending.length ? pending.map(item => `
+            <article class="rounded-2xl border p-4 ${theme.panel}" data-stepper-pending-invite-email="${escapeHtml(item.email || '')}">
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div class="text-base font-black">${escapeHtml(item.email || '')}</div>
+                  <p class="mt-1 text-sm ${theme.subtle}">Waiting for first Google sign-in</p>
+                </div>
+                <button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="remove-pending-invite">Delete invite</button>
+              </div>
+            </article>`).join('') : `<p class="text-sm ${theme.subtle}">No pending Gmail invites.</p>`}
+          </div>`;
+        wrap.querySelectorAll('[data-stepper-pending-invite-email]').forEach(card => {
+          const email = card.getAttribute('data-stepper-pending-invite-email');
+          const btn = card.querySelector('[data-action="remove-pending-invite"]');
+          if (btn) btn.addEventListener('click', () => removePendingModeratorInvite(email));
+        });
+      }
+    }
+  };
+
+  window.addEventListener('focusin', () => {
+    if (!__stepperPendingDangerRender) return;
+    clearTimeout(window.__stepperPendingDangerRenderTimer);
+    window.__stepperPendingDangerRenderTimer = setTimeout(() => {
+      if (!hasDangerousTypingFocus() && __stepperPendingDangerRender) renderPages();
+    }, 250);
+  }, true);
+
+  const __dangerOpenPage = openPage;
+  openPage = function(pageName){
+    const result = __dangerOpenPage(pageName);
+    if (state.ui.mainEl) state.ui.mainEl.style.display = state.activePage ? 'none' : '';
+    if (state.ui.footerWrap) state.ui.footerWrap.style.display = state.activePage ? 'none' : '';
+    return result;
+  };
+
+  const __dangerClosePages = closePages;
+  closePages = function(){
+    const result = __dangerClosePages();
+    if (state.ui.mainEl) state.ui.mainEl.style.display = '';
+    if (state.ui.footerWrap) state.ui.footerWrap.style.display = '';
+    return result;
+  };
+
+  async function removePendingModeratorInvite(email){
+    try {
+      const data = await authFetch('/api/admin/moderators/invites/remove', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+      state.pendingModeratorInvites = Array.isArray(data && data.pendingInvites) ? data.pendingInvites : [];
+      renderPages();
+    } catch (error) {
+      alert(error.message || 'Could not remove that pending invite.');
+    }
+  }
+
+  const __dangerRefreshActiveModerators = refreshActiveModerators;
+  refreshActiveModerators = async function(){
+    if (!isAdminSession()) { state.activeModerators = []; state.pendingModeratorInvites = []; return []; }
+    try {
+      const data = await authFetch('/api/admin/moderators');
+      state.activeModerators = Array.isArray(data.items) ? data.items : [];
+      state.pendingModeratorInvites = Array.isArray(data.pendingInvites) ? data.pendingInvites : [];
+      return state.activeModerators;
+    } catch (error) {
+      state.pendingModeratorInvites = [];
+      return __dangerRefreshActiveModerators();
+    }
+  };
+
+  addModeratorByEmail = async function(email){
+    try {
+      const data = await authFetch('/api/admin/moderators/add', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ email })
+      });
+      state.pendingModeratorInvites = Array.isArray(data && data.pendingInvites) ? data.pendingInvites : state.pendingModeratorInvites;
+      await Promise.all([refreshActiveModerators(), refreshModeratorApplications()]);
+      renderPages();
+      alert(data && data.pending ? 'Moderator invite saved to the database. It activates when that Gmail signs in.' : 'Moderator added.');
+    } catch (error) {
+      alert(error.message || 'Could not add moderator.');
+    }
+  };
+
+  applyForModerator = async function(){
+    alert('Moderator access is invite-only now. Admin needs to add your Gmail in the database first.');
+    return false;
+  };
+
 })();
+
