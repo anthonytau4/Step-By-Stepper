@@ -3331,9 +3331,18 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     scrollToPhrasedPanel();
   }
 
-  function renderPhrasedPanel(){
+  function renderPhrasedPanel(force){
     const panel = document.getElementById(PHR_PANEL_ID);
     if (!panel) return;
+    const active = document.activeElement;
+    const freezeRender = !force && active && panel.contains(active) && active.matches && active.matches('input, textarea, select');
+    if (freezeRender) return;
+    const focusSnapshot = active && panel.contains(active) && active.matches && active.matches('input, textarea, select') ? {
+      selector: active.getAttribute('data-preserve-focus-selector') || '',
+      value: 'value' in active ? active.value : '',
+      selectionStart: typeof active.selectionStart === 'number' ? active.selectionStart : null,
+      selectionEnd: typeof active.selectionEnd === 'number' ? active.selectionEnd : null
+    } : null;
     const data = readAppData() || { meta:{}, sections:[], tags:[] };
     const tools = ensurePartDefaults(data);
     const theme = themeClasses();
@@ -3346,8 +3355,8 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     const partsHtml = tools.parts.length ? tools.parts.map((part, index) => `
       <article class="rounded-3xl border p-5 sm:p-6 ${theme.soft}" data-part-id="${escapeHtml(part.id)}">
         <div class="stepper-tools-grid">
-          <div class="stepper-field"><label>Part Label</label><input type="text" maxlength="8" data-part-field="label" value="${escapeHtml(part.label)}"></div>
-          <div class="stepper-field"><label>Part Title</label><input type="text" maxlength="80" data-part-field="title" value="${escapeHtml(part.title)}" placeholder="Optional Part Title"></div>
+          <div class="stepper-field"><label>Part Label</label><input type="text" maxlength="8" data-part-field="label" data-preserve-focus-selector="part-label-${escapeHtml(part.id)}" value="${escapeHtml(part.label)}"></div>
+          <div class="stepper-field"><label>Part Title</label><input type="text" maxlength="80" data-part-field="title" data-preserve-focus-selector="part-title-${escapeHtml(part.id)}" value="${escapeHtml(part.title)}" placeholder="Optional Part Title"></div>
         </div>
         <div class="mt-4">
           <div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Sections in this Part</div>
@@ -3368,7 +3377,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
 
     const sequenceHtml = tools.sequence.length ? tools.sequence.map((item, index) => `
       <div class="stepper-seq-row" data-seq-index="${index}">
-        <div class="stepper-field"><label>${index === 0 ? 'Sequence' : 'Next'}</label><select data-seq-select>${options.map(option => `<option value="${escapeHtml(option.value)}" ${option.value === `${item.kind}:${item.id}` ? 'selected' : ''}>${escapeHtml(option.label)}</option>`).join('')}</select></div>
+        <div class="stepper-field"><label>${index === 0 ? 'Sequence' : 'Next'}</label><select data-seq-select data-preserve-focus-selector="seq-${index}">${options.map(option => `<option value="${escapeHtml(option.value)}" ${option.value === `${item.kind}:${item.id}` ? 'selected' : ''}>${escapeHtml(option.label)}</option>`).join('')}</select></div>
         <button type="button" data-action="add-after" class="stepper-mini-btn ${theme.accent}">+</button>
         <button type="button" data-action="remove-seq" class="stepper-danger-btn stepper-row-trash ${theme.dark ? 'bg-red-500/15 text-red-300 border border-red-400/20' : 'bg-red-50 text-red-700 border border-red-200'}">Delete</button>
       </div>
@@ -3472,6 +3481,17 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
         renderCustomPanels();
       });
     });
+
+
+    if (focusSnapshot && focusSnapshot.selector) {
+      const target = panel.querySelector('[data-preserve-focus-selector="' + focusSnapshot.selector.replace(/"/g, '&quot;') + '"]');
+      if (target) {
+        target.focus({ preventScroll:true });
+        if (typeof focusSnapshot.selectionStart === 'number' && typeof target.setSelectionRange === 'function') {
+          try { target.setSelectionRange(focusSnapshot.selectionStart, focusSnapshot.selectionEnd == null ? focusSnapshot.selectionStart : focusSnapshot.selectionEnd); } catch (_) {}
+        }
+      }
+    }
 
     panel.querySelectorAll('[data-seq-index]').forEach(row => {
       const index = Number(row.getAttribute('data-seq-index')) || 0;

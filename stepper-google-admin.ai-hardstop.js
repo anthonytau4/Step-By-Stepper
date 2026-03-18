@@ -47,6 +47,7 @@
     glossaryRequests: [],
     siteMemories: [],
     aiDance: { busy: false, mode: 'judge', prompt: '', result: null },
+    glossaryDraft: { name:'', counts:'', foot:'', tags:'', description:'' },
     communityGlossaryOpen: false,
     subscription: { isPremium: false, plan: 'free', status: 'free', source: 'unknown' },
     savedDancesUiSignature: '',
@@ -88,25 +89,66 @@
     return String(value || '').trim().replace(/\/+$/, '');
   }
 
+  function isEditableElement(node){
+    return !!(node && node.matches && node.matches('input, textarea, select, [contenteditable="true"], [contenteditable=""]'));
+  }
+
+  function shouldFreezeRender(container){
+    const active = document.activeElement;
+    return !!(active && container && container.contains(active) && isEditableElement(active));
+  }
+
+  function captureFocusSnapshot(container){
+    const active = document.activeElement;
+    if (!(active && container && container.contains(active) && isEditableElement(active))) return null;
+    const selector = active.getAttribute('data-preserve-focus-selector') || active.getAttribute('data-preserve-focus') || active.getAttribute('data-part-field') || active.getAttribute('data-part-section') || active.getAttribute('data-seq-select') || active.getAttribute('data-stepper-ai-prompt') || active.getAttribute('data-stepper-glossary-name') || active.getAttribute('data-stepper-glossary-counts') || active.getAttribute('data-stepper-glossary-foot') || active.getAttribute('data-stepper-glossary-tags') || active.getAttribute('data-stepper-glossary-description') || active.name || active.id || '';
+    return {
+      tag: active.tagName,
+      selector,
+      value: 'value' in active ? active.value : '',
+      selectionStart: typeof active.selectionStart === 'number' ? active.selectionStart : null,
+      selectionEnd: typeof active.selectionEnd === 'number' ? active.selectionEnd : null,
+      preserveAttr: active.getAttribute('data-preserve-focus-selector') ? 'data-preserve-focus-selector' : (active.getAttribute('data-preserve-focus') ? 'data-preserve-focus' : null)
+    };
+  }
+
+  function restoreFocusSnapshot(container, snapshot){
+    if (!(container && snapshot)) return;
+    let node = null;
+    if (snapshot.preserveAttr && snapshot.selector) {
+      node = container.querySelector('[' + snapshot.preserveAttr + '="' + cssEscape(snapshot.selector) + '"]');
+    }
+    if (!node && snapshot.selector) {
+      node = container.querySelector('[data-part-field="' + cssEscape(snapshot.selector) + '"], [data-part-section="' + cssEscape(snapshot.selector) + '"], [data-seq-select], [data-stepper-ai-prompt="' + cssEscape(snapshot.selector) + '"], [data-stepper-glossary-name="' + cssEscape(snapshot.selector) + '"], [data-stepper-glossary-counts="' + cssEscape(snapshot.selector) + '"], [data-stepper-glossary-foot="' + cssEscape(snapshot.selector) + '"], [data-stepper-glossary-tags="' + cssEscape(snapshot.selector) + '"], [data-stepper-glossary-description="' + cssEscape(snapshot.selector) + '"]');
+    }
+    if (!node && snapshot.tag) node = container.querySelector(snapshot.tag.toLowerCase());
+    if (!(node && isEditableElement(node))) return;
+    node.focus({ preventScroll:true });
+    if ('value' in node && typeof snapshot.value === 'string' && node.value !== snapshot.value) node.value = snapshot.value;
+    if (typeof snapshot.selectionStart === 'number' && typeof node.setSelectionRange === 'function') {
+      try { node.setSelectionRange(snapshot.selectionStart, snapshot.selectionEnd == null ? snapshot.selectionStart : snapshot.selectionEnd); } catch (_) {}
+    }
+  }
+
+  function cssEscape(value){
+    const str = String(value || '');
+    if (window.CSS && typeof window.CSS.escape === 'function') return window.CSS.escape(str);
+    return str.replace(/[\0-\x1f\x7f"\\]/g, '\$&');
+  }
+
   function readApiBase(){
     const explicit = normalizeApiBase(window.STEPPER_API_BASE || '');
     if (explicit) return explicit;
-    if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
-      const saved = normalizeApiBase(localStorage.getItem(API_BASE_KEY) || '');
-      if (saved) return saved;
-      return 'http://localhost:3000';
-    }
+    const saved = normalizeApiBase(localStorage.getItem(API_BASE_KEY) || '');
+    if (saved) return saved;
+    if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') return 'http://localhost:3000';
     return DEFAULT_BACKEND_BASE;
   }
 
   function saveApiBase(value){
     const normalized = normalizeApiBase(value);
     state.apiBase = normalized || DEFAULT_BACKEND_BASE;
-    if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
-      localStorage.setItem(API_BASE_KEY, state.apiBase);
-    } else {
-      try { localStorage.removeItem(API_BASE_KEY); } catch {}
-    }
+    localStorage.setItem(API_BASE_KEY, state.apiBase);
     window.STEPPER_API_BASE = state.apiBase;
   }
 
@@ -117,10 +159,10 @@
       if (!normalized) return;
       if (!list.includes(normalized)) list.push(normalized);
     };
+    const saved = normalizeApiBase(localStorage.getItem(API_BASE_KEY) || '');
     const explicit = normalizeApiBase(window.STEPPER_API_BASE || '');
     const currentOrigin = (location.protocol === 'http:' || location.protocol === 'https:') ? normalizeApiBase(location.origin) : '';
     if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
-      const saved = normalizeApiBase(localStorage.getItem(API_BASE_KEY) || '');
       push(preferred);
       push(explicit);
       push(saved);
@@ -128,9 +170,12 @@
       push(currentOrigin);
       return list;
     }
-    push(explicit);
     push(preferred);
+    push(explicit);
+    push(saved);
     push(DEFAULT_BACKEND_BASE);
+    push(ALT_BACKEND_BASE);
+    if (currentOrigin && !/step-by-stepper\.com$/i.test(location.hostname)) push(currentOrigin);
     return list;
   }
 
@@ -164,9 +209,7 @@
         return working;
       }
     }
-    const fallback = normalizeApiBase(preferred) || DEFAULT_BACKEND_BASE;
-    saveApiBase(fallback);
-    return fallback;
+    return normalizeApiBase(preferred) || DEFAULT_BACKEND_BASE;
   }
 
   function wireStartupBackendBase(){
@@ -677,26 +720,12 @@
     }
   }
 
-  function buildBackendReachabilityError(base, error){
-    const chosenBase = normalizeApiBase(base) || DEFAULT_BACKEND_BASE;
-    const message = String(error && error.message || '');
-    const nice = new Error(`Could not reach the Step-By-Stepper backend at ${chosenBase}. Check Render is awake, the backend URL is correct, and this site origin is allowed by CORS.`);
-    nice.status = Number(error && error.status || 0);
-    nice.base = chosenBase;
-    nice.data = error && error.data ? error.data : null;
-    if (/Failed to fetch|NetworkError|Load failed|fetch/i.test(message) || !nice.status) {
-      nice.code = 'BACKEND_UNREACHABLE';
-    }
-    return nice;
-  }
-
   async function fetchJson(path, options){
-    const retryableStatuses = new Set([0, 502, 503, 504]);
+    const retryableStatuses = new Set([0, 404, 405, 502, 503, 504]);
     const bases = String(path || '').startsWith('/api/') ? getApiBaseCandidates(state.apiBase) : [normalizeApiBase(state.apiBase) || DEFAULT_BACKEND_BASE];
     let lastError = null;
     for (const base of bases) {
-      const normalizedBase = normalizeApiBase(base) || DEFAULT_BACKEND_BASE;
-      const url = `${normalizedBase}${path}`;
+      const url = `${normalizeApiBase(base)}${path}`;
       try {
         const headers = Object.assign({ Accept: 'application/json' }, options && options.headers ? options.headers : {});
         const response = await fetch(url, Object.assign({}, options || {}, { headers, mode: 'cors', credentials: 'omit' }));
@@ -707,26 +736,26 @@
           data = null;
         }
         if (response.ok && data && data.ok !== false) {
-          if (normalizedBase !== state.apiBase) saveApiBase(normalizedBase);
+          if (base && base !== state.apiBase) saveApiBase(base);
           return data;
         }
         const message = data && data.error ? data.error : `Request failed (${response.status})`;
         const error = new Error(message);
         error.status = response.status;
-        error.base = normalizedBase;
+        error.base = base;
         error.data = data;
         lastError = error;
-        if (retryableStatuses.has(Number(response.status)) && normalizedBase !== bases[bases.length - 1]) continue;
+        if (retryableStatuses.has(Number(response.status)) && base !== bases[bases.length - 1]) continue;
         throw error;
       } catch (error) {
-        lastError = buildBackendReachabilityError(normalizedBase, error);
+        lastError = error;
         const status = Number(error && error.status || 0);
         const retryable = !status || retryableStatuses.has(status) || /Failed to fetch|NetworkError|Load failed/i.test(String(error && error.message || ''));
-        if (retryable && normalizedBase !== bases[bases.length - 1]) continue;
-        throw lastError;
+        if (retryable && base !== bases[bases.length - 1]) continue;
+        throw error;
       }
     }
-    throw lastError || buildBackendReachabilityError(state.apiBase || DEFAULT_BACKEND_BASE, new Error('Could not reach backend.'));
+    throw lastError || new Error('Could not reach backend.');
   }
 
   async function authFetch(path, options){
@@ -769,7 +798,7 @@
         ok: false,
         googleEnabled: !!FALLBACK_GOOGLE_CLIENT_ID,
         googleClientId: FALLBACK_GOOGLE_CLIENT_ID,
-        error: error && error.message ? error.message : 'Could not reach the Step-By-Stepper backend.',
+        error: error && error.message ? error.message : 'Could not reach backend.',
         source: 'frontend-fallback'
       };
       return state.config;
@@ -893,7 +922,7 @@
     await ensureStaffChatLoaded(true);
       if (isAdminSession()) { await refreshAdminDances(); await refreshSubmissions(); }
     } catch (error) {
-      alert(error && error.message ? error.message : 'Google sign in failed because the backend could not be reached.');
+      alert(error.message || 'Google sign in failed.');
     }
     renderPages();
   }
@@ -1934,9 +1963,11 @@
     });
   }
 
-  function renderSignInPage(){
+  function renderSignInPage(force){
     const page = document.getElementById(SIGNIN_PAGE_ID);
     if (!page) return;
+    if (!force && shouldFreezeRender(page)) return;
+    const focusSnapshot = captureFocusSnapshot(page);
     const theme = themeClasses();
     const session = state.session;
     const profile = session && session.profile ? session.profile : null;
@@ -2006,12 +2037,12 @@
               </div>
             </div>
             <div class="mt-4 grid gap-4 sm:grid-cols-2">
-              <input data-stepper-glossary-name="1" class="stepper-google-input" placeholder="Step name" />
-              <input data-stepper-glossary-counts="1" class="stepper-google-input" placeholder="Counts, e.g. 1&2" />
-              <input data-stepper-glossary-foot="1" class="stepper-google-input" placeholder="Foot: Right, Left, or Either" />
-              <input data-stepper-glossary-tags="1" class="stepper-google-input" placeholder="Tags or aliases (optional)" />
+              <input data-stepper-glossary-name="1" class="stepper-google-input" placeholder="Step name" value="${escapeHtml(state.glossaryDraft.name || '')}" />
+              <input data-stepper-glossary-counts="1" class="stepper-google-input" placeholder="Counts, e.g. 1&2" value="${escapeHtml(state.glossaryDraft.counts || '')}" />
+              <input data-stepper-glossary-foot="1" class="stepper-google-input" placeholder="Foot: Right, Left, or Either" value="${escapeHtml(state.glossaryDraft.foot || '')}" />
+              <input data-stepper-glossary-tags="1" class="stepper-google-input" placeholder="Tags or aliases (optional)" value="${escapeHtml(state.glossaryDraft.tags || '')}" />
             </div>
-            <div class="mt-4 ${theme.panel} rounded-3xl border p-4"><textarea data-stepper-glossary-description="1" class="stepper-google-input" rows="4" placeholder="Describe the step clearly so Admin can preview it."></textarea></div>
+            <div class="mt-4 ${theme.panel} rounded-3xl border p-4"><textarea data-stepper-glossary-description="1" class="stepper-google-input" rows="4" placeholder="Describe the step clearly so Admin can preview it.">${escapeHtml(state.glossaryDraft.description || '')}</textarea></div>
             <div class="mt-4 flex flex-wrap gap-3"><button type="button" data-stepper-action="request-glossary-step" class="stepper-google-cta ${theme.button}">Send glossary step request</button></div>
           </div>
           <div class="mx-auto max-w-3xl rounded-3xl border p-5 sm:p-6 ${theme.soft}">
@@ -2088,7 +2119,16 @@
     const applyNeedsSignInBtn = page.querySelector('[data-stepper-action="apply-moderator-needs-signin"]');
     if (applyNeedsSignInBtn) applyNeedsSignInBtn.addEventListener('click', () => { alert('Sign in with Google first, then press Apply for moderator.'); });
     const aiPrompt = page.querySelector('[data-stepper-ai-prompt="1"]');
-    if (aiPrompt) aiPrompt.addEventListener('input', () => { state.aiDance.prompt = aiPrompt.value; });
+    if (aiPrompt) {
+      aiPrompt.setAttribute('data-preserve-focus-selector', 'ai-prompt');
+      aiPrompt.addEventListener('input', () => { state.aiDance.prompt = aiPrompt.value; });
+    }
+    [['[data-stepper-glossary-name="1"]','name'],['[data-stepper-glossary-counts="1"]','counts'],['[data-stepper-glossary-foot="1"]','foot'],['[data-stepper-glossary-tags="1"]','tags'],['[data-stepper-glossary-description="1"]','description']].forEach(([selector,key]) => {
+      const field = page.querySelector(selector);
+      if (!field) return;
+      field.setAttribute('data-preserve-focus-selector', selector);
+      field.addEventListener('input', () => { state.glossaryDraft[key] = field.value; });
+    });
     const aiJudgeBtn = page.querySelector('[data-stepper-action="ai-judge"]');
     if (aiJudgeBtn) aiJudgeBtn.addEventListener('click', () => { state.aiDance.mode = 'judge'; runAiDanceTool('judge'); });
     const aiAddBtn = page.querySelector('[data-stepper-action="ai-add"]');
@@ -2114,6 +2154,7 @@
       };
       requestGlossaryStep(payload).then((ok)=>{
         if (ok) {
+          state.glossaryDraft = { name:'', counts:'', foot:'', tags:'', description:'' };
           ['[data-stepper-glossary-name="1"]','[data-stepper-glossary-counts="1"]','[data-stepper-glossary-foot="1"]','[data-stepper-glossary-tags="1"]','[data-stepper-glossary-description="1"]'].forEach(sel => {
             const el = page.querySelector(sel);
             if (el) el.value = '';
@@ -2122,6 +2163,7 @@
       });
     });
 
+    restoreFocusSnapshot(page, focusSnapshot);
     renderGoogleButton();
     renderPresenceOnly();
   }
