@@ -49,6 +49,8 @@
     communityGlossaryOpen: false,
     subscription: { isPremium: false, plan: 'free', status: 'free', source: 'unknown' },
     savedDancesUiSignature: '',
+    adminUiDirty: true,
+    adminUiSignature: '',
     suspension: null,
     chatOpen: false,
     chatBusy: false,
@@ -2157,10 +2159,56 @@
     renderPages();
   }
 
-  function renderAdminPage(){
+  function adminPageHasLiveTyping(page){
+    if (!page) return false;
+    const active = document.activeElement;
+    if (!active || !page.contains(active)) return false;
+    return !!(active.matches && active.matches('input, textarea, select, [contenteditable="true"], [contenteditable=""], [contenteditable]'));
+  }
+
+  function adminDataSignature(value){
+    try {
+      return JSON.stringify(value == null ? null : value);
+    } catch (_error) {
+      return String(value == null ? '' : value);
+    }
+  }
+
+  function markAdminUiDirty(){
+    state.adminUiDirty = true;
+    state.adminUiSignature = '';
+  }
+
+  function getAdminUiSignature(){
+    return JSON.stringify({
+      dark: !!(readAppData() && readAppData().isDarkMode),
+      isAdmin: isAdminSession(),
+      activePage: state.activePage || '',
+      adminDances: adminDataSignature(state.adminDances || []),
+      submissions: adminDataSignature(state.submissions || []),
+      moderatorApplications: adminDataSignature(state.moderatorApplications || []),
+      activeModerators: adminDataSignature(state.activeModerators || []),
+      suspensions: adminDataSignature(state.suspensions || []),
+      securityAlerts: adminDataSignature(state.securityAlerts || []),
+      glossaryApproved: adminDataSignature(state.glossaryApproved || []),
+      glossaryRequests: adminDataSignature(state.glossaryRequests || []),
+      siteMemories: adminDataSignature(state.siteMemories || [])
+    });
+  }
+
+  function renderAdminPage(force){
     const page = document.getElementById(ADMIN_PAGE_ID);
     if (!page) return;
+    if (!force && state.activePage !== 'admin') return;
     const theme = themeClasses();
+    const uiSignature = getAdminUiSignature();
+    if (!force && adminPageHasLiveTyping(page)) {
+      state.adminUiDirty = true;
+      return;
+    }
+    if (!force && !state.adminUiDirty && state.adminUiSignature === uiSignature) return;
+    state.adminUiDirty = false;
+    state.adminUiSignature = uiSignature;
     if (!isAdminSession()) {
       page.className = `rounded-3xl border shadow-sm overflow-hidden ${theme.shell}`;
       page.innerHTML = `
@@ -2286,6 +2334,16 @@
         ${cards}
       </div>
     `;
+
+    if (!page.dataset.stepperAdminButtonRenderHook) {
+      page.addEventListener('click', (event) => {
+        const target = event.target instanceof Element ? event.target.closest('button, [role="button"], a') : null;
+        if (!target) return;
+        markAdminUiDirty();
+        setTimeout(() => renderAdminPage(true), 0);
+      }, true);
+      page.dataset.stepperAdminButtonRenderHook = 'true';
+    }
 
     page.querySelectorAll('[data-stepper-submission-id]').forEach(card => {
       const submissionId = card.getAttribute('data-stepper-submission-id');
@@ -2492,6 +2550,7 @@
     }
     await refreshGlossaryApproved();
     await syncFeaturedFromBackend();
+    markAdminUiDirty();
     renderPages();
   }
 
@@ -2543,6 +2602,7 @@
   window.addEventListener('storage', () => {
     if (state.session && state.session.credential) syncCurrentDanceToBackend(false);
     state.savedDancesUiSignature = '';
+    markAdminUiDirty();
     renderPages();
   });
 
@@ -3351,6 +3411,16 @@ Newest user question: ${question}`;
 
   const __origRenderPages = renderPages;
   renderPages = function(){
+    const adminPage = document.getElementById(ADMIN_PAGE_ID);
+    if (state.activePage === 'admin' && adminPageHasLiveTyping(adminPage)) {
+      markAdminUiDirty();
+      ensureHost();
+      setVisibility(adminPage, true);
+      renderPresenceOnly();
+      renderSuspensionBanner();
+      showNotificationToasts();
+      return;
+    }
     __origRenderPages();
     ensureHost();
     renderModeratorPage();
@@ -3377,6 +3447,7 @@ Newest user question: ${question}`;
     if (__stepperLiveQueueRefreshBusy || !(state.session && state.session.credential)) return;
     __stepperLiveQueueRefreshBusy = true;
     refreshLiveQueues().then(() => {
+      markAdminUiDirty();
       if (state.activePage === 'admin' || state.activePage === 'moderator' || state.activePage === 'signin' || state.activePage === 'subscription') renderPages();
     }).catch(() => {}).finally(() => { __stepperLiveQueueRefreshBusy = false; });
   }, LIVE_QUEUE_SYNC_INTERVAL_MS);
