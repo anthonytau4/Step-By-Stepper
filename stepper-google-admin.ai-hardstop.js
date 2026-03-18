@@ -20,6 +20,7 @@
   const DEFAULT_RENDER_SERVICE_ID = 'srv-d6ss4295pdvs73e1iifg';
   const DEFAULT_BACKEND_BASE = 'https://step-by-stepper.onrender.com';
   const ALT_BACKEND_BASE = 'https://api.step-by-stepper.com';
+  const SESSION_BAD_API_BASES = new Set();
   const FALLBACK_GOOGLE_CLIENT_ID = '1038282546217-a7qv2i1puevmtjf38f6sv761vt7he26s.apps.googleusercontent.com';
   const SYNC_INTERVAL_MS = 6000;
   const PRESENCE_INTERVAL_MS = 30000;
@@ -100,8 +101,23 @@
   function saveApiBase(value){
     const normalized = normalizeApiBase(value);
     state.apiBase = normalized || DEFAULT_BACKEND_BASE;
+    SESSION_BAD_API_BASES.delete(state.apiBase);
     localStorage.setItem(API_BASE_KEY, state.apiBase);
     window.STEPPER_API_BASE = state.apiBase;
+  }
+
+  function markApiBaseBad(value){
+    const normalized = normalizeApiBase(value);
+    if (!normalized) return;
+    SESSION_BAD_API_BASES.add(normalized);
+    if (normalizeApiBase(state.apiBase) === normalized) {
+      try { localStorage.removeItem(API_BASE_KEY); } catch {}
+      if (window.STEPPER_API_BASE === normalized) {
+        try { delete window.STEPPER_API_BASE; } catch {}
+        window.STEPPER_API_BASE = '';
+      }
+      state.apiBase = '';
+    }
   }
 
   function getApiBaseCandidates(preferred){
@@ -109,6 +125,7 @@
     const push = (value) => {
       const normalized = normalizeApiBase(value);
       if (!normalized) return;
+      if (SESSION_BAD_API_BASES.has(normalized)) return;
       if (!list.includes(normalized)) list.push(normalized);
     };
     const saved = normalizeApiBase(localStorage.getItem(API_BASE_KEY) || '');
@@ -126,7 +143,7 @@
     push(explicit);
     push(saved);
     push(DEFAULT_BACKEND_BASE);
-    push(ALT_BACKEND_BASE);
+    if (explicit === normalizeApiBase(ALT_BACKEND_BASE) || saved === normalizeApiBase(ALT_BACKEND_BASE)) push(ALT_BACKEND_BASE);
     if (currentOrigin && !/step-by-stepper\.com$/i.test(location.hostname)) push(currentOrigin);
     return list;
   }
@@ -643,8 +660,11 @@
   }
 
   async function fetchJson(path, options){
-    const retryableStatuses = new Set([0, 404, 405, 502, 503, 504]);
-    const bases = String(path || '').startsWith('/api/') ? getApiBaseCandidates(state.apiBase) : [normalizeApiBase(state.apiBase) || DEFAULT_BACKEND_BASE];
+    const method = String(options && options.method || 'GET').toUpperCase();
+    const isApiPath = String(path || '').startsWith('/api/');
+    const isWrite = method !== 'GET' && method !== 'HEAD';
+    const retryableStatuses = new Set([0, 502, 503, 504]);
+    const bases = isApiPath ? getApiBaseCandidates(state.apiBase) : [normalizeApiBase(state.apiBase) || DEFAULT_BACKEND_BASE];
     let lastError = null;
     for (const base of bases) {
       const url = `${normalizeApiBase(base)}${path}`;
@@ -667,17 +687,37 @@
         error.base = base;
         error.data = data;
         lastError = error;
-        if (retryableStatuses.has(Number(response.status)) && base !== bases[bases.length - 1]) continue;
+        const statusCode = Number(response.status);
+        if ((retryableStatuses.has(statusCode) || (!isWrite && statusCode === 404) || (!isWrite && statusCode === 405)) && base !== bases[bases.length - 1]) continue;
+        if (statusCode === 404 || statusCode === 405 || statusCode === 495 || statusCode === 525 || statusCode === 526) markApiBaseBad(base);
         throw error;
       } catch (error) {
         lastError = error;
         const status = Number(error && error.status || 0);
-        const retryable = !status || retryableStatuses.has(status) || /Failed to fetch|NetworkError|Load failed/i.test(String(error && error.message || ''));
+        const retryable = !status || retryableStatuses.has(status) || /Failed to fetch|NetworkError|Load failed|ERR_SSL_VERSION_OR_CIPHER_MISMATCH/i.test(String(error && error.message || ''));
+        if (/ERR_SSL_VERSION_OR_CIPHER_MISMATCH/i.test(String(error && error.message || ''))) markApiBaseBad(base);
+        if ((status === 404 || status === 405) && isWrite) markApiBaseBad(base);
         if (retryable && base !== bases[bases.length - 1]) continue;
         throw error;
       }
     }
     throw lastError || new Error('Could not reach backend.');
+  }
+
+  async function ensureFreshAdminApiBase(path, options){
+    const method = String(options && options.method || 'GET').toUpperCase();
+    const isAdminWrite = /^\/api\/(admin|moderator)\//.test(String(path || '')) && method !== 'GET' && method !== 'HEAD';
+    if (!isAdminWrite) return;
+    const activeBase = normalizeApiBase(state.apiBase);
+    const stillWorking = activeBase ? await probeApiBaseCandidate(activeBase) : null;
+    if (stillWorking) {
+      saveApiBase(stillWorking);
+      return;
+    }
+    if (activeBase) markApiBaseBad(activeBase);
+    const preferredBase = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') ? 'http://localhost:3000' : DEFAULT_BACKEND_BASE;
+    const nextBase = await chooseWorkingApiBase(preferredBase);
+    if (nextBase) saveApiBase(nextBase);
   }
 
   async function authFetch(path, options){
@@ -691,6 +731,7 @@
       Authorization: `Bearer ${session.credential}`
     });
     try {
+      await ensureFreshAdminApiBase(path, options);
       return await fetchJson(path, Object.assign({}, options || {}, { headers }));
     } catch (error) {
       if (error && error.status === 401) {
