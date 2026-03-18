@@ -11,13 +11,15 @@
   const API_BASE_KEY = 'stepper_api_base_v1';
   const SIGNIN_PAGE_ID = 'stepper-google-signin-page';
   const ADMIN_PAGE_ID = 'stepper-google-admin-page';
+  const SUBSCRIPTION_PAGE_ID = 'stepper-google-subscription-page';
   const HOST_ID = 'stepper-google-admin-host';
   const SIGNIN_TAB_ID = 'stepper-google-signin-tab';
   const ADMIN_TAB_ID = 'stepper-google-admin-tab';
+  const SUBSCRIPTION_TAB_ID = 'stepper-google-subscription-tab';
   const ADMIN_EMAIL = 'anthonytau4@gmail.com';
   const DEFAULT_RENDER_SERVICE_ID = 'srv-d6ss4295pdvs73e1iifg';
-  const DEFAULT_BACKEND_BASE = 'https://api.step-by-stepper.com';
-  const ALT_BACKEND_BASE = 'https://step-by-stepper-backend.onrender.com';
+  const DEFAULT_BACKEND_BASE = 'https://step-by-stepper.onrender.com';
+  const ALT_BACKEND_BASE = 'https://api.step-by-stepper.com';
   const FALLBACK_GOOGLE_CLIENT_ID = '1038282546217-a7qv2i1puevmtjf38f6sv761vt7he26s.apps.googleusercontent.com';
   const SYNC_INTERVAL_MS = 6000;
   const PRESENCE_INTERVAL_MS = 30000;
@@ -34,6 +36,7 @@
     submissions: [],
     notifications: [],
     cloudSaves: [],
+    subscription: { isPremium: false, plan: 'free', status: 'free', source: 'unknown' },
     chatOpen: false,
     chatBusy: false,
     chatMessages: [],
@@ -48,7 +51,8 @@
       footerWrap: null,
       host: null,
       signInBtn: null,
-      adminBtn: null
+      adminBtn: null,
+      subscriptionBtn: null
     },
     gisReady: false,
     gisPromise: null,
@@ -200,6 +204,17 @@
       || !!(state.session && state.session.isAdmin);
   }
 
+  function isPremiumSession(){
+    return isAdminSession() || !!(state.subscription && state.subscription.isPremium);
+  }
+
+  function paymentStatusLabel(){
+    if (isAdminSession()) return 'Admin access';
+    if (state.subscription && state.subscription.plan === 'yearly' && isPremiumSession()) return 'Premium yearly';
+    if (state.subscription && state.subscription.plan === 'monthly' && isPremiumSession()) return 'Premium monthly';
+    return 'Free member';
+  }
+
   function isDarkMode(){
     const data = readJson(DATA_KEY, null);
     return !!(data && data.isDarkMode);
@@ -270,6 +285,7 @@
 
   function updateTabButtons(){
     applyTabStyles(state.ui.signInBtn, state.activePage === 'signin', '#4f46e5');
+    applyTabStyles(state.ui.subscriptionBtn, state.activePage === 'subscription', '#4f46e5');
     applyTabStyles(state.ui.adminBtn, state.activePage === 'admin', '#4f46e5');
   }
 
@@ -315,7 +331,9 @@
       .stepper-google-muted-list { display:grid; gap:.85rem; }
       .stepper-google-member-item { display:flex; align-items:center; justify-content:space-between; gap:1rem; }
       .stepper-google-google-btn > div { display:flex; justify-content:center; }
-      .stepper-extra-tab { min-width: 114px; justify-content:center; }
+      .stepper-extra-tab { min-width: 114px; justify-content:center; font-weight:900; }
+      .dark .stepper-extra-tab { color:#f5f5f5 !important; }
+      .stepper-extra-tab-icon svg { width:18px; height:18px; }
       @media (max-width: 640px) { .stepper-extra-tab { min-width: 104px; } }
     `;
     document.head.appendChild(style);
@@ -348,9 +366,15 @@
       else tabStrip.appendChild(state.ui.signInBtn);
     }
 
+    state.ui.subscriptionBtn = makeTabButton('Subscription', iconMedal(), 'subscription', SUBSCRIPTION_TAB_ID);
+    if (!state.ui.subscriptionBtn.parentNode) {
+      if (state.ui.signInBtn && state.ui.signInBtn.parentNode === tabStrip) state.ui.signInBtn.insertAdjacentElement('afterend', state.ui.subscriptionBtn);
+      else tabStrip.appendChild(state.ui.subscriptionBtn);
+    }
+
     state.ui.adminBtn = makeTabButton('Admin', iconShield(), 'admin', ADMIN_TAB_ID);
     if (!state.ui.adminBtn.parentNode) {
-      if (state.ui.signInBtn && state.ui.signInBtn.parentNode === tabStrip) state.ui.signInBtn.insertAdjacentElement('afterend', state.ui.adminBtn);
+      if (state.ui.subscriptionBtn && state.ui.subscriptionBtn.parentNode === tabStrip) state.ui.subscriptionBtn.insertAdjacentElement('afterend', state.ui.adminBtn);
       else tabStrip.appendChild(state.ui.adminBtn);
     }
 
@@ -359,7 +383,7 @@
       tabStrip.addEventListener('click', (event) => {
         const button = event.target.closest('button');
         if (!button) return;
-        const own = button.id === SIGNIN_TAB_ID || button.id === ADMIN_TAB_ID;
+        const own = button.id === SIGNIN_TAB_ID || button.id === SUBSCRIPTION_TAB_ID || button.id === ADMIN_TAB_ID;
         if (!own && state.activePage) closePages();
       }, true);
     }
@@ -375,7 +399,7 @@
     host.id = HOST_ID;
     host.hidden = true;
     host.className = 'max-w-4xl mx-auto px-3 sm:px-4 py-6 sm:py-8 pb-28 sm:pb-32 print:hidden';
-    host.innerHTML = `<div class="space-y-5"><section id="${SIGNIN_PAGE_ID}" hidden style="display:none"></section><section id="${ADMIN_PAGE_ID}" hidden style="display:none"></section></div>`;
+    host.innerHTML = `<div class="space-y-5"><section id="${SIGNIN_PAGE_ID}" hidden style="display:none"></section><section id="${SUBSCRIPTION_PAGE_ID}" hidden style="display:none"></section><section id="${ADMIN_PAGE_ID}" hidden style="display:none"></section></div>`;
     const root = document.getElementById('root');
     if (root && root.parentNode) root.insertAdjacentElement('afterend', host);
     else document.body.appendChild(host);
@@ -416,7 +440,7 @@
   }
 
   function openPage(pageName){
-    state.activePage = pageName === 'admin' ? 'admin' : 'signin';
+    state.activePage = pageName === 'admin' ? 'admin' : (pageName === 'subscription' ? 'subscription' : 'signin');
     const host = ensureHost();
     host.hidden = false;
     host.style.display = '';
@@ -428,6 +452,12 @@
   }
 
   function updateAdminTabVisibility(){
+    if (state.ui.subscriptionBtn) {
+      const subVisible = !!(state.session && state.session.credential);
+      state.ui.subscriptionBtn.style.display = subVisible ? '' : 'none';
+      state.ui.subscriptionBtn.hidden = !subVisible;
+      if (!subVisible && state.activePage === 'subscription') state.activePage = 'signin';
+    }
     if (!state.ui.adminBtn) return;
     const visible = isAdminSession();
     state.ui.adminBtn.style.display = visible ? '' : 'none';
@@ -445,7 +475,7 @@
       const url = `${normalizeApiBase(base)}${path}`;
       try {
         const headers = Object.assign({ Accept: 'application/json' }, options && options.headers ? options.headers : {});
-        const response = await fetch(url, Object.assign({}, options || {}, { headers, mode: 'cors' }));
+        const response = await fetch(url, Object.assign({}, options || {}, { headers, mode: 'cors', credentials: 'omit' }));
         let data = null;
         try {
           data = await response.json();
@@ -613,6 +643,7 @@
       await restoreLatestCloudSaveIfNeeded();
       await syncCurrentDanceToBackend(true);
       await refreshNotifications();
+      await refreshSubscription();
       await syncFeaturedFromBackend();
       if (isAdminSession()) { await refreshAdminDances(); await refreshSubmissions(); }
     } catch (error) {
@@ -1105,7 +1136,8 @@
     const text = String(prompt || '').toLowerCase();
     if (!text) return 'Try asking where to save, how sign-in works, how featuring works, or what tab to use.';
     if (text.includes('save') || text.includes('changes')) return state.session && state.session.credential ? 'Use Save Changes in My Saved Dances to lock the newest version into your Google-linked cloud save. Your latest signed-in dance also auto-syncs in the background.' : 'Open My Saved Dances and use Save Changes there. Sign in with Google first if you want that save to follow you onto other devices.';
-    if (text.includes('feature') || text.includes('badge') || text.includes('bronze') || text.includes('silver') || text.includes('gold')) return 'Use Send to host for featuring. The admin account can approve it, add Bronze, Silver, or Gold, and it will appear in Featured Choreo. Removing a feature takes it back off that public page.';
+    if (text.includes('premium') || text.includes('subscription') || text.includes('pay')) return 'Open Subscription after signing in. Premium is NZ$12.50 monthly or NZ$100 yearly and gets priority review plus the paid site helper.';
+    if (text.includes('feature') || text.includes('badge') || text.includes('bronze') || text.includes('silver') || text.includes('gold')) return 'Use Send to host for featuring. Premium requests go to the top of the admin queue, and the admin can approve them with Bronze, Silver, or Gold for Featured Choreo. Removing a feature takes it back off that public page.';
     if (text.includes('upload') || text.includes('site')) return 'Use Upload to site to send your dance into the admin moderation queue. The admin can approve it for the site or delete it.';
     if (text.includes('signin') || text.includes('google') || text.includes('sign in')) return 'Open the Sign In tab and use Sign in with Google. Once signed in, your dances can sync to the backend and the admin tab appears only for the admin email.';
     if (text.includes('tab') || text.includes('where') || text.includes('go')) return 'Use Build to make or edit a dance, Sheet for the clean sheet view, My Saved Dances for your cloud saves, Featured Choreo for public featured dances, and Sign In for Google saving and moderation actions.';
@@ -1185,7 +1217,7 @@
       return;
     }
     const messages = state.chatMessages.slice(-10).map(msg => `<div style="align-self:${msg.role==='user'?'flex-end':'stretch'};max-width:100%;background:${msg.role==='user'?'#4f46e5':'#ffffff'};color:${msg.role==='user'?'#ffffff':'#111827'};border:1px solid rgba(79,70,229,.12);padding:.75rem .85rem;border-radius:18px;font-size:14px;line-height:1.45;box-shadow:0 8px 24px rgba(0,0,0,.08);word-break:break-word;">${escapeHtml(msg.text)}</div>`).join('');
-    host.innerHTML = `<div style="width:min(380px, calc(100vw - 24px));max-width:calc(100vw - 24px);background:#f8fafc;border:1px solid rgba(99,102,241,.16);border-radius:24px;box-shadow:0 18px 40px rgba(0,0,0,.18);overflow:hidden;"><div style="padding:.9rem 1rem;background:#4f46e5;color:#fff;display:flex;align-items:center;gap:.6rem;"><div style="font-weight:900;">Site helper</div><button type="button" data-chat-close="1" style="margin-left:auto;border:none;background:rgba(255,255,255,.18);color:#fff;border-radius:999px;padding:.35rem .65rem;font-weight:900;">Close</button></div><div data-chat-messages="1" style="padding:1rem;display:flex;flex-direction:column;gap:.7rem;max-height:min(45vh, 340px);overflow:auto;overscroll-behavior:contain;">${messages}${state.chatBusy ? '<div style="font-size:13px;color:#6b7280;">Thinking…</div>' : ''}</div><form data-chat-form="1" style="padding:0 1rem 1rem;display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;"><input data-chat-input="1" type="text" autocomplete="off" autocapitalize="sentences" spellcheck="true" placeholder="Ask where to go or what to press" value="${escapeHtml(state.chatDraft || '')}" style="flex:1 1 220px;border:1px solid rgba(99,102,241,.18);border-radius:999px;padding:.9rem 1rem;background:#fff;font-size:16px;min-width:0;" /><button type="submit" style="border:none;background:#4f46e5;color:#fff;border-radius:999px;padding:.85rem 1rem;font-weight:900;white-space:nowrap;">Send</button></form></div>`;
+    host.innerHTML = `<div style="width:min(380px, calc(100vw - 24px));max-width:calc(100vw - 24px);background:#f8fafc;border:1px solid rgba(99,102,241,.16);border-radius:24px;box-shadow:0 18px 40px rgba(0,0,0,.18);overflow:hidden;"><div style="padding:.9rem 1rem;background:#4f46e5;color:#fff;display:flex;align-items:center;gap:.6rem;"><div style="font-weight:900;">Site helper${isPremiumSession() ? ' • Premium' : ''}</div><button type="button" data-chat-close="1" style="margin-left:auto;border:none;background:rgba(255,255,255,.18);color:#fff;border-radius:999px;padding:.35rem .65rem;font-weight:900;">Close</button></div><div data-chat-messages="1" style="padding:1rem;display:flex;flex-direction:column;gap:.7rem;max-height:min(45vh, 340px);overflow:auto;overscroll-behavior:contain;">${messages}${state.chatBusy ? '<div style="font-size:13px;color:#6b7280;">Thinking…</div>' : ''}</div><form data-chat-form="1" style="padding:0 1rem 1rem;display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;"><input data-chat-input="1" type="text" autocomplete="off" autocapitalize="sentences" spellcheck="true" placeholder="${isPremiumSession() ? 'Ask where to go or what to press' : 'Premium helper lives in Subscription'}" value="${escapeHtml(state.chatDraft || '')}" style="flex:1 1 220px;border:1px solid rgba(99,102,241,.18);border-radius:999px;padding:.9rem 1rem;background:#fff;font-size:16px;min-width:0;" /><button type="submit" ${isPremiumSession() ? '' : 'disabled'} style="border:none;background:#4f46e5;color:#fff;border-radius:999px;padding:.85rem 1rem;font-weight:900;white-space:nowrap;${isPremiumSession() ? '' : 'opacity:.5;cursor:not-allowed;'}">Send</button></form></div>`;
     const list = host.querySelector('[data-chat-messages="1"]');
     if (list) list.scrollTop = list.scrollHeight;
     host.querySelector('[data-chat-close="1"]').addEventListener('click', ()=>{ state.chatOpen = false; renderSiteHelper(); });
@@ -1242,10 +1274,12 @@
     const profile = signedIn ? state.session.profile || {} : null;
     card.className = `rounded-3xl border p-5 sm:p-6 ${theme.soft}`;
     card.innerHTML = signedIn
-      ? `<div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Google cloud save is on</div><p class="mt-1 text-sm ${theme.subtle}">Signed in as ${escapeHtml(profile.name || profile.email || 'Member')}. Use Save Changes here to push the latest version to your Google-linked save so it is still there next time you open the site.</p></div><div class="flex flex-wrap gap-3"><button type="button" data-stepper-saved-save-now="1" class="stepper-google-cta ${theme.button}">Save Changes</button><button type="button" data-stepper-open-signin="1" class="stepper-google-cta ${theme.button}">Account</button></div></div>`
+      ? `<div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Google cloud save is on</div><p class="mt-1 text-sm ${theme.subtle}">Signed in as ${escapeHtml(profile.name || profile.email || 'Member')}. Use Save Changes here to push the latest version to your Google-linked save so it is still there next time you open the site.</p></div><div class="flex flex-wrap gap-3"><button type="button" data-stepper-saved-save-now="1" class="stepper-google-cta ${theme.button}">Save Changes</button><button type="button" data-stepper-open-subscription="1" class="stepper-google-cta ${theme.button}">Subscription</button><button type="button" data-stepper-open-signin="1" class="stepper-google-cta ${theme.button}">Account</button></div></div>`
       : `<div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Sign in to save across devices</div><p class="mt-1 text-sm ${theme.subtle}">Local device saves still work without signing in. Use Google sign-in when you want the same dance to come back on other phones, tablets, and computers.</p></div><div class="flex flex-wrap gap-3"><button type="button" data-stepper-open-signin="1" class="stepper-google-cta ${theme.button}">Sign in with Google</button></div></div>`;
     const openBtn = card.querySelector('[data-stepper-open-signin="1"]');
     if (openBtn) openBtn.addEventListener('click', ()=> openPage('signin'));
+    const subBtn = card.querySelector('[data-stepper-open-subscription="1"]');
+    if (subBtn) subBtn.addEventListener('click', ()=> openPage('subscription'));
     const saveBtn = card.querySelector('[data-stepper-saved-save-now="1"]');
     if (saveBtn) saveBtn.addEventListener('click', async ()=>{
       const ok = await saveChangesNow({ force:true });
@@ -1286,10 +1320,12 @@
                 <div class="mt-4 flex flex-wrap gap-3">
                   <button type="button" data-stepper-action="send-host" class="stepper-google-cta ${theme.button}">Send to host for featuring</button>
                   <button type="button" data-stepper-action="upload-site" class="stepper-google-cta ${theme.button}">Upload to site</button>
+                  <button type="button" data-stepper-action="open-subscription" class="stepper-google-cta ${theme.button}">Subscription</button>
                 </div>
               </div>
               <div class="stepper-google-badge-row">
                 <span class="stepper-google-pill ${theme.orange}"><span data-stepper-online-count>${escapeHtml(onlineCount)}</span> online</span>
+                <span class="stepper-google-pill ${theme.orange}">${escapeHtml(paymentStatusLabel())}</span>
                 ${isAdminSession() ? `<span class="stepper-google-pill ${theme.orange}">${iconShield()} Admin</span>` : ''}
                 <button type="button" data-stepper-action="signout" class="stepper-google-cta stepper-google-danger ${theme.button}">Sign out</button>
               </div>
@@ -1325,9 +1361,56 @@
     if (sendHostBtn) sendHostBtn.addEventListener('click', () => requestModeration('feature'));
     const uploadSiteBtn = page.querySelector('[data-stepper-action="upload-site"]');
     if (uploadSiteBtn) uploadSiteBtn.addEventListener('click', () => requestModeration('site'));
+    const openSubBtn = page.querySelector('[data-stepper-action="open-subscription"]');
+    if (openSubBtn) openSubBtn.addEventListener('click', () => { openPage('subscription'); renderPages(); });
 
     renderGoogleButton();
     renderPresenceOnly();
+  }
+
+
+  function renderSubscriptionPage(){
+    const page = document.getElementById(SUBSCRIPTION_PAGE_ID);
+    if (!page) return;
+    const theme = themeClasses();
+    page.className = `rounded-3xl border shadow-sm overflow-hidden ${theme.shell}`;
+    if (!(state.session && state.session.credential)) {
+      page.innerHTML = `
+        <div class="px-6 py-5 border-b ${theme.panel}">
+          <h2 class="text-2xl font-black tracking-tight uppercase flex items-center gap-2"><span class="stepper-extra-tab-icon">${iconMedal()}</span> Subscription</h2>
+        </div>
+        <div class="p-6 sm:p-8"><div class="rounded-3xl border p-6 sm:p-8 text-center ${theme.soft}"><p class="text-lg font-black">Sign in first.</p><p class="mt-2 text-sm ${theme.subtle}">Subscription and Premium tools show up after Google sign-in.</p></div></div>`;
+      return;
+    }
+    const sub = state.subscription || { isPremium:false, plan:'free', status:'free' };
+    const active = isPremiumSession();
+    page.innerHTML = `
+      <div class="px-6 py-5 border-b ${theme.panel}">
+        <h2 class="text-2xl font-black tracking-tight uppercase flex items-center gap-2"><span class="stepper-extra-tab-icon">${iconMedal()}</span> Subscription</h2>
+      </div>
+      <div class="p-6 sm:p-8 space-y-5">
+        <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}">
+          <div class="flex flex-wrap items-center justify-between gap-4">
+            <div><div class="text-lg font-black tracking-tight">Your plan</div><p class="mt-1 text-sm ${theme.subtle}">${active ? 'Premium is active. Priority feature requests go to the top of the admin queue and the AI site helper is unlocked.' : 'Free members can sign in and save. Premium unlocks the AI site helper and priority review.'}</p></div>
+            <span class="stepper-google-pill ${theme.orange}">${escapeHtml(paymentStatusLabel())}</span>
+          </div>
+        </div>
+        <div class="stepper-google-grid">
+          <article class="rounded-3xl border p-5 sm:p-6 ${theme.soft}">
+            <div class="text-lg font-black tracking-tight">Premium monthly</div>
+            <p class="mt-2 text-sm ${theme.subtle}">NZ$12.50 per month. Priority admin review, premium recognition, and the paid AI site helper.</p>
+            <button type="button" data-subscribe-plan="monthly" class="stepper-google-cta ${theme.button}" style="margin-top:16px;">Start monthly</button>
+          </article>
+          <article class="rounded-3xl border p-5 sm:p-6 ${theme.soft}">
+            <div class="text-lg font-black tracking-tight">Premium yearly</div>
+            <p class="mt-2 text-sm ${theme.subtle}">NZ$100 per year. Same perks, cheaper across the year, and priority review stays active.</p>
+            <button type="button" data-subscribe-plan="yearly" class="stepper-google-cta ${theme.button}" style="margin-top:16px;">Start yearly</button>
+          </article>
+        </div>
+      </div>`;
+    page.querySelectorAll('[data-subscribe-plan]').forEach((button)=>{
+      button.addEventListener('click', ()=> createCheckout(button.getAttribute('data-subscribe-plan') || 'monthly'));
+    });
   }
 
   function renderAdminPage(){
@@ -1355,7 +1438,7 @@
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div>
             <div class="flex flex-wrap items-center gap-3"><h3 class="text-lg font-black tracking-tight">${escapeHtml(item.title || 'Untitled Dance')}</h3><span class="stepper-google-pill ${theme.orange}">${escapeHtml(item.requestType || 'request')}</span></div>
-            <p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.ownerName || item.ownerEmail || 'Member')} • ${escapeHtml(item.ownerEmail || '')}</p>
+            <p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.ownerName || item.ownerEmail || 'Member')} • ${escapeHtml(item.ownerEmail || '')}${item.priority ? ' • Premium priority' : ''}</p>
           </div>
           <div class="stepper-google-badge-row">
             ${item.requestType === 'site' ? `<button type="button" class="stepper-google-cta ${theme.button}" data-action="approve-site">Approve upload</button>` : ''}
@@ -1454,9 +1537,12 @@
     const host = ensureHost();
     const signInPage = document.getElementById(SIGNIN_PAGE_ID);
     const adminPage = document.getElementById(ADMIN_PAGE_ID);
+    const subscriptionPage = document.getElementById(SUBSCRIPTION_PAGE_ID);
     const showSignIn = state.activePage === 'signin';
+    const showSubscription = state.activePage === 'subscription';
     const showAdmin = state.activePage === 'admin';
     setVisibility(signInPage, showSignIn);
+    setVisibility(subscriptionPage, showSubscription);
     setVisibility(adminPage, showAdmin);
     host.hidden = !state.activePage;
     host.style.display = state.activePage ? '' : 'none';
@@ -1477,6 +1563,7 @@
     locateUi();
     ensureHost();
     renderSignInPage();
+    renderSubscriptionPage();
     renderAdminPage();
     syncPageVisibility();
     renderPresenceOnly();
@@ -1511,6 +1598,8 @@
       await restoreLatestCloudSaveIfNeeded();
       await syncCurrentDanceToBackend(false);
       await refreshNotifications();
+      await refreshSubscription();
+      await confirmCheckoutIfPresent();
       if (isAdminSession()) { await refreshAdminDances(); await refreshSubmissions(); }
     }
     await syncFeaturedFromBackend();
@@ -1548,7 +1637,7 @@
   setInterval(() => {
     syncFeaturedFromBackend();
     patchFeaturedPageCopy();
-    if (state.session && state.session.credential) refreshNotifications();
+    if (state.session && state.session.credential) { refreshNotifications(); refreshSubscription(); }
     if (isAdminSession()) { refreshAdminDances(); refreshSubmissions(); }
   }, FEATURED_SYNC_INTERVAL_MS);
 
@@ -1562,4 +1651,74 @@
     if (state.session && state.session.credential) syncCurrentDanceToBackend(false);
     renderPages();
   });
+
+  async function refreshSubscription(){
+    if (!state.session || !state.session.credential) {
+      state.subscription = { isPremium: false, plan: 'free', status: 'free', source: 'signed-out' };
+      return state.subscription;
+    }
+    try {
+      const data = await authFetch('/api/subscription/status');
+      state.subscription = Object.assign({ isPremium: false, plan: 'free', status: 'free', source: 'backend' }, data || {});
+      return state.subscription;
+    } catch (error) {
+      state.subscription = { isPremium: isAdminSession(), plan: isAdminSession() ? 'admin' : 'free', status: isAdminSession() ? 'active' : 'free', source: 'fallback' };
+      return state.subscription;
+    }
+  }
+
+  async function createCheckout(plan){
+    if (!state.session || !state.session.credential) {
+      openPage('signin');
+      renderPages();
+      return;
+    }
+    try {
+      const data = await authFetch('/api/subscription/create-checkout-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          plan,
+          returnOrigin: location.origin,
+          returnPath: location.pathname + location.search,
+          backendBase: state.apiBase || DEFAULT_BACKEND_BASE
+        })
+      });
+      if (data && data.alreadyPremium) {
+        await refreshSubscription();
+        renderPages();
+        alert('Premium is already active on this account.');
+        return;
+      }
+      if (data && data.url) {
+        location.href = data.url;
+        return;
+      }
+      throw new Error((data && data.error) || 'Checkout link could not be created.');
+    } catch (error) {
+      alert(error.message || 'Could not start checkout.');
+    }
+  }
+
+  async function confirmCheckoutIfPresent(){
+    if (!state.session || !state.session.credential) return false;
+    const url = new URL(location.href);
+    const sessionId = url.searchParams.get('checkout_session_id') || url.searchParams.get('session_id');
+    if (!sessionId) return false;
+    try {
+      await authFetch('/api/subscription/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId })
+      });
+      await refreshSubscription();
+      url.searchParams.delete('checkout_session_id');
+      url.searchParams.delete('session_id');
+      history.replaceState({}, '', url.toString());
+      renderPages();
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
 })();

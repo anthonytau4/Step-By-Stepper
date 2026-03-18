@@ -28,16 +28,77 @@ const openaiClient = process.env.OPENAI_API_KEY
   : null;
 const adminEmail = normalizeEmail(process.env.ADMIN_EMAIL || "anthonytau4@gmail.com");
 const onlineWindowMs = Math.max(30_000, Number(process.env.ONLINE_WINDOW_MS || 180_000));
+const stripeSecretKey = String(process.env.STRIPE_SECRET_KEY || '').trim();
+const stripePublishableKey = String(process.env.STRIPE_PUBLISHABLE_KEY || '').trim();
+const monthlyAmountNzd = 1250;
+const yearlyAmountNzd = 10000;
+const builtInAllowedOrigins = [
+  'https://step-by-stepper.com',
+  'https://www.step-by-stepper.com',
+  'https://step-by-stepper.onrender.com',
+  'http://localhost:3000'
+];
 
 function normalizeEmail(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+function safeOrigin(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  try { return new URL(raw).origin; } catch { return ''; }
+}
+
+function buildStripeAuthHeaders() {
+  return { Authorization: `Bearer ${stripeSecretKey}`, 'Content-Type': 'application/x-www-form-urlencoded' };
+}
+
+async function stripeRequest(endpoint, params = null, method = 'POST') {
+  if (!stripeSecretKey) {
+    const error = new Error('Stripe is not configured on the backend yet.');
+    error.status = 503;
+    throw error;
+  }
+  const body = params ? new URLSearchParams(params).toString() : undefined;
+  const response = await fetch(`https://api.stripe.com${endpoint}`, { method, headers: buildStripeAuthHeaders(), body });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = data?.error?.message || `Stripe request failed (${response.status}).`;
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
+  }
+  return data;
+}
+
+function getUserMembership(bucket, profile = null) {
+  const current = bucket && bucket.membership && typeof bucket.membership === 'object' ? bucket.membership : {};
+  const admin = normalizeEmail(profile?.email || bucket?.profile?.email) === adminEmail;
+  if (admin) {
+    return { isPremium: true, status: 'active', plan: 'admin', source: 'admin', updatedAt: new Date().toISOString() };
+  }
+  return {
+    isPremium: !!current.isPremium,
+    status: String(current.status || 'free').trim() || 'free',
+    plan: String(current.plan || 'free').trim() || 'free',
+    source: String(current.source || 'free').trim() || 'free',
+    updatedAt: String(current.updatedAt || '').trim() || null,
+    stripeCustomerId: String(current.stripeCustomerId || '').trim(),
+    stripeSubscriptionId: String(current.stripeSubscriptionId || '').trim(),
+    checkoutSessionId: String(current.checkoutSessionId || '').trim()
+  };
+}
+
+function isPremiumUser(bucket, profile = null) {
+  const membership = getUserMembership(bucket, profile);
+  return !!membership.isPremium;
+}
+
 function parseAllowedOrigins(value) {
-  const raw = String(value || "*").trim();
-  if (!raw || raw === "*") return "*";
-  const list = raw.split(",").map(item => item.trim()).filter(Boolean);
-  return list.length ? list : "*";
+  const raw = String(value || '*').trim();
+  if (!raw || raw === '*') return '*';
+  const list = raw.split(',').map(item => safeOrigin(item) || item.trim()).filter(Boolean);
+  return Array.from(new Set([...builtInAllowedOrigins, ...list]));
 }
 
 const allowedOrigins = parseAllowedOrigins(process.env.ALLOWED_ORIGIN || "*");
@@ -300,7 +361,8 @@ function touchUser(db, profile, userKey) {
     },
     lastSeenAt: new Date().toISOString(),
     cloudSaves: Array.isArray(bucket.cloudSaves) ? bucket.cloudSaves : [],
-    notifications: Array.isArray(bucket.notifications) ? bucket.notifications : []
+    notifications: Array.isArray(bucket.notifications) ? bucket.notifications : [],
+    membership: getUserMembership(bucket, profile)
   };
   return db.users[key];
 }
@@ -360,6 +422,7 @@ function upsertSubmission(db, payload) {
     ownerEmail: String(entry.ownerEmail || "").trim(),
     ownerName: String(entry.ownerName || entry.ownerEmail || "").trim(),
     ownerPicture: String(entry.ownerPicture || "").trim(),
+    priority: !!entry.priority,
     title: String(entry.title || "Untitled Dance").trim(),
     choreographer: String(entry.choreographer || "Uncredited").trim(),
     requestType: sanitizeRequestType(entry.requestType),
@@ -432,7 +495,9 @@ app.get("/api/auth/config", (_req, res) => {
     cloudStorage: "json-file",
     authMode: googleClientId ? "google-id-token" : "none",
     adminEmail,
-    onlineWindowMs
+    onlineWindowMs,
+    stripeEnabled: !!stripeSecretKey,
+    stripePublishableKey
   });
 });
 
@@ -444,7 +509,7 @@ app.post("/api/auth/google", async (req, res) => {
     const db = await readDb();
     touchUser(db, profile, userKeyFromClaims(claims));
     await writeDb(db);
-    res.json({ ok: true, profile, isAdmin: isAdminProfile(profile), onlineCount: getOnlineUsers(db).length });
+    res.json({ ok: true, profile, isAdmin: isAdminProfile(profile), onlineCount: getOnlineUsers(db).length, membership: db.users[userKeyFromClaims(claims)]?.membership || getUserMembership(null, profile) });
   } catch (error) {
     res.status(error.status || 401).json({ ok: false, error: error?.message || "Google sign-in failed." });
   }
@@ -454,7 +519,7 @@ app.get("/api/auth/me", requireGoogleUser, async (req, res) => {
   const db = await readDb();
   touchUser(db, req.stepperUser, userKeyFromClaims(req.stepperClaims));
   await writeDb(db);
-  res.json({ ok: true, profile: req.stepperUser, isAdmin: isAdminProfile(req.stepperUser), onlineCount: getOnlineUsers(db).length });
+  res.json({ ok: true, profile: req.stepperUser, isAdmin: isAdminProfile(req.stepperUser), onlineCount: getOnlineUsers(db).length, membership: db.users[userKeyFromClaims(req.stepperClaims)]?.membership || getUserMembership(null, req.stepperUser) });
 });
 
 app.get("/api/presence", async (_req, res) => {
@@ -527,7 +592,8 @@ app.post("/api/submissions/request", requireGoogleUser, async (req, res) => {
     title: source.title,
     choreographer: source.choreographer,
     requestType,
-    status: 'pending'
+    status: 'pending',
+    priority: isPremiumUser(db.users[key], req.stepperUser)
   });
   await writeDb(db);
   res.json({ ok: true, submission });
@@ -579,7 +645,12 @@ app.get("/api/admin/submissions", requireAdmin, async (_req, res) => {
   const db = await readDb();
   const items = (Array.isArray(db.submissions) ? db.submissions : [])
     .filter(item => String(item?.status || 'pending') === 'pending')
-    .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
+    .sort((a, b) => {
+      const ap = a?.priority ? 1 : 0;
+      const bp = b?.priority ? 1 : 0;
+      if (ap !== bp) return bp - ap;
+      return new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0);
+    });
   res.json({ ok: true, items });
 });
 
@@ -658,10 +729,94 @@ app.delete("/api/admin/feature/:registryId", requireAdmin, async (req, res) => {
   res.json({ ok: true, registryId });
 });
 
+app.get('/api/subscription/status', requireGoogleUser, async (req, res) => {
+  const db = await readDb();
+  const key = userKeyFromClaims(req.stepperClaims);
+  const bucket = touchUser(db, req.stepperUser, key);
+  await writeDb(db);
+  const membership = getUserMembership(bucket, req.stepperUser);
+  res.json({ ok: true, ...membership, stripeEnabled: !!stripeSecretKey, stripePublishableKey });
+});
 
-app.post('/api/chatbot/help', async (req, res) => {
+app.post('/api/subscription/create-checkout-session', requireGoogleUser, async (req, res) => {
+  try {
+    const plan = String(req.body?.plan || 'monthly').trim().toLowerCase() === 'yearly' ? 'yearly' : 'monthly';
+    const db = await readDb();
+    const key = userKeyFromClaims(req.stepperClaims);
+    const bucket = touchUser(db, req.stepperUser, key);
+    if (isPremiumUser(bucket, req.stepperUser)) {
+      return res.json({ ok: true, alreadyPremium: true, plan: getUserMembership(bucket, req.stepperUser).plan });
+    }
+    const requestOrigin = safeOrigin(req.headers.origin);
+    const requestedOrigin = safeOrigin(req.body?.returnOrigin);
+    const fallbackOrigin = safeOrigin(req.body?.backendBase) || (Array.isArray(allowedOrigins) && allowedOrigins[0]) || '';
+    const origin = requestOrigin || requestedOrigin || fallbackOrigin;
+    if (!origin) return res.status(400).json({ ok:false, error:'Missing return origin.' });
+    const successUrl = `${origin}${String(req.body?.returnPath || '/')}${String(req.body?.returnPath || '/').includes('?') ? '&' : '?'}checkout_session_id={CHECKOUT_SESSION_ID}`;
+    const cancelUrl = `${origin}${String(req.body?.returnPath || '/')}`;
+    const amount = plan === 'yearly' ? yearlyAmountNzd : monthlyAmountNzd;
+    const interval = plan === 'yearly' ? 'year' : 'month';
+    const params = {
+      mode: 'subscription',
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      'line_items[0][price_data][currency]': 'nzd',
+      'line_items[0][price_data][unit_amount]': String(amount),
+      'line_items[0][price_data][recurring][interval]': interval,
+      'line_items[0][price_data][product_data][name]': `Step By Stepper Premium (${plan})`,
+      'line_items[0][quantity]': '1',
+      customer_email: req.stepperUser.email,
+      'metadata[userKey]': key,
+      'metadata[email]': req.stepperUser.email,
+      'metadata[plan]': plan
+    };
+    const session = await stripeRequest('/v1/checkout/sessions', params);
+    bucket.membership = { ...getUserMembership(bucket, req.stepperUser), checkoutSessionId: String(session.id || '').trim(), plan, source: 'checkout-pending', updatedAt: new Date().toISOString() };
+    await writeDb(db);
+    res.json({ ok: true, id: session.id, url: session.url, plan, publishableKey: stripePublishableKey });
+  } catch (error) {
+    res.status(error.status || 500).json({ ok:false, error: error.message || 'Could not create checkout session.' });
+  }
+});
+
+app.post('/api/subscription/confirm', requireGoogleUser, async (req, res) => {
+  try {
+    const sessionId = String(req.body?.sessionId || '').trim();
+    if (!sessionId) return res.status(400).json({ ok:false, error:'Missing sessionId.' });
+    const session = await stripeRequest(`/v1/checkout/sessions/${encodeURIComponent(sessionId)}`, null, 'GET');
+    const db = await readDb();
+    const key = userKeyFromClaims(req.stepperClaims);
+    const bucket = touchUser(db, req.stepperUser, key);
+    const plan = String(session?.metadata?.plan || req.body?.plan || 'monthly').trim().toLowerCase() === 'yearly' ? 'yearly' : 'monthly';
+    const paid = String(session?.payment_status || '').toLowerCase() === 'paid' || String(session?.status || '').toLowerCase() === 'complete';
+    if (!paid) return res.status(409).json({ ok:false, error:'Checkout session is not paid yet.' });
+    bucket.membership = {
+      isPremium: true,
+      status: 'active',
+      plan,
+      source: 'stripe',
+      updatedAt: new Date().toISOString(),
+      stripeCustomerId: String(session?.customer || '').trim(),
+      stripeSubscriptionId: String(session?.subscription || '').trim(),
+      checkoutSessionId: sessionId
+    };
+    await writeDb(db);
+    res.json({ ok:true, ...bucket.membership });
+  } catch (error) {
+    res.status(error.status || 500).json({ ok:false, error: error.message || 'Could not confirm subscription.' });
+  }
+});
+
+app.post('/api/chatbot/help', requireGoogleUser, async (req, res) => {
   const prompt = String(req.body?.prompt || '').trim();
   const context = req.body?.context && typeof req.body.context === 'object' ? req.body.context : {};
+  const db = await readDb();
+  const key = userKeyFromClaims(req.stepperClaims);
+  const bucket = touchUser(db, req.stepperUser, key);
+  await writeDb(db);
+  if (!isPremiumUser(bucket, req.stepperUser)) {
+    return res.status(402).json({ ok:false, error:'Premium subscription required for the AI site helper.' });
+  }
   if (!prompt) {
     return res.status(400).json({ ok:false, error:'Missing prompt.' });
   }
