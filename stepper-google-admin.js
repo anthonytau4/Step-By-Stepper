@@ -37,6 +37,14 @@
     submissions: [],
     notifications: [],
     cloudSaves: [],
+    moderatorApplications: [],
+    activeModerators: [],
+    moderatorQueue: [],
+    glossaryApproved: [],
+    glossaryRequests: [],
+    siteMemories: [],
+    aiDance: { busy: false, mode: 'judge', prompt: '', result: null },
+    communityGlossaryOpen: false,
     subscription: { isPremium: false, plan: 'free', status: 'free', source: 'unknown' },
     chatOpen: false,
     chatBusy: false,
@@ -212,6 +220,64 @@
       showNote: !!(step && step.note),
       note: String(step && step.note || '').trim()
     };
+  }
+
+
+  function buildSectionCountLabels(stepCount){
+    const total = Math.max(1, Number(stepCount) || 1);
+    const labels = [];
+    for (let i = 0; i < total; i += 1) {
+      const start = Math.floor((i * 8) / total) + 1;
+      const end = Math.floor((((i + 1) * 8) - 1) / total) + 1;
+      labels.push(start === end ? String(start) : `${start}-${end}`);
+    }
+    return labels;
+  }
+
+  function autoGenerateCountsForWorksheet(){
+    const data = ensureAppData();
+    if (!data.meta || typeof data.meta !== 'object') data.meta = createBlankAppData().meta;
+    if (!Array.isArray(data.sections)) data.sections = [];
+    let sectionCounter = 0;
+    data.sections.forEach((section) => {
+      const steps = Array.isArray(section && section.steps) ? section.steps : [];
+      if (!steps.length) return;
+      sectionCounter += 1;
+      const labels = buildSectionCountLabels(steps.length);
+      steps.forEach((step, index) => {
+        if (!step || typeof step !== 'object') return;
+        step.count = String(labels[index] || `${index + 1}`).trim();
+      });
+    });
+    const totalCounts = Math.max(8, sectionCounter * 8);
+    data.meta.counts = String(totalCounts);
+    writeAppData(data);
+    updateSavedSignature('');
+    renderPages();
+    openBuildWorksheet();
+    return { totalCounts, sections: sectionCounter };
+  }
+
+  function applyGeneratedCountLines(countLines, totalCounts){
+    const data = ensureAppData();
+    if (!data.meta || typeof data.meta !== 'object') data.meta = createBlankAppData().meta;
+    if (!Array.isArray(data.sections)) data.sections = [];
+    const lines = Array.isArray(countLines) ? countLines : [];
+    const flatSteps = [];
+    data.sections.forEach((section) => {
+      const steps = Array.isArray(section && section.steps) ? section.steps : [];
+      steps.forEach((step) => { if (step && typeof step === 'object') flatSteps.push(step); });
+    });
+    flatSteps.forEach((step, index) => {
+      const label = String(lines[index] || '').trim();
+      if (label) step.count = label;
+    });
+    if (String(totalCounts || '').trim()) data.meta.counts = String(totalCounts).trim();
+    writeAppData(data);
+    updateSavedSignature('');
+    renderPages();
+    openBuildWorksheet();
+    return true;
   }
 
   function applyStepToCurrentWorksheet(step){
@@ -747,7 +813,9 @@
       }
       await ensureGsiLoaded();
       if (!(window.google && window.google.accounts && window.google.accounts.id)) {
-        container.innerHTML = `<button type="button" disabled class="stepper-google-cta ${theme.button}" style="width:280px;max-width:100%;opacity:.65;cursor:not-allowed">Sign in with Google</button><p class="mt-3 text-sm ${theme.subtle}">Google sign-in script could not load on this device.</p>`;
+        container.innerHTML = `<button type="button" disabled class="stepper-google-cta ${theme.button}" style="width:280px;max-width:100%;opacity:.65;cursor:not-allowed">Sign in with Google</button><p class="mt-3 text-sm ${theme.subtle}">Google sign-in script could not load on this device.</p><button type="button" data-stepper-google-retry="1" class="stepper-google-cta ${theme.button}" style="margin-top:12px;">Retry Google sign-in</button>`;
+        const retryBtn = container.querySelector('[data-stepper-google-retry="1"]');
+        if (retryBtn) retryBtn.addEventListener('click', async () => { state.gisPromise = null; state.gisReady = false; await refreshConfig().catch(() => null); renderGoogleButton(); });
         return;
       }
       if (state.gisClientId !== effectiveClientId) {
@@ -775,7 +843,9 @@
         : 'Google sign-in should be ready here. If the button still does nothing, the backend URL or Google origin is mismatched.';
       container.appendChild(helper);
     } catch (error) {
-      container.innerHTML = `<button type="button" disabled class="stepper-google-cta ${theme.button}" style="width:280px;max-width:100%;opacity:.65;cursor:not-allowed">Sign in with Google</button><p class="mt-3 text-sm ${theme.subtle}">${escapeHtml(error.message || 'Google button could not load.')}</p>`;
+      container.innerHTML = `<button type="button" disabled class="stepper-google-cta ${theme.button}" style="width:280px;max-width:100%;opacity:.65;cursor:not-allowed">Sign in with Google</button><p class="mt-3 text-sm ${theme.subtle}">${escapeHtml(error.message || 'Google button could not load.')}</p><button type="button" data-stepper-google-retry="1" class="stepper-google-cta ${theme.button}" style="margin-top:12px;">Retry Google sign-in</button>`;
+      const retryBtn = container.querySelector('[data-stepper-google-retry="1"]');
+      if (retryBtn) retryBtn.addEventListener('click', async () => { state.gisPromise = null; state.gisReady = false; await refreshConfig().catch(() => null); renderGoogleButton(); });
     }
   }
 
@@ -1309,6 +1379,48 @@
     }
   }
 
+
+  async function refreshSiteMemories(){
+    try {
+      const data = await fetchJson('/api/site-memory');
+      state.siteMemories = Array.isArray(data.items) ? data.items : [];
+      return state.siteMemories;
+    } catch (_error) {
+      state.siteMemories = [];
+      return [];
+    }
+  }
+
+  async function addSiteMemory(textValue){
+    const text = String(textValue || '').trim();
+    if (!text) return false;
+    try {
+      await authFetch('/api/admin/site-memory', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ text })
+      });
+      await refreshSiteMemories();
+      renderPages();
+      return true;
+    } catch (error) {
+      alert(error.message || 'Could not add that helper memory.');
+      return false;
+    }
+  }
+
+  async function deleteSiteMemory(id){
+    try {
+      await authFetch(`/api/admin/site-memory/${encodeURIComponent(id)}`, { method:'DELETE' });
+      await refreshSiteMemories();
+      renderPages();
+      return true;
+    } catch (error) {
+      alert(error.message || 'Could not delete that helper memory.');
+      return false;
+    }
+  }
+
   async function refreshGlossaryRequests(){
     if (!isAdminSession()) {
       state.glossaryRequests = [];
@@ -1402,10 +1514,24 @@
         mode,
         text: String(data.text || '').trim(),
         score: data.flowScore,
-        suggestions: Array.isArray(data.suggestions) ? data.suggestions.map(normalizeAiSuggestion).filter(Boolean) : []
+        suggestions: Array.isArray(data.suggestions) ? data.suggestions.map(normalizeAiSuggestion).filter(Boolean) : [],
+        countLines: Array.isArray(data.countLines) ? data.countLines.map(item => String(item || '').trim()).filter(Boolean) : [],
+        totalCounts: String(data.totalCounts || '').trim()
       };
+      if (mode === 'counts' && state.aiDance.result.countLines.length) {
+        applyGeneratedCountLines(state.aiDance.result.countLines, state.aiDance.result.totalCounts || data.totalCounts || '');
+      } else if (mode === 'counts' && !state.aiDance.result.countLines.length) {
+        const local = autoGenerateCountsForWorksheet();
+        state.aiDance.result.text = state.aiDance.result.text || `I generated worksheet counts locally and set the dance to ${local.totalCounts} counts.`;
+        state.aiDance.result.totalCounts = String(local.totalCounts);
+      }
     } catch (error) {
-      state.aiDance.result = { mode, text: error.message || 'AI dance tool failed.', score: null, suggestions: [] };
+      state.aiDance.result = { mode, text: error.message || 'AI dance tool failed.', score: null, suggestions: [], countLines: [], totalCounts: '' };
+      if (mode === 'counts') {
+        const local = autoGenerateCountsForWorksheet();
+        state.aiDance.result.text = `AI count generation had a wobble, so the site generated worksheet counts locally and set the dance to ${local.totalCounts} counts.`;
+        state.aiDance.result.totalCounts = String(local.totalCounts);
+      }
     } finally {
       state.aiDance.busy = false;
       renderPages();
@@ -1457,7 +1583,8 @@
     if (text.includes('signin') || text.includes('google') || text.includes('sign in')) return 'Open the Sign In tab and use Sign in with Google. Once signed in, your dances can sync to the backend and the admin tab appears only for the admin email.';
     if (text.includes('moderator')) return 'Open Sign In and use Apply for moderator. You need a Google account first. Approved moderators get moderator tools but not the Admin tab.';
     if (text.includes('glossary') || text.includes('step request')) return 'Use the Community Glossary button while building to apply admin-approved custom steps. Signed-in members can request new glossary steps from the Sign In tab, and Admin reviews them under Requested dance steps.';
-    if (text.includes('judge') || text.includes('flow')) return 'Open Sign In and use AI Dance Judge. It can score flowability, suggest tidy-ups, and propose glossary-style step additions for the current worksheet.';
+    if (text.includes('judge') || text.includes('flow')) return 'Open Sign In and use AI Dance Judge. It can score flowability, suggest tidy-ups, propose glossary-style step additions, and generate counts for the current worksheet.';
+    if (text.includes('count')) return 'Open Sign In and use Generate counts in the AI dance panel. It fills worksheet step counts and updates the dance count total for you.';
     if (text.includes('tab') || text.includes('where') || text.includes('go')) return 'Use Build to make or edit a dance, Sheet for the clean sheet view, My Saved Dances for your cloud saves, Featured Choreo for public featured dances, and Sign In for Google saving and moderation actions.';
     return 'Tell me what you are trying to do and I will point you to the exact tab or button.';
   }
@@ -1740,8 +1867,8 @@
               </div>
               <span class="stepper-google-pill ${theme.orange}">${escapeHtml((state.glossaryApproved || []).length)} community steps</span>
             </div>
-            <div class="mt-4 ${theme.panel} rounded-3xl border p-4"><textarea data-stepper-ai-prompt="1" class="stepper-google-input" rows="3" placeholder="Optional: e.g. make the chorus flow better, add a smoother travelling step, or judge whether this dance is clunky.">${escapeHtml(state.aiDance.prompt || '')}</textarea><div class="mt-4 flex flex-wrap gap-3"><button type="button" data-stepper-action="ai-judge" class="stepper-google-cta ${theme.button}">${state.aiDance.busy && state.aiDance.mode === 'judge' ? 'Judging…' : 'Judge dance'}</button><button type="button" data-stepper-action="ai-add" class="stepper-google-cta ${theme.button}">${state.aiDance.busy && state.aiDance.mode === 'add' ? 'Thinking…' : 'Add with glossary AI'}</button></div></div>
-            ${state.aiDance.result ? `<div class="mt-4 rounded-3xl border p-5 ${theme.panel}"><div class="flex flex-wrap items-center gap-3"><div class="text-lg font-black tracking-tight">${state.aiDance.result.mode === 'add' ? 'AI add-on result' : 'AI judging result'}</div>${state.aiDance.result.score ? `<span class="stepper-google-pill ${theme.orange}">Flow ${escapeHtml(String(state.aiDance.result.score))}/10</span>` : ''}</div><p class="mt-3 text-sm leading-relaxed ${theme.subtle}">${escapeHtml(state.aiDance.result.text || '')}</p>${state.aiDance.result.suggestions && state.aiDance.result.suggestions.length ? `<div class="mt-4 grid gap-3">${state.aiDance.result.suggestions.map((item, index) => `<article class="rounded-2xl border p-4 ${theme.soft}" data-stepper-ai-suggestion="${index}"><div class="flex flex-wrap items-start justify-between gap-3"><div><div class="text-base font-black">${escapeHtml(item.name || 'Suggested Step')}</div><p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.count || '1')} • ${escapeHtml(item.foot || 'Either')}</p></div><button type="button" class="stepper-google-cta ${theme.button}" data-action="apply-ai-suggestion">Apply to worksheet</button></div><p class="mt-3 text-sm leading-relaxed ${theme.subtle}">${escapeHtml(item.description || '')}</p>${item.note ? `<p class="mt-2 text-xs font-semibold ${theme.subtle}">${escapeHtml(item.note)}</p>` : ''}</article>`).join('')}</div>` : ''}</div>` : ''}
+            <div class="mt-4 ${theme.panel} rounded-3xl border p-4"><textarea data-stepper-ai-prompt="1" class="stepper-google-input" rows="3" placeholder="Optional: e.g. make the chorus flow better, add a smoother travelling step, judge whether this dance is clunky, or generate counts for the worksheet.">${escapeHtml(state.aiDance.prompt || '')}</textarea><div class="mt-4 flex flex-wrap gap-3"><button type="button" data-stepper-action="ai-judge" class="stepper-google-cta ${theme.button}">${state.aiDance.busy && state.aiDance.mode === 'judge' ? 'Judging…' : 'Judge dance'}</button><button type="button" data-stepper-action="ai-add" class="stepper-google-cta ${theme.button}">${state.aiDance.busy && state.aiDance.mode === 'add' ? 'Thinking…' : 'Add with glossary AI'}</button><button type="button" data-stepper-action="ai-counts" class="stepper-google-cta ${theme.button}">${state.aiDance.busy && state.aiDance.mode === 'counts' ? 'Counting…' : 'Generate counts'}</button></div></div>
+            ${state.aiDance.result ? `<div class="mt-4 rounded-3xl border p-5 ${theme.panel}"><div class="flex flex-wrap items-center gap-3"><div class="text-lg font-black tracking-tight">${state.aiDance.result.mode === 'add' ? 'AI add-on result' : (state.aiDance.result.mode === 'counts' ? 'AI count result' : 'AI judging result')}</div>${state.aiDance.result.score ? `<span class="stepper-google-pill ${theme.orange}">Flow ${escapeHtml(String(state.aiDance.result.score))}/10</span>` : ''}${state.aiDance.result.totalCounts ? `<span class="stepper-google-pill ${theme.orange}">${escapeHtml(String(state.aiDance.result.totalCounts))} counts</span>` : ''}</div><p class="mt-3 text-sm leading-relaxed ${theme.subtle}">${escapeHtml(state.aiDance.result.text || '')}</p>${state.aiDance.result.suggestions && state.aiDance.result.suggestions.length ? `<div class="mt-4 grid gap-3">${state.aiDance.result.suggestions.map((item, index) => `<article class="rounded-2xl border p-4 ${theme.soft}" data-stepper-ai-suggestion="${index}"><div class="flex flex-wrap items-start justify-between gap-3"><div><div class="text-base font-black">${escapeHtml(item.name || 'Suggested Step')}</div><p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.count || '1')} • ${escapeHtml(item.foot || 'Either')}</p></div><button type="button" class="stepper-google-cta ${theme.button}" data-action="apply-ai-suggestion">Apply to worksheet</button></div><p class="mt-3 text-sm leading-relaxed ${theme.subtle}">${escapeHtml(item.description || '')}</p>${item.note ? `<p class="mt-2 text-xs font-semibold ${theme.subtle}">${escapeHtml(item.note)}</p>` : ''}</article>`).join('')}</div>` : ''}</div>` : ''}
           </div>
           <div class="mx-auto max-w-3xl rounded-3xl border p-5 sm:p-6 ${theme.soft}">
             <div class="flex flex-wrap items-center justify-between gap-4">
@@ -1810,6 +1937,8 @@
     if (aiJudgeBtn) aiJudgeBtn.addEventListener('click', () => { state.aiDance.mode = 'judge'; runAiDanceTool('judge'); });
     const aiAddBtn = page.querySelector('[data-stepper-action="ai-add"]');
     if (aiAddBtn) aiAddBtn.addEventListener('click', () => { state.aiDance.mode = 'add'; runAiDanceTool('add'); });
+    const aiCountsBtn = page.querySelector('[data-stepper-action="ai-counts"]');
+    if (aiCountsBtn) aiCountsBtn.addEventListener('click', () => { state.aiDance.mode = 'counts'; runAiDanceTool('counts'); });
     page.querySelectorAll('[data-stepper-ai-suggestion]').forEach(card => {
       const idx = Number(card.getAttribute('data-stepper-ai-suggestion'));
       const btn = card.querySelector('[data-action="apply-ai-suggestion"]');
@@ -2007,6 +2136,7 @@
           </article>`).join('') : `<p class="text-sm ${theme.subtle}">No active moderators yet.</p>`}</div></div>
         ${cards}
 
+        <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-site-memory="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Helper memory</div><p class="mt-1 text-sm ${theme.subtle}">Add site facts or rules the AI helper should keep using for everyone. This is how the website learns approved things over time.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.siteMemories || []).length))} learned</span></div><div class="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]"><textarea data-stepper-site-memory-input="1" class="stepper-google-input" rows="3" placeholder="Example: Featured dances should feel polished but not over-written. Counts should be generated in 8-count blocks whenever possible."></textarea><button type="button" class="stepper-google-cta ${theme.button}" data-action="add-site-memory">Add memory</button></div><div class="mt-4 grid gap-3">${(state.siteMemories || []).length ? state.siteMemories.slice(0,30).map(item => `<div class="rounded-2xl border p-4 ${theme.soft}" data-stepper-site-memory-id="${escapeHtml(item.id)}"><div class="flex flex-wrap items-start justify-between gap-3"><div><div class="text-sm font-black">${escapeHtml(item.text || '')}</div><p class="mt-1 text-xs ${theme.subtle}">${escapeHtml(item.createdByName || item.createdByEmail || 'Admin')}</p></div><button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="delete-site-memory">Delete</button></div></div>`).join('') : `<p class="text-sm ${theme.subtle}">No saved helper memory yet.</p>`}</div></div>
         <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-glossary-requests="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Requested dance steps</div><p class="mt-1 text-sm ${theme.subtle}">Admin approves custom glossary steps here. If a request is clearly right-footed or left-footed, the mirrored version is created automatically too.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.glossaryRequests || []).length))} pending</span></div><div class="mt-4 grid gap-4">${(state.glossaryRequests || []).length ? state.glossaryRequests.map(item => `<article class="rounded-2xl border p-4 ${theme.soft}" data-stepper-glossary-request-id="${escapeHtml(item.id)}"><div class="flex flex-wrap items-start justify-between gap-3"><div><div class="text-base font-black">${escapeHtml(item.name || 'Requested Step')}</div><p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.ownerName || item.ownerEmail || 'Member')} • ${escapeHtml(item.counts || '1')} • ${escapeHtml(item.foot || 'Either')}</p></div><div class="flex flex-wrap gap-3"><button type="button" class="stepper-google-cta ${theme.button}" data-action="approve-glossary-request">Approve</button><button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="reject-glossary-request">Decline</button></div></div><div class="mt-4 grid gap-3 sm:grid-cols-2"><div class="rounded-2xl border p-4 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Requested step</div><p class="mt-3 text-sm font-bold">${escapeHtml(item.name || '')}</p><p class="mt-2 text-sm ${theme.subtle}">${escapeHtml(item.description || '')}</p>${item.tags ? `<p class="mt-2 text-xs font-semibold ${theme.subtle}">Tags: ${escapeHtml(item.tags)}</p>` : ''}</div><div class="rounded-2xl border p-4 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Auto twin preview</div>${item.autoMirror ? `<p class="mt-3 text-sm font-bold">${escapeHtml(item.autoMirror.name || '')}</p><p class="mt-2 text-sm ${theme.subtle}">${escapeHtml(item.autoMirror.description || '')}</p><p class="mt-2 text-xs font-semibold ${theme.subtle}">${escapeHtml(item.autoMirror.foot || '')} • ${escapeHtml(item.autoMirror.counts || '')}</p>` : `<p class="mt-3 text-sm ${theme.subtle}">No forced opposite-foot twin for this request.</p>`}</div></div></article>`).join('') : `<p class="text-sm ${theme.subtle}">No pending dance step requests.</p>`}</div></div>
         <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-approved-glossary="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Approved community glossary</div><p class="mt-1 text-sm ${theme.subtle}">These are the admin-approved custom steps everyone can apply from Glossary+ while building.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.glossaryApproved || []).length))} live</span></div><div class="mt-4 grid gap-3">${(state.glossaryApproved || []).length ? state.glossaryApproved.slice(0, 20).map(item => `<div class="rounded-2xl border p-4 ${theme.soft}"><div class="flex flex-wrap items-start justify-between gap-3"><div><div class="text-base font-black">${escapeHtml(item.name || 'Step')}</div><p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.foot || 'Either')} • ${escapeHtml(item.counts || '1')}</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(item.status || 'approved')}</span></div><p class="mt-3 text-sm ${theme.subtle}">${escapeHtml(item.description || '')}</p></div>`).join('') : `<p class="text-sm ${theme.subtle}">No approved custom glossary steps yet.</p>`}</div></div>
         ${cards}
@@ -2045,6 +2175,18 @@
       if (removeBtn) removeBtn.addEventListener('click', () => removeModeratorAccess(userKey, noteEl && noteEl.value));
     });
 
+    const addMemoryBtn = page.querySelector('[data-action="add-site-memory"]');
+    if (addMemoryBtn) addMemoryBtn.addEventListener('click', async () => {
+      const input = page.querySelector('[data-stepper-site-memory-input="1"]');
+      const value = input ? input.value : '';
+      const ok = await addSiteMemory(value);
+      if (ok && input) input.value = '';
+    });
+    page.querySelectorAll('[data-stepper-site-memory-id]').forEach(card => {
+      const id = card.getAttribute('data-stepper-site-memory-id') || '';
+      const del = card.querySelector('[data-action="delete-site-memory"]');
+      if (del) del.addEventListener('click', () => deleteSiteMemory(id));
+    });
     page.querySelectorAll('[data-stepper-glossary-request-id]').forEach(card => {
       const id = card.getAttribute('data-stepper-glossary-request-id');
       const approve = card.querySelector('[data-action="approve-glossary-request"]');
@@ -2887,6 +3029,7 @@ Newest user question: ${question}`;
       jobs.push(refreshSubscription().catch(() => null));
       jobs.push(refreshNotifications().catch(() => null));
       jobs.push(refreshGlossaryApproved().catch(() => null));
+      jobs.push(refreshSiteMemories().catch(() => null));
       if (isAdminSession()) {
         jobs.push(refreshAdminDances().catch(() => null));
         jobs.push(refreshSubmissions().catch(() => null));
@@ -2917,7 +3060,8 @@ Newest user question: ${question}`;
       paymentStatusLabel,
       isModeratorSession,
       isAdminSession,
-      applyStepToCurrentWorksheet
+      applyStepToCurrentWorksheet,
+      autoGenerateCountsForWorksheet
     };
   };
 

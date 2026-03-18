@@ -227,7 +227,8 @@ function emptyDb() {
     submissions: [],
     moderatorApplications: [],
     glossaryRequests: [],
-    approvedGlossarySteps: []
+    approvedGlossarySteps: [],
+    siteMemory: []
   };
 }
 
@@ -253,6 +254,7 @@ async function readDb() {
     if (!Array.isArray(parsed.moderatorApplications)) parsed.moderatorApplications = [];
     if (!Array.isArray(parsed.glossaryRequests)) parsed.glossaryRequests = [];
     if (!Array.isArray(parsed.approvedGlossarySteps)) parsed.approvedGlossarySteps = [];
+    if (!Array.isArray(parsed.siteMemory)) parsed.siteMemory = [];
     return parsed;
   } catch {
     return emptyDb();
@@ -729,6 +731,25 @@ function parseJsonFromAiText(text) {
   return null;
 }
 
+
+function buildFallbackCountLines(dance) {
+  const sections = Array.isArray(dance?.snapshot?.data?.sections) ? dance.snapshot.data.sections : [];
+  const lines = [];
+  let sectionCount = 0;
+  for (const section of sections) {
+    const steps = Array.isArray(section?.steps) ? section.steps : [];
+    if (!steps.length) continue;
+    sectionCount += 1;
+    const total = Math.max(1, steps.length);
+    for (let i = 0; i < total; i += 1) {
+      const start = Math.floor((i * 8) / total) + 1;
+      const end = Math.floor((((i + 1) * 8) - 1) / total) + 1;
+      lines.push(start === end ? String(start) : `${start}-${end}`);
+    }
+  }
+  return { countLines: lines, totalCounts: String(Math.max(8, sectionCount * 8 || 8)) };
+}
+
 function fallbackDanceTool(mode, dance, prompt) {
   const sections = Array.isArray(dance?.snapshot?.data?.sections) ? dance.snapshot.data.sections : [];
   const stepCount = sections.reduce((sum, section) => sum + (Array.isArray(section?.steps) ? section.steps.length : 0), 0);
@@ -736,20 +757,35 @@ function fallbackDanceTool(mode, dance, prompt) {
     return {
       text: `I could not get a clean AI tool reply, so here is a safe fallback. Add one smoother travelling step near the end of the current worksheet and keep the count simple so the flow stays readable. ${prompt ? `You asked for: ${prompt}` : ''}`.trim(),
       flowScore: null,
-      suggestions: [{ name: 'Travelling Brush Step', description: 'Step forward with control, brush the free foot through, then settle into the next travelling action so the phrase breathes more cleanly.', count: '7&8', foot: 'Right', reason: 'Fallback glossary-style add-on while the AI response was messy.' }]
+      suggestions: [{ name: 'Travelling Brush Step', description: 'Step forward with control, brush the free foot through, then settle into the next travelling action so the phrase breathes more cleanly.', count: '7&8', foot: 'Right', reason: 'Fallback glossary-style add-on while the AI response was messy.' }],
+      countLines: [],
+      totalCounts: ''
+    };
+  }
+  if (mode === 'counts') {
+    const generated = buildFallbackCountLines(dance);
+    return {
+      text: 'I generated worksheet counts in 8-count blocks and set the dance total for you.',
+      flowScore: null,
+      suggestions: [],
+      countLines: generated.countLines,
+      totalCounts: generated.totalCounts
     };
   }
   const score = Math.max(5, Math.min(9, stepCount ? Math.round(Math.min(10, 5 + stepCount / 12)) : 5));
   return {
     text: 'Fallback judging result: the worksheet structure is readable, but tighten any overcrowded phrases and keep repeated travelling patterns balanced so the dance feels smoother to teach and dance.',
     flowScore: score,
-    suggestions: []
+    suggestions: [],
+    countLines: [],
+    totalCounts: ''
   };
 }
 
 const SITE_HELP_CONTEXT = `You are the Step By Stepper site helper. Keep answers short, practical, and human. Only answer about using this site.
 Tabs and actions available: Build, Sheet, What's New, My Saved Dances, Featured Choreo, Sign In, and Admin for anthonytau4@gmail.com only.
 Important behaviours: users sign in with Google, Save Changes pushes the current dance to cloud save, Send to host for featuring creates a feature request, Upload to site creates a site-upload request, Featured Choreo shows public featured dances, removing a feature removes it from Featured Choreo, signed-in users can get notifications when admin approves or rejects requests, and Admin reviews custom glossary step requests under Requested dance steps.
+The site can also remember admin-approved helper memory notes, and those learned notes should be treated as true for future helper replies.
 If someone asks where to go, tell them the exact tab or button to use.
 Do not open with generic greetings like "Hi there! What can I help you with today on Step By Stepper?" and do not tell people to ask about any tab or feature. Just answer the actual question.`;
 
@@ -1349,8 +1385,39 @@ app.post('/api/admin/glossary-requests/:id/reject', requireAdmin, async (req, re
   res.json({ ok:true, item });
 });
 
+
+app.get('/api/site-memory', async (_req, res) => {
+  const db = await readDb();
+  res.json({ ok:true, items: (Array.isArray(db.siteMemory) ? db.siteMemory : []).slice(0, 60) });
+});
+
+app.post('/api/admin/site-memory', requireAdmin, async (req, res) => {
+  const db = await readDb();
+  const textValue = String(req.body?.text || '').trim();
+  if (!textValue) return res.status(400).json({ ok:false, error:'Missing memory text.' });
+  const item = {
+    id: createId('site_memory'),
+    text: textValue.slice(0, 1200),
+    createdAt: new Date().toISOString(),
+    createdByEmail: req.stepperUser.email,
+    createdByName: req.stepperUser.name
+  };
+  db.siteMemory = [item, ...(Array.isArray(db.siteMemory) ? db.siteMemory : [])].slice(0, 200);
+  await writeDb(db);
+  res.json({ ok:true, item, items: db.siteMemory });
+});
+
+app.delete('/api/admin/site-memory/:id', requireAdmin, async (req, res) => {
+  const db = await readDb();
+  const id = String(req.params?.id || '').trim();
+  db.siteMemory = (Array.isArray(db.siteMemory) ? db.siteMemory : []).filter(item => String(item?.id || '') !== id);
+  await writeDb(db);
+  res.json({ ok:true, items: db.siteMemory });
+});
+
 app.post('/api/ai/dance-tools', requireGoogleUser, async (req, res) => {
-  const mode = String(req.body?.mode || 'judge').trim().toLowerCase() === 'add' ? 'add' : 'judge';
+  const requestedMode = String(req.body?.mode || 'judge').trim().toLowerCase();
+  const mode = requestedMode === 'add' ? 'add' : (requestedMode === 'counts' ? 'counts' : 'judge');
   const prompt = String(req.body?.prompt || '').trim();
   const dance = req.body?.dance && typeof req.body.dance === 'object' ? req.body.dance : null;
   if (!dance || typeof dance !== 'object') return res.status(400).json({ ok:false, error:'Missing dance payload.' });
@@ -1358,8 +1425,10 @@ app.post('/api/ai/dance-tools', requireGoogleUser, async (req, res) => {
   const approved = (Array.isArray(db.approvedGlossarySteps) ? db.approvedGlossarySteps : []).slice(0, 120).map(item => ({ name:item.name, description:item.description, counts:item.counts, foot:item.foot, tags:item.tags }));
   const danceText = serializeDanceForAi(dance);
   const system = mode === 'add'
-    ? 'You are an expert line-dance editor. Use the provided dance sheet and community glossary to propose 1 to 3 additions that improve flow. Return strict JSON with keys text, flowScore, suggestions. Each suggestion must have name, description, count, foot, reason. Avoid markdown.'
-    : 'You are an expert line-dance judge. Score the dance for flowability and teaching clarity. Return strict JSON with keys text, flowScore, suggestions. flowScore is 1-10. suggestions can be empty or contain tidy-up suggestions with name, description, count, foot, reason. Avoid markdown.';
+    ? 'You are an expert line-dance editor. Use the provided dance sheet and community glossary to propose 1 to 3 additions that improve flow. Return strict JSON with keys text, flowScore, suggestions, countLines, totalCounts. Each suggestion must have name, description, count, foot, reason. Avoid markdown.'
+    : (mode === 'counts'
+      ? 'You are an expert line-dance worksheet assistant. Generate count labels for each step in order, grouped naturally into 8-count phrasing. Return strict JSON with keys text, flowScore, suggestions, countLines, totalCounts. countLines must be an array of count labels matching the number of steps exactly. suggestions can be empty. Avoid markdown.'
+      : 'You are an expert line-dance judge. Score the dance for flowability and teaching clarity. Return strict JSON with keys text, flowScore, suggestions, countLines, totalCounts. flowScore is 1-10. suggestions can be empty or contain tidy-up suggestions with name, description, count, foot, reason. Avoid markdown.');
   const userPrompt = `Mode: ${mode}
 User request: ${prompt || '(none)'}
 
@@ -1382,7 +1451,7 @@ ${approved.map(item => `- ${item.name} [${item.foot}] ${item.counts}: ${item.des
       foot: String(item?.foot || '').trim(),
       reason: String(item?.reason || item?.note || '').trim()
     })).filter(item => item.name || item.description) : [];
-    res.json({ ok:true, provider: ai.provider, text: String(parsed.text || '').trim() || fallbackDanceTool(mode, dance, prompt).text, flowScore: Number(parsed.flowScore || 0) || null, suggestions });
+    res.json({ ok:true, provider: ai.provider, text: String(parsed.text || '').trim() || fallbackDanceTool(mode, dance, prompt).text, flowScore: Number(parsed.flowScore || 0) || null, suggestions, countLines: Array.isArray(parsed.countLines) ? parsed.countLines.map(item => String(item || '').trim()).filter(Boolean) : [], totalCounts: String(parsed.totalCounts || '').trim() });
   } catch (error) {
     const fallback = fallbackDanceTool(mode, dance, prompt);
     res.json({ ok:true, provider:'fallback', ...fallback, fallback:true, error: error.message || 'AI dance tool failed.' });
@@ -1409,8 +1478,8 @@ app.post('/api/chatbot/help', requireGoogleUser, async (req, res) => {
     text: String(item?.text || '').trim().slice(0, 2000)
   })).filter(item => item.text);
   try {
-    const system = `${SITE_HELP_CONTEXT}
-Reply like a natural AI helper for the Step By Stepper site. Be specific, warm, and practical. Use the conversation history when it matters, and do not keep repeating the exact same canned answer.`;
+    const learnedNotes = (Array.isArray(db.siteMemory) ? db.siteMemory : []).slice(0, 30).map(item => `- ${String(item?.text || '').trim()}`).filter(Boolean).join('\n') || '(none)';
+    const system = `${SITE_HELP_CONTEXT}\nReply like a natural AI helper for the Step By Stepper site. Be specific, warm, and practical. Use the conversation history when it matters, and do not keep repeating the exact same canned answer.\nAdmin-approved helper memory:\n${learnedNotes}`;
     const userPrompt = `Current tab: ${context.currentTab || 'unknown'}
 Signed in: ${context.signedIn ? 'yes' : 'no'}
 Admin: ${context.isAdmin ? 'yes' : 'no'}
