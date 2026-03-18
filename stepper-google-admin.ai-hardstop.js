@@ -91,16 +91,22 @@
   function readApiBase(){
     const explicit = normalizeApiBase(window.STEPPER_API_BASE || '');
     if (explicit) return explicit;
-    const saved = normalizeApiBase(localStorage.getItem(API_BASE_KEY) || '');
-    if (saved) return saved;
-    if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') return 'http://localhost:3000';
+    if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+      const saved = normalizeApiBase(localStorage.getItem(API_BASE_KEY) || '');
+      if (saved) return saved;
+      return 'http://localhost:3000';
+    }
     return DEFAULT_BACKEND_BASE;
   }
 
   function saveApiBase(value){
     const normalized = normalizeApiBase(value);
     state.apiBase = normalized || DEFAULT_BACKEND_BASE;
-    localStorage.setItem(API_BASE_KEY, state.apiBase);
+    if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+      localStorage.setItem(API_BASE_KEY, state.apiBase);
+    } else {
+      try { localStorage.removeItem(API_BASE_KEY); } catch {}
+    }
     window.STEPPER_API_BASE = state.apiBase;
   }
 
@@ -111,10 +117,10 @@
       if (!normalized) return;
       if (!list.includes(normalized)) list.push(normalized);
     };
-    const saved = normalizeApiBase(localStorage.getItem(API_BASE_KEY) || '');
     const explicit = normalizeApiBase(window.STEPPER_API_BASE || '');
     const currentOrigin = (location.protocol === 'http:' || location.protocol === 'https:') ? normalizeApiBase(location.origin) : '';
     if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+      const saved = normalizeApiBase(localStorage.getItem(API_BASE_KEY) || '');
       push(preferred);
       push(explicit);
       push(saved);
@@ -122,12 +128,9 @@
       push(currentOrigin);
       return list;
     }
-    push(preferred);
     push(explicit);
-    push(saved);
+    push(preferred);
     push(DEFAULT_BACKEND_BASE);
-    push(ALT_BACKEND_BASE);
-    if (currentOrigin && !/step-by-stepper\.com$/i.test(location.hostname)) push(currentOrigin);
     return list;
   }
 
@@ -161,7 +164,9 @@
         return working;
       }
     }
-    return normalizeApiBase(preferred) || DEFAULT_BACKEND_BASE;
+    const fallback = normalizeApiBase(preferred) || DEFAULT_BACKEND_BASE;
+    saveApiBase(fallback);
+    return fallback;
   }
 
   function wireStartupBackendBase(){
@@ -672,12 +677,26 @@
     }
   }
 
+  function buildBackendReachabilityError(base, error){
+    const chosenBase = normalizeApiBase(base) || DEFAULT_BACKEND_BASE;
+    const message = String(error && error.message || '');
+    const nice = new Error(`Could not reach the Step-By-Stepper backend at ${chosenBase}. Check Render is awake, the backend URL is correct, and this site origin is allowed by CORS.`);
+    nice.status = Number(error && error.status || 0);
+    nice.base = chosenBase;
+    nice.data = error && error.data ? error.data : null;
+    if (/Failed to fetch|NetworkError|Load failed|fetch/i.test(message) || !nice.status) {
+      nice.code = 'BACKEND_UNREACHABLE';
+    }
+    return nice;
+  }
+
   async function fetchJson(path, options){
-    const retryableStatuses = new Set([0, 404, 405, 502, 503, 504]);
+    const retryableStatuses = new Set([0, 502, 503, 504]);
     const bases = String(path || '').startsWith('/api/') ? getApiBaseCandidates(state.apiBase) : [normalizeApiBase(state.apiBase) || DEFAULT_BACKEND_BASE];
     let lastError = null;
     for (const base of bases) {
-      const url = `${normalizeApiBase(base)}${path}`;
+      const normalizedBase = normalizeApiBase(base) || DEFAULT_BACKEND_BASE;
+      const url = `${normalizedBase}${path}`;
       try {
         const headers = Object.assign({ Accept: 'application/json' }, options && options.headers ? options.headers : {});
         const response = await fetch(url, Object.assign({}, options || {}, { headers, mode: 'cors', credentials: 'omit' }));
@@ -688,26 +707,26 @@
           data = null;
         }
         if (response.ok && data && data.ok !== false) {
-          if (base && base !== state.apiBase) saveApiBase(base);
+          if (normalizedBase !== state.apiBase) saveApiBase(normalizedBase);
           return data;
         }
         const message = data && data.error ? data.error : `Request failed (${response.status})`;
         const error = new Error(message);
         error.status = response.status;
-        error.base = base;
+        error.base = normalizedBase;
         error.data = data;
         lastError = error;
-        if (retryableStatuses.has(Number(response.status)) && base !== bases[bases.length - 1]) continue;
+        if (retryableStatuses.has(Number(response.status)) && normalizedBase !== bases[bases.length - 1]) continue;
         throw error;
       } catch (error) {
-        lastError = error;
+        lastError = buildBackendReachabilityError(normalizedBase, error);
         const status = Number(error && error.status || 0);
         const retryable = !status || retryableStatuses.has(status) || /Failed to fetch|NetworkError|Load failed/i.test(String(error && error.message || ''));
-        if (retryable && base !== bases[bases.length - 1]) continue;
-        throw error;
+        if (retryable && normalizedBase !== bases[bases.length - 1]) continue;
+        throw lastError;
       }
     }
-    throw lastError || new Error('Could not reach backend.');
+    throw lastError || buildBackendReachabilityError(state.apiBase || DEFAULT_BACKEND_BASE, new Error('Could not reach backend.'));
   }
 
   async function authFetch(path, options){
@@ -750,7 +769,7 @@
         ok: false,
         googleEnabled: !!FALLBACK_GOOGLE_CLIENT_ID,
         googleClientId: FALLBACK_GOOGLE_CLIENT_ID,
-        error: error && error.message ? error.message : 'Could not reach backend.',
+        error: error && error.message ? error.message : 'Could not reach the Step-By-Stepper backend.',
         source: 'frontend-fallback'
       };
       return state.config;
@@ -874,7 +893,7 @@
     await ensureStaffChatLoaded(true);
       if (isAdminSession()) { await refreshAdminDances(); await refreshSubmissions(); }
     } catch (error) {
-      alert(error.message || 'Google sign in failed.');
+      alert(error && error.message ? error.message : 'Google sign in failed because the backend could not be reached.');
     }
     renderPages();
   }

@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import OpenAI from "openai";
 import { OAuth2Client } from "google-auth-library";
 import { promises as fs } from "fs";
+import { MongoClient } from "mongodb";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -26,10 +27,17 @@ const dataDir = process.env.DATA_DIR
 const dbPath = path.join(dataDir, "stepper-db.json");
 const dbBackupPath = `${dbPath}.bak`;
 const dbTempPath = `${dbPath}.tmp`;
+const mongoUri = String(process.env.MONGODB_URI || process.env.MONGO_URL || '').trim();
+const mongoDbName = String(process.env.MONGODB_DB_NAME || process.env.MONGODB_DB || 'step_by_stepper').trim() || 'step_by_stepper';
+const mongoCollectionName = String(process.env.MONGODB_COLLECTION || 'app_state').trim() || 'app_state';
+const mongoEnabled = !!mongoUri;
+let mongoClient = null;
+let mongoCollection = null;
 console.log('[Stepper] RENDER_DISK_MOUNT_PATH =', process.env.RENDER_DISK_MOUNT_PATH || '(not set)');
 console.log('[Stepper] DATA_DIR =', process.env.DATA_DIR || '(not set)');
 console.log('[Stepper] resolved dataDir =', dataDir);
 console.log('[Stepper] resolved dbPath =', dbPath);
+console.log('[Stepper] storage mode =', mongoEnabled ? `mongodb (${mongoDbName}/${mongoCollectionName})` : 'json-file');
 const openaiClient = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
@@ -326,12 +334,50 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json({ limit: "4mb" }));
 
+async function ensureMongo() {
+  if (!mongoEnabled) return null;
+  if (mongoCollection) return mongoCollection;
+  if (!mongoClient) {
+    mongoClient = new MongoClient(mongoUri, {
+      maxPoolSize: 10,
+      minPoolSize: 0,
+      serverSelectionTimeoutMS: 10000
+    });
+    await mongoClient.connect();
+  }
+  const db = mongoClient.db(mongoDbName);
+  mongoCollection = db.collection(mongoCollectionName);
+  await mongoCollection.createIndex({ updatedAt: -1 });
+  return mongoCollection;
+}
+
+function normalizeDbShape(parsed) {
+  if (!parsed || typeof parsed !== "object") throw new Error("Database payload did not contain an object.");
+  if (!parsed.users || typeof parsed.users !== "object") parsed.users = {};
+  if (!Array.isArray(parsed.featuredChoreo)) parsed.featuredChoreo = [];
+  if (!Array.isArray(parsed.danceRegistry)) parsed.danceRegistry = [];
+  if (!Array.isArray(parsed.submissions)) parsed.submissions = [];
+  if (!Array.isArray(parsed.submissionHistory)) parsed.submissionHistory = [];
+  if (!Array.isArray(parsed.moderatorApplications)) parsed.moderatorApplications = [];
+  if (!Array.isArray(parsed.moderatorRegistry)) parsed.moderatorRegistry = [];
+  if (!Array.isArray(parsed.adminRegistry)) parsed.adminRegistry = [];
+  if (!Array.isArray(parsed.pendingModeratorInvites)) parsed.pendingModeratorInvites = [];
+  if (!Array.isArray(parsed.pendingSuspensions)) parsed.pendingSuspensions = [];
+  if (!Array.isArray(parsed.glossaryRequests)) parsed.glossaryRequests = [];
+  if (!Array.isArray(parsed.approvedGlossarySteps)) parsed.approvedGlossarySteps = [];
+  if (!Array.isArray(parsed.siteMemory)) parsed.siteMemory = [];
+  if (!Array.isArray(parsed.securityAlerts)) parsed.securityAlerts = [];
+  if (!Array.isArray(parsed.staffChat)) parsed.staffChat = [];
+  return parsed;
+}
+
 function emptyDb() {
   return {
     users: {},
     featuredChoreo: [],
     danceRegistry: [],
     submissions: [],
+    submissionHistory: [],
     moderatorApplications: [],
     moderatorRegistry: [],
     adminRegistry: [],
@@ -346,6 +392,27 @@ function emptyDb() {
 }
 
 async function ensureDb() {
+  if (mongoEnabled) {
+    const collection = await ensureMongo();
+    const existing = await collection.findOne({ _id: 'main' }, { projection: { _id: 1 } });
+    if (!existing) {
+      const initial = syncAdminRegistry(syncModeratorRegistry(syncAndPruneDb(emptyDb())));
+      await collection.updateOne(
+        { _id: 'main' },
+        {
+          $setOnInsert: {
+            _id: 'main',
+            state: initial,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            storage: 'mongodb'
+          }
+        },
+        { upsert: true }
+      );
+    }
+    return;
+  }
   if (isRenderDiskMode) {
     try {
       await fs.access(dataDir);
@@ -367,22 +434,7 @@ async function ensureDb() {
 async function readDbFromPath(targetPath) {
   const raw = await fs.readFile(targetPath, "utf8");
   const parsed = JSON.parse(raw);
-  if (!parsed || typeof parsed !== "object") throw new Error("Database file did not contain an object.");
-  if (!parsed.users || typeof parsed.users !== "object") parsed.users = {};
-  if (!Array.isArray(parsed.featuredChoreo)) parsed.featuredChoreo = [];
-  if (!Array.isArray(parsed.danceRegistry)) parsed.danceRegistry = [];
-  if (!Array.isArray(parsed.submissions)) parsed.submissions = [];
-  if (!Array.isArray(parsed.moderatorApplications)) parsed.moderatorApplications = [];
-  if (!Array.isArray(parsed.moderatorRegistry)) parsed.moderatorRegistry = [];
-  if (!Array.isArray(parsed.adminRegistry)) parsed.adminRegistry = [];
-  if (!Array.isArray(parsed.pendingModeratorInvites)) parsed.pendingModeratorInvites = [];
-  if (!Array.isArray(parsed.pendingSuspensions)) parsed.pendingSuspensions = [];
-  if (!Array.isArray(parsed.glossaryRequests)) parsed.glossaryRequests = [];
-  if (!Array.isArray(parsed.approvedGlossarySteps)) parsed.approvedGlossarySteps = [];
-  if (!Array.isArray(parsed.siteMemory)) parsed.siteMemory = [];
-  if (!Array.isArray(parsed.securityAlerts)) parsed.securityAlerts = [];
-  if (!Array.isArray(parsed.staffChat)) parsed.staffChat = [];
-  return parsed;
+  return normalizeDbShape(parsed);
 }
 
 function syncModeratorRegistry(db) {
@@ -420,6 +472,12 @@ function syncModeratorRegistry(db) {
 
 async function readDb() {
   await ensureDb();
+  if (mongoEnabled) {
+    const collection = await ensureMongo();
+    const doc = await collection.findOne({ _id: 'main' });
+    const parsed = normalizeDbShape(doc && doc.state ? doc.state : emptyDb());
+    return syncAdminRegistry(syncModeratorRegistry(syncAndPruneDb(parsed)));
+  }
   try {
     const parsed = await readDbFromPath(dbPath);
     return syncAndPruneDb(parsed);
@@ -487,7 +545,26 @@ function syncAdminRegistry(db) {
 
 async function writeDb(payload) {
   await ensureDb();
-  const data = JSON.stringify(syncAdminRegistry(syncModeratorRegistry(syncAndPruneDb(payload))), null, 2);
+  const normalized = syncAdminRegistry(syncModeratorRegistry(syncAndPruneDb(payload)));
+  if (mongoEnabled) {
+    const collection = await ensureMongo();
+    await collection.updateOne(
+      { _id: 'main' },
+      {
+        $set: {
+          state: normalized,
+          updatedAt: new Date().toISOString(),
+          storage: 'mongodb'
+        },
+        $setOnInsert: {
+          createdAt: new Date().toISOString()
+        }
+      },
+      { upsert: true }
+    );
+    return;
+  }
+  const data = JSON.stringify(normalized, null, 2);
   try {
     try {
       await fs.copyFile(dbPath, dbBackupPath);
