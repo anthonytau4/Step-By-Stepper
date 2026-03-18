@@ -1799,27 +1799,13 @@
     });
   }
 
-  function isActuallyVisible(el){
-    if (!el) return false;
-    if (el.hidden) return false;
-    const style = window.getComputedStyle ? window.getComputedStyle(el) : null;
-    if (style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) return false;
-    const rect = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
-    return !!(rect && (rect.width > 0 || rect.height > 0));
-  }
-
-  function shouldPatchSavedDancesPage(){
-    const page = document.getElementById('stepper-saved-dances-page');
-    if (!page) return false;
-    return isActuallyVisible(page) || !!page.querySelector(':scope > *:not([hidden])');
-  }
-
   function patchSavedDancesPage(force){
     const page = document.getElementById('stepper-saved-dances-page');
     if (!page) return;
-    if (!force && !shouldPatchSavedDancesPage()) return;
-    const activeInput = document.activeElement;
-    if (!force && activeInput && activeInput.closest && activeInput.closest('#stepper-saved-dances-page')) return;
+    const isVisible = !!(page.offsetParent || page.getClientRects().length) && getComputedStyle(page).display !== 'none' && getComputedStyle(page).visibility !== 'hidden';
+    const focused = document.activeElement;
+    const focusInside = !!(focused && page.contains(focused));
+    if (!force && (!isVisible || focusInside)) return;
     const body = page.querySelector('[class*="p-6"]') || page;
     if (!body) return;
     let wrap = page.querySelector('[data-stepper-cloud-save-wrap="true"]');
@@ -2471,7 +2457,7 @@
     updateAdminTabVisibility();
     updateTabButtons();
     renderQuickActions();
-    if (shouldPatchSavedDancesPage()) patchSavedDancesPage();
+    if (document.getElementById('stepper-saved-dances-page') && ((document.getElementById('stepper-saved-dances-page').offsetParent || document.getElementById('stepper-saved-dances-page').getClientRects().length) && getComputedStyle(document.getElementById('stepper-saved-dances-page')).display !== 'none')) patchSavedDancesPage();
     renderSaveButton();
     renderFeatureBadge();
     renderSiteHelper();
@@ -2525,7 +2511,8 @@
     renderPresenceOnly();
     renderSuspensionBanner();
     patchFeaturedPageCopy();
-    patchSavedDancesPage();
+    const __savedPage = document.getElementById('stepper-saved-dances-page');
+    if (__savedPage && ((__savedPage.offsetParent || __savedPage.getClientRects().length) && getComputedStyle(__savedPage).display !== 'none' && getComputedStyle(__savedPage).visibility !== 'hidden')) patchSavedDancesPage();
     renderSaveButton();
   }, 2200);
 

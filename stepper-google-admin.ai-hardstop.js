@@ -20,7 +20,6 @@
   const DEFAULT_RENDER_SERVICE_ID = 'srv-d6ss4295pdvs73e1iifg';
   const DEFAULT_BACKEND_BASE = 'https://step-by-stepper.onrender.com';
   const ALT_BACKEND_BASE = 'https://api.step-by-stepper.com';
-  const SESSION_BAD_API_BASES = new Set();
   const FALLBACK_GOOGLE_CLIENT_ID = '1038282546217-a7qv2i1puevmtjf38f6sv761vt7he26s.apps.googleusercontent.com';
   const SYNC_INTERVAL_MS = 6000;
   const PRESENCE_INTERVAL_MS = 30000;
@@ -47,7 +46,6 @@
     glossaryRequests: [],
     siteMemories: [],
     aiDance: { busy: false, mode: 'judge', prompt: '', result: null },
-    adminUiSignature: '',
     communityGlossaryOpen: false,
     subscription: { isPremium: false, plan: 'free', status: 'free', source: 'unknown' },
     savedDancesUiSignature: '',
@@ -101,23 +99,8 @@
   function saveApiBase(value){
     const normalized = normalizeApiBase(value);
     state.apiBase = normalized || DEFAULT_BACKEND_BASE;
-    SESSION_BAD_API_BASES.delete(state.apiBase);
     localStorage.setItem(API_BASE_KEY, state.apiBase);
     window.STEPPER_API_BASE = state.apiBase;
-  }
-
-  function markApiBaseBad(value){
-    const normalized = normalizeApiBase(value);
-    if (!normalized) return;
-    SESSION_BAD_API_BASES.add(normalized);
-    if (normalizeApiBase(state.apiBase) === normalized) {
-      try { localStorage.removeItem(API_BASE_KEY); } catch {}
-      if (window.STEPPER_API_BASE === normalized) {
-        try { delete window.STEPPER_API_BASE; } catch {}
-        window.STEPPER_API_BASE = '';
-      }
-      state.apiBase = '';
-    }
   }
 
   function getApiBaseCandidates(preferred){
@@ -125,7 +108,6 @@
     const push = (value) => {
       const normalized = normalizeApiBase(value);
       if (!normalized) return;
-      if (SESSION_BAD_API_BASES.has(normalized)) return;
       if (!list.includes(normalized)) list.push(normalized);
     };
     const saved = normalizeApiBase(localStorage.getItem(API_BASE_KEY) || '');
@@ -143,7 +125,7 @@
     push(explicit);
     push(saved);
     push(DEFAULT_BACKEND_BASE);
-    if (explicit === normalizeApiBase(ALT_BACKEND_BASE) || saved === normalizeApiBase(ALT_BACKEND_BASE)) push(ALT_BACKEND_BASE);
+    push(ALT_BACKEND_BASE);
     if (currentOrigin && !/step-by-stepper\.com$/i.test(location.hostname)) push(currentOrigin);
     return list;
   }
@@ -660,11 +642,8 @@
   }
 
   async function fetchJson(path, options){
-    const method = String(options && options.method || 'GET').toUpperCase();
-    const isApiPath = String(path || '').startsWith('/api/');
-    const isWrite = method !== 'GET' && method !== 'HEAD';
-    const retryableStatuses = new Set([0, 502, 503, 504]);
-    const bases = isApiPath ? getApiBaseCandidates(state.apiBase) : [normalizeApiBase(state.apiBase) || DEFAULT_BACKEND_BASE];
+    const retryableStatuses = new Set([0, 404, 405, 502, 503, 504]);
+    const bases = String(path || '').startsWith('/api/') ? getApiBaseCandidates(state.apiBase) : [normalizeApiBase(state.apiBase) || DEFAULT_BACKEND_BASE];
     let lastError = null;
     for (const base of bases) {
       const url = `${normalizeApiBase(base)}${path}`;
@@ -687,37 +666,17 @@
         error.base = base;
         error.data = data;
         lastError = error;
-        const statusCode = Number(response.status);
-        if ((retryableStatuses.has(statusCode) || (!isWrite && statusCode === 404) || (!isWrite && statusCode === 405)) && base !== bases[bases.length - 1]) continue;
-        if (statusCode === 404 || statusCode === 405 || statusCode === 495 || statusCode === 525 || statusCode === 526) markApiBaseBad(base);
+        if (retryableStatuses.has(Number(response.status)) && base !== bases[bases.length - 1]) continue;
         throw error;
       } catch (error) {
         lastError = error;
         const status = Number(error && error.status || 0);
-        const retryable = !status || retryableStatuses.has(status) || /Failed to fetch|NetworkError|Load failed|ERR_SSL_VERSION_OR_CIPHER_MISMATCH/i.test(String(error && error.message || ''));
-        if (/ERR_SSL_VERSION_OR_CIPHER_MISMATCH/i.test(String(error && error.message || ''))) markApiBaseBad(base);
-        if ((status === 404 || status === 405) && isWrite) markApiBaseBad(base);
+        const retryable = !status || retryableStatuses.has(status) || /Failed to fetch|NetworkError|Load failed/i.test(String(error && error.message || ''));
         if (retryable && base !== bases[bases.length - 1]) continue;
         throw error;
       }
     }
     throw lastError || new Error('Could not reach backend.');
-  }
-
-  async function ensureFreshAdminApiBase(path, options){
-    const method = String(options && options.method || 'GET').toUpperCase();
-    const isAdminWrite = /^\/api\/(admin|moderator)\//.test(String(path || '')) && method !== 'GET' && method !== 'HEAD';
-    if (!isAdminWrite) return;
-    const activeBase = normalizeApiBase(state.apiBase);
-    const stillWorking = activeBase ? await probeApiBaseCandidate(activeBase) : null;
-    if (stillWorking) {
-      saveApiBase(stillWorking);
-      return;
-    }
-    if (activeBase) markApiBaseBad(activeBase);
-    const preferredBase = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') ? 'http://localhost:3000' : DEFAULT_BACKEND_BASE;
-    const nextBase = await chooseWorkingApiBase(preferredBase);
-    if (nextBase) saveApiBase(nextBase);
   }
 
   async function authFetch(path, options){
@@ -731,7 +690,6 @@
       Authorization: `Bearer ${session.credential}`
     });
     try {
-      await ensureFreshAdminApiBase(path, options);
       return await fetchJson(path, Object.assign({}, options || {}, { headers }));
     } catch (error) {
       if (error && error.status === 401) {
@@ -874,7 +832,6 @@
       await heartbeat();
       await refreshCloudSaves();
     state.savedDancesUiSignature = '';
-    state.adminUiSignature = '';
       await restoreLatestCloudSaveIfNeeded();
       await syncCurrentDanceToBackend(true);
       await refreshNotifications();
@@ -1138,7 +1095,7 @@
     const synced = await syncCurrentDanceToBackend(force || true);
     if (synced) {
       await refreshCloudSaves();
-      state.savedDancesUiSignature = '';
+    state.savedDancesUiSignature = '';
       renderSaveButton();
       return true;
     }
@@ -1178,7 +1135,7 @@
     try {
       await authFetch(`/api/cloud-saves/${encodeURIComponent(saveId)}`, { method: 'DELETE' });
       await refreshCloudSaves();
-      state.savedDancesUiSignature = '';
+    state.savedDancesUiSignature = '';
       renderPages();
       return true;
     } catch (error) {
@@ -1497,7 +1454,6 @@
         body: JSON.stringify({ text })
       });
       await refreshSiteMemories();
-      clearAdminEditorDirty();
       renderPages();
       return true;
     } catch (error) {
@@ -1843,27 +1799,13 @@
     });
   }
 
-  function isActuallyVisible(el){
-    if (!el) return false;
-    if (el.hidden) return false;
-    const style = window.getComputedStyle ? window.getComputedStyle(el) : null;
-    if (style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) return false;
-    const rect = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
-    return !!(rect && (rect.width > 0 || rect.height > 0));
-  }
-
-  function shouldPatchSavedDancesPage(){
-    const page = document.getElementById('stepper-saved-dances-page');
-    if (!page) return false;
-    return isActuallyVisible(page);
-  }
-
   function patchSavedDancesPage(force){
     const page = document.getElementById('stepper-saved-dances-page');
     if (!page) return;
-    if (!force && !shouldPatchSavedDancesPage()) return;
-    const activeInput = document.activeElement;
-    if (!force && activeInput && activeInput.closest && activeInput.closest('#stepper-saved-dances-page')) return;
+    const isVisible = !!(page.offsetParent || page.getClientRects().length) && getComputedStyle(page).display !== 'none' && getComputedStyle(page).visibility !== 'hidden';
+    const focused = document.activeElement;
+    const focusInside = !!(focused && page.contains(focused));
+    if (!force && (!isVisible || focusInside)) return;
     const body = page.querySelector('[class*="p-6"]') || page;
     if (!body) return;
     let wrap = page.querySelector('[data-stepper-cloud-save-wrap="true"]');
@@ -2201,7 +2143,7 @@
 
   async function sendStaffChat(text){
     const clean = String(text || '').trim();
-    if (!clean) return false;
+    if (!clean) return;
     const res = await authFetch('/api/staff-chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2209,97 +2151,17 @@
     }).catch(() => null);
     if (!res || res.ok === false) {
       flash('Staff chat could not send right now.', 'error');
-      return false;
+      return;
     }
     state.staffChat = Array.isArray(res.messages) ? res.messages : (Array.isArray(state.staffChat) ? state.staffChat : []);
-    clearAdminEditorDirty();
     renderPages();
-    return true;
-  }
-
-  function getAdminUiSignature(){
-    const pick = (items, mapFn, limit) => (Array.isArray(items) ? items : []).slice(0, limit || 60).map(mapFn).join('|');
-    return JSON.stringify({
-      activePage: state.activePage || '',
-      onlineCount: (state.presence && state.presence.onlineCount) || 0,
-      submissions: pick(state.submissions, item => [
-        item && item.id || '',
-        item && item.registryId || '',
-        item && item.updatedAt || '',
-        item && item.requestType || '',
-        item && item.status || ''
-      ].join('~'), 80),
-      dances: pick(state.adminDances, item => [
-        item && item.registryId || '',
-        item && item.updatedAt || '',
-        item && item.title || '',
-        item && item.featureTone || '',
-        item && item.isFeatured ? '1' : '0'
-      ].join('~'), 120),
-      modApps: pick(state.moderatorApplications, item => [item && item.id || '', item && item.updatedAt || '', item && item.email || ''].join('~'), 60),
-      moderators: pick(state.activeModerators, item => [item && item.userKey || '', item && item.email || '', item && item.updatedAt || ''].join('~'), 60),
-      suspensions: pick(state.suspensions, item => [item && item.userKey || '', item && item.email || '', item && item.expiresAt || ''].join('~'), 60),
-      alerts: pick(state.securityAlerts, item => [item && item.id || '', item && item.createdAt || '', item && item.type || ''].join('~'), 60),
-      glossaryApproved: pick(state.glossaryApproved, item => [item && item.id || '', item && item.updatedAt || '', item && item.name || ''].join('~'), 60),
-      glossaryRequests: pick(state.glossaryRequests, item => [item && item.id || '', item && item.updatedAt || '', item && item.name || '', item && item.status || 'pending'].join('~'), 60),
-      siteMemories: pick(state.siteMemories, item => [item && item.id || '', item && item.createdAt || '', item && item.text || ''].join('~'), 80),
-      staffChat: pick(state.chatMessages, item => [item && item.id || '', item && item.createdAt || '', item && item.text || ''].join('~'), 80)
-    });
-  }
-
-  function isAdminEditorElement(element){
-    if (!element || !element.matches) return false;
-    if (element.isContentEditable) return true;
-    if (!element.matches('input, textarea, select')) return false;
-    const type = String(element.getAttribute('type') || '').toLowerCase();
-    return !['hidden','button','submit','reset','checkbox','radio','file'].includes(type);
-  }
-
-  function markAdminEditorDirty(element){
-    if (!isAdminEditorElement(element)) return;
-    element.setAttribute('data-stepper-dirty', '1');
-  }
-
-  function clearAdminEditorDirty(scope){
-    const root = scope && scope.querySelectorAll ? scope : document.getElementById(ADMIN_PAGE_ID);
-    if (!root || !root.querySelectorAll) return;
-    root.querySelectorAll('[data-stepper-dirty="1"]').forEach(node => node.removeAttribute('data-stepper-dirty'));
-  }
-
-  function adminPageHasLiveEditor(page){
-    if (!page) return false;
-    if (page.querySelector('[data-stepper-dirty="1"]')) return true;
-    const active = document.activeElement;
-    if (!active || !active.closest || !active.closest('#' + ADMIN_PAGE_ID)) return false;
-    return isAdminEditorElement(active);
-  }
-
-  function wireAdminDraftGuards(page){
-    if (!page || page.__stepperDraftGuardWired) return;
-    page.__stepperDraftGuardWired = true;
-    const markDirtyFromEvent = (event) => {
-      const target = event && event.target;
-      if (!target || !target.closest || !target.closest('#' + ADMIN_PAGE_ID)) return;
-      markAdminEditorDirty(target);
-    };
-    page.addEventListener('input', markDirtyFromEvent, true);
-    page.addEventListener('change', markDirtyFromEvent, true);
   }
 
   function renderAdminPage(){
     const page = document.getElementById(ADMIN_PAGE_ID);
     if (!page) return;
-    wireAdminDraftGuards(page);
     const theme = themeClasses();
-    const adminSignature = getAdminUiSignature();
-    if (isAdminSession() && adminPageHasLiveEditor(page)) return;
-    if (isAdminSession() && state.adminUiSignature === adminSignature) {
-      renderPresenceOnly();
-      return;
-    }
-    state.adminUiSignature = adminSignature;
     if (!isAdminSession()) {
-      state.adminUiSignature = '';
       page.className = `rounded-3xl border shadow-sm overflow-hidden ${theme.shell}`;
       page.innerHTML = `
         <div class="px-6 py-5 border-b ${theme.panel}">
@@ -2454,40 +2316,30 @@
       const userKey = card.getAttribute('data-stepper-active-mod-key');
       const noteEl = card.querySelector('[data-remove-mod-note="1"]');
       const removeBtn = card.querySelector('[data-action="remove-moderator"]');
-      if (removeBtn) removeBtn.addEventListener('click', async () => {
-        const ok = await removeModeratorAccess(userKey, noteEl && noteEl.value);
-        if (ok) clearAdminEditorDirty(page);
-      });
+      if (removeBtn) removeBtn.addEventListener('click', () => removeModeratorAccess(userKey, noteEl && noteEl.value));
     });
     const staffSendBtn = page.querySelector('[data-action="send-staff-chat"]');
-    if (staffSendBtn) staffSendBtn.addEventListener('click', async () => {
+    if (staffSendBtn) staffSendBtn.addEventListener('click', () => {
       const input = page.querySelector('[data-stepper-staff-chat-input="1"]');
       const text = input && input.value;
-      const ok = await sendStaffChat(text);
-      if (ok) {
-        clearAdminEditorDirty(page);
-        if (input) input.value = '';
-      }
+      sendStaffChat(text);
+      if (input) input.value = '';
     });
 
     const addModeratorBtn = page.querySelector('[data-action="add-moderator-email"]');
-    if (addModeratorBtn) addModeratorBtn.addEventListener('click', async () => {
+    if (addModeratorBtn) addModeratorBtn.addEventListener('click', () => {
       const emailEl = page.querySelector('[data-add-moderator-email="1"]');
-      const ok = await addModeratorByEmail(emailEl && emailEl.value);
-      if (ok) {
-        clearAdminEditorDirty(page);
-        if (emailEl) emailEl.value = '';
-      }
+      addModeratorByEmail(emailEl && emailEl.value);
+      if (emailEl) emailEl.value = '';
     });
     const suspendBtn = page.querySelector('[data-action="suspend-person"]');
-    if (suspendBtn) suspendBtn.addEventListener('click', async () => {
+    if (suspendBtn) suspendBtn.addEventListener('click', () => {
       const emailEl = page.querySelector('[data-suspend-email="1"]');
       const durationEl = page.querySelector('[data-suspend-duration="1"]');
       const reasonEl = page.querySelector('[data-suspend-reason="1"]');
       const durationMs = Number(durationEl && durationEl.value || 300000);
       const durationLabel = durationEl && durationEl.options && durationEl.selectedIndex >= 0 ? durationEl.options[durationEl.selectedIndex].text : '5 minutes';
-      const ok = await suspendMember(emailEl && emailEl.value, durationMs, durationLabel, reasonEl && reasonEl.value);
-      if (ok) clearAdminEditorDirty(page);
+      suspendMember(emailEl && emailEl.value, durationMs, durationLabel, reasonEl && reasonEl.value);
     });
     page.querySelectorAll('[data-stepper-suspension-key]').forEach(card => {
       const userKey = card.getAttribute('data-stepper-suspension-key');
@@ -2500,10 +2352,7 @@
       const input = page.querySelector('[data-stepper-site-memory-input="1"]');
       const value = input ? input.value : '';
       const ok = await addSiteMemory(value);
-      if (ok) {
-        clearAdminEditorDirty(page);
-        if (input) input.value = '';
-      }
+      if (ok && input) input.value = '';
     });
     page.querySelectorAll('[data-stepper-site-memory-id]').forEach(card => {
       const id = card.getAttribute('data-stepper-site-memory-id') || '';
@@ -2608,7 +2457,7 @@
     updateAdminTabVisibility();
     updateTabButtons();
     renderQuickActions();
-    if (shouldPatchSavedDancesPage()) patchSavedDancesPage();
+    if (document.getElementById('stepper-saved-dances-page') && ((document.getElementById('stepper-saved-dances-page').offsetParent || document.getElementById('stepper-saved-dances-page').getClientRects().length) && getComputedStyle(document.getElementById('stepper-saved-dances-page')).display !== 'none')) patchSavedDancesPage();
     renderSaveButton();
     renderFeatureBadge();
     renderSiteHelper();
@@ -2633,8 +2482,7 @@
       await refreshSession();
       await heartbeat();
       await refreshCloudSaves();
-      state.savedDancesUiSignature = '';
-      state.adminUiSignature = '';
+    state.savedDancesUiSignature = '';
       await restoreLatestCloudSaveIfNeeded();
       await syncCurrentDanceToBackend(false);
       await refreshNotifications();
@@ -2663,7 +2511,8 @@
     renderPresenceOnly();
     renderSuspensionBanner();
     patchFeaturedPageCopy();
-    patchSavedDancesPage();
+    const __savedPage = document.getElementById('stepper-saved-dances-page');
+    if (__savedPage && ((__savedPage.offsetParent || __savedPage.getClientRects().length) && getComputedStyle(__savedPage).display !== 'none' && getComputedStyle(__savedPage).visibility !== 'hidden')) patchSavedDancesPage();
     renderSaveButton();
   }, 2200);
 
@@ -2694,7 +2543,6 @@
   window.addEventListener('storage', () => {
     if (state.session && state.session.credential) syncCurrentDanceToBackend(false);
     state.savedDancesUiSignature = '';
-    state.adminUiSignature = '';
     renderPages();
   });
 
@@ -3039,13 +2887,10 @@
         body: JSON.stringify({ email, durationMs, durationLabel, reason })
       });
       await Promise.all([refreshSuspensions(), refreshSecurityAlerts()]);
-      clearAdminEditorDirty();
       renderPages();
       alert('Bar saved.');
-      return true;
     } catch (error) {
       alert(error.message || 'Could not bar that person.');
-      return false;
     }
   }
 
@@ -3067,13 +2912,10 @@
         body: JSON.stringify({ email })
       });
       await Promise.all([refreshActiveModerators(), refreshModeratorApplications()]);
-      clearAdminEditorDirty();
       renderPages();
       alert('Moderator added.');
-      return true;
     } catch (error) {
       alert(error.message || 'Could not add moderator.');
-      return false;
     }
   }
 
@@ -3109,10 +2951,10 @@
 
   async function removeModeratorAccess(userKey, reason){
     const note = String(reason || '').trim();
-    if (!userKey) return false;
+    if (!userKey) return;
     if (!note) {
       alert('Add a reason so the removed moderator can see why on next startup.');
-      return false;
+      return;
     }
     try {
       await authFetch(`/api/admin/moderators/${encodeURIComponent(userKey)}/remove`, {
@@ -3121,12 +2963,9 @@
         body: JSON.stringify({ reason: note })
       });
       await refreshActiveModerators().catch(() => []);
-      clearAdminEditorDirty();
       renderPages();
-      return true;
     } catch (error) {
       alert(error.message || 'Could not remove moderator access.');
-      return false;
     }
   }
 
