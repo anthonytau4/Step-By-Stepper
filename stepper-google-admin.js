@@ -2284,11 +2284,35 @@
   function patchFeaturedPageCopy(){
     const page = document.getElementById('stepper-featured-choreo-page');
     if (!page) return;
-    const noteCard = page.querySelector('.rounded-2xl.border.p-5');
-    if (!noteCard) return;
-    if (noteCard.dataset.stepperAdminPatched === 'true') return;
-    noteCard.dataset.stepperAdminPatched = 'true';
-    noteCard.remove();
+    const BAD_TEXT_SNIPPETS = [
+      'Featured dances now come from the admin workflow instead of Gmail submissions.',
+      'Signed-in members can have their work auto-synced to the registry',
+      'Public members can still browse everything here once it has been featured.',
+      'Contact information'
+    ];
+    const scrub = () => {
+      const noteCard = page.querySelector('.rounded-2xl.border.p-5');
+      if (noteCard && !noteCard.dataset.stepperAdminPatched) {
+        noteCard.dataset.stepperAdminPatched = 'true';
+        const noteText = String(noteCard.textContent || '').replace(/\s+/g, ' ').trim();
+        if (BAD_TEXT_SNIPPETS.some(snippet => noteText.includes(snippet)) || /gmail submissions|auto-synced to the registry|bronze, silver, or gold/i.test(noteText)) {
+          noteCard.remove();
+        }
+      }
+      page.querySelectorAll('p, div, section, article, aside, span').forEach(node => {
+        if (!node || node === page || node.children.length > 12) return;
+        const text = String(node.textContent || '').replace(/\s+/g, ' ').trim();
+        if (!text) return;
+        if (BAD_TEXT_SNIPPETS.some(snippet => text.includes(snippet)) || /gmail submissions|auto-synced to the registry|bronze, silver, or gold feature badge/i.test(text)) {
+          node.remove();
+        }
+      });
+    };
+    scrub();
+    if (page.dataset.stepperFeaturedScrubber === 'true') return;
+    page.dataset.stepperFeaturedScrubber = 'true';
+    const observer = new MutationObserver(() => scrub());
+    observer.observe(page, { childList: true, subtree: true, characterData: true });
   }
 
   function renderPages(){
