@@ -274,13 +274,14 @@
   function applyTabStyles(button, isActive, accentColor){
     if (!button) return;
     const dark = isDarkMode();
-    button.style.color = dark ? '#ffffff' : '';
-    button.style.opacity = isActive ? '1' : (dark ? '.92' : '');
+    const activeBg = accentColor || '#4f46e5';
+    const idleBg = dark ? '#262626' : '#4b5563';
+    button.style.color = '#ffffff';
+    button.style.opacity = '1';
     button.style.transform = isActive ? 'translateY(-1px)' : '';
-    button.style.boxShadow = isActive ? '0 8px 24px rgba(79,70,229,.18)' : '';
-    button.style.background = isActive ? (dark ? '#2f2f2f' : '#ffffff') : '';
-    button.style.borderColor = isActive ? (dark ? '#525252' : '#d4d4d8') : '';
-    if (!dark && isActive && accentColor) button.style.color = accentColor;
+    button.style.boxShadow = isActive ? '0 8px 24px rgba(79,70,229,.22)' : '0 6px 18px rgba(0,0,0,.08)';
+    button.style.background = isActive ? activeBg : idleBg;
+    button.style.borderColor = isActive ? activeBg : idleBg;
   }
 
   function updateTabButtons(){
@@ -394,14 +395,18 @@
   }
 
   function ensureHost(){
+    const parent = (state.ui.mainEl && state.ui.mainEl.parentNode) || (document.getElementById('root') && document.getElementById('root').parentNode) || document.body;
+    const anchor = state.ui.footerWrap || (state.ui.mainEl ? state.ui.mainEl.nextSibling : null);
+    if (state.ui.host && parent && state.ui.host.parentNode !== parent) {
+      parent.insertBefore(state.ui.host, anchor || null);
+    }
     if (state.ui.host && document.body.contains(state.ui.host)) return state.ui.host;
     const host = document.createElement('div');
     host.id = HOST_ID;
     host.hidden = true;
     host.className = 'max-w-4xl mx-auto px-3 sm:px-4 py-6 sm:py-8 pb-28 sm:pb-32 print:hidden';
     host.innerHTML = `<div class="space-y-5"><section id="${SIGNIN_PAGE_ID}" hidden style="display:none"></section><section id="${SUBSCRIPTION_PAGE_ID}" hidden style="display:none"></section><section id="${ADMIN_PAGE_ID}" hidden style="display:none"></section></div>`;
-    const root = document.getElementById('root');
-    if (root && root.parentNode) root.insertAdjacentElement('afterend', host);
+    if (parent) parent.insertBefore(host, anchor || null);
     else document.body.appendChild(host);
     state.ui.host = host;
     return host;
@@ -759,6 +764,81 @@
     }
   }
 
+  function buildPreviewSectionsFromEntry(entry){
+    if (entry && Array.isArray(entry.previewSections) && entry.previewSections.length) {
+      return entry.previewSections.filter(section => section && Array.isArray(section.lines) && section.lines.length).slice(0, 8);
+    }
+    const sections = Array.isArray(entry && entry.snapshot && entry.snapshot.data && entry.snapshot.data.sections) ? entry.snapshot.data.sections : [];
+    return sections.slice(0, 8).map((section, index) => {
+      const steps = Array.isArray(section && section.steps) ? section.steps : [];
+      const lines = steps.slice(0, 12).map((step) => {
+        const count = String((step && (step.count || step.counts)) || '').trim();
+        const name = String((step && step.name) || '').trim();
+        const description = String((step && (step.description || step.desc)) || '').trim();
+        const note = step && step.showNote ? String(step.note || '').trim() : '';
+        return [count, name, description, note ? `(${note})` : ''].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+      }).filter(Boolean);
+      return {
+        name: String((section && section.name) || `Section ${index + 1}`).trim(),
+        lines
+      };
+    }).filter(section => Array.isArray(section.lines) && section.lines.length);
+  }
+
+  function buildPreviewSheetHtml(entry, theme, emptyText){
+    const sections = buildPreviewSectionsFromEntry(entry);
+    if (!sections.length) {
+      return `<div class="rounded-2xl border p-4 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Preview sheet</div><p class="mt-2 text-sm ${theme.subtle}">${escapeHtml(emptyText || 'No preview sheet has been saved for this dance yet.')}</p></div>`;
+    }
+    const blocks = sections.map((section) => `
+      <div class="rounded-2xl border p-4 ${theme.soft}">
+        <div class="text-xs font-black uppercase tracking-widest ${theme.subtle}">${escapeHtml(section.name || 'Section')}</div>
+        <div class="mt-2 space-y-2">${section.lines.map((line) => `<p class="text-sm leading-relaxed">${escapeHtml(line)}</p>`).join('')}</div>
+      </div>
+    `).join('');
+    return `<div class="rounded-2xl border p-4 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Preview sheet</div><div class="mt-3 grid gap-3">${blocks}</div></div>`;
+  }
+
+  function confirmReplaceUnsavedDance(nextTitle){
+    if (!hasUnsavedChanges()) return true;
+    return window.confirm(`You have changes in the current worksheet that are not saved to cloud yet. If you load "${String(nextTitle || 'this dance').trim() || 'this dance'}" now, that unsaved progress will not be kept unless you press Save Changes first. Load it anyway?`);
+  }
+
+  function openBuildWorksheet(){
+    const open = () => {
+      if (state.ui.buildBtn) state.ui.buildBtn.click();
+      else closePages();
+      window.requestAnimationFrame(() => {
+        try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch { window.scrollTo(0, 0); }
+      });
+    };
+    if (window.__stepperRunFaviconTransition) window.__stepperRunFaviconTransition(open, { target: 'editor' });
+    else open();
+  }
+
+  function loadDanceIntoWorksheet(item){
+    const entry = item && item.snapshot ? item : (item && item.source && item.source.snapshot ? item.source : null);
+    if (!entry || !entry.snapshot) {
+      alert('That dance does not have a saved worksheet to load yet.');
+      return false;
+    }
+    const nextTitle = entry.title || item.title || 'this dance';
+    if (!confirmReplaceUnsavedDance(nextTitle)) return false;
+    const restored = restoreDanceSnapshot(entry);
+    if (!restored) {
+      alert('Could not load that dance into the worksheet.');
+      return false;
+    }
+    const registryId = String((item && item.registryId) || entry.registryId || '').trim();
+    setCurrentRegistryId(registryId);
+    const signature = buildDanceSignature(entry);
+    updateSavedSignature(signature);
+    state.lastSyncedSignature = signature;
+    renderPages();
+    openBuildWorksheet();
+    return true;
+  }
+
 
   function getCurrentDanceSignature(){
     const entry = buildCurrentDanceEntry();
@@ -853,6 +933,20 @@
       return false;
     } finally {
       state.busy.sync = false;
+    }
+  }
+
+  async function deleteCloudSave(saveId){
+    if (!saveId || !state.session || !state.session.credential) return false;
+    if (!window.confirm('Delete this cloud save from your Google account?')) return false;
+    try {
+      await authFetch(`/api/cloud-saves/${encodeURIComponent(saveId)}`, { method: 'DELETE' });
+      await refreshCloudSaves();
+      renderPages();
+      return true;
+    } catch (error) {
+      alert(error.message || 'Could not delete that cloud save.');
+      return false;
     }
   }
 
@@ -1150,13 +1244,16 @@
     state.chatBusy = true;
     renderSiteHelper();
     const currentTab = state.activePage || 'main';
+    const appData = readAppData();
     const payload = {
       prompt,
+      history: (state.chatMessages || []).slice(-8).map(message => ({ role: message.role, text: message.text })),
       context: {
         currentTab,
         signedIn: !!(state.session && state.session.credential),
         isAdmin: isAdminSession(),
-        onlineCount: (state.presence && state.presence.onlineCount) || 0
+        onlineCount: (state.presence && state.presence.onlineCount) || 0,
+        currentDanceTitle: appData && appData.meta ? String(appData.meta.title || '').trim() : ''
       }
     };
     try {
@@ -1262,29 +1359,70 @@
     if (!page) return;
     const body = page.querySelector('[class*="p-6"]') || page;
     if (!body) return;
-    let card = page.querySelector('[data-stepper-cloud-save-card="true"]');
-    if (!card) {
-      card = document.createElement('section');
-      card.setAttribute('data-stepper-cloud-save-card', 'true');
-      card.style.marginBottom = '20px';
-      body.insertBefore(card, body.firstElementChild || null);
+    let wrap = page.querySelector('[data-stepper-cloud-save-wrap="true"]');
+    if (!wrap) {
+      wrap = document.createElement('section');
+      wrap.setAttribute('data-stepper-cloud-save-wrap', 'true');
+      wrap.style.marginBottom = '20px';
+      body.insertBefore(wrap, body.firstElementChild || null);
     }
     const theme = themeClasses();
     const signedIn = !!(state.session && state.session.credential);
     const profile = signedIn ? state.session.profile || {} : null;
-    card.className = `rounded-3xl border p-5 sm:p-6 ${theme.soft}`;
-    card.innerHTML = signedIn
-      ? `<div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Google cloud save is on</div><p class="mt-1 text-sm ${theme.subtle}">Signed in as ${escapeHtml(profile.name || profile.email || 'Member')}. Use Save Changes here to push the latest version to your Google-linked save so it is still there next time you open the site.</p></div><div class="flex flex-wrap gap-3"><button type="button" data-stepper-saved-save-now="1" class="stepper-google-cta ${theme.button}">Save Changes</button><button type="button" data-stepper-open-subscription="1" class="stepper-google-cta ${theme.button}">Subscription</button><button type="button" data-stepper-open-signin="1" class="stepper-google-cta ${theme.button}">Account</button></div></div>`
-      : `<div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Sign in to save across devices</div><p class="mt-1 text-sm ${theme.subtle}">Local device saves still work without signing in. Use Google sign-in when you want the same dance to come back on other phones, tablets, and computers.</p></div><div class="flex flex-wrap gap-3"><button type="button" data-stepper-open-signin="1" class="stepper-google-cta ${theme.button}">Sign in with Google</button></div></div>`;
-    const openBtn = card.querySelector('[data-stepper-open-signin="1"]');
+    const cloudCards = signedIn && state.cloudSaves.length ? state.cloudSaves.slice(0, 12).map(item => `
+      <article class="rounded-3xl border p-5 sm:p-6 ${theme.soft}" data-stepper-cloud-id="${escapeHtml(item.id)}">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div class="min-w-0">
+            <h3 class="text-lg font-black tracking-tight">${escapeHtml(item.title || 'Untitled Dance')}</h3>
+            <p class="mt-1 text-sm font-semibold ${theme.subtle}">${escapeHtml(item.choreographer || 'Uncredited')}${item.country ? ` • ${escapeHtml(item.country)}` : ''}</p>
+            <p class="mt-2 text-sm ${theme.subtle}">Updated ${escapeHtml(formatDate(item.updatedAt))}</p>
+          </div>
+          <div class="stepper-google-badge-row">
+            <span class="stepper-google-pill ${theme.orange}">${escapeHtml(item.level || 'Unlabelled')}</span>
+            <button type="button" class="stepper-google-cta ${theme.button}" data-action="load-cloud">Load to worksheet</button>
+            <button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="delete-cloud">Delete</button>
+          </div>
+        </div>
+        <div class="mt-4 stepper-google-grid text-sm">
+          <div class="stepper-google-stat ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Counts</div><div class="mt-1 font-bold">${escapeHtml(item.counts || '-')}</div></div>
+          <div class="stepper-google-stat ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Walls</div><div class="mt-1 font-bold">${escapeHtml(item.walls || '-')}</div></div>
+          <div class="stepper-google-stat ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Sections</div><div class="mt-1 font-bold">${escapeHtml(String(item.sections || 0))}</div></div>
+          <div class="stepper-google-stat ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Steps</div><div class="mt-1 font-bold">${escapeHtml(String(item.steps || 0))}</div></div>
+        </div>
+        <div class="mt-4">${buildPreviewSheetHtml(item, theme, 'Save this dance once and the sheet preview will show here.')}</div>
+      </article>
+    `).join('') : `<div class="rounded-3xl border p-6 sm:p-8 text-center ${theme.soft}"><p class="text-lg font-black">${signedIn ? 'No cloud saves yet.' : 'Sign in to use cloud saves.'}</p><p class="mt-2 text-sm ${theme.subtle}">${signedIn ? 'Use Save Changes to push the current worksheet into your Google-linked cloud saves. Loading a different dance will replace the current worksheet.' : 'Local saves still work without signing in, but Google cloud saves follow you onto other devices.'}</p></div>`;
+
+    wrap.className = 'space-y-4';
+    wrap.innerHTML = `
+      <section class="rounded-3xl border p-5 sm:p-6 ${theme.soft}" data-stepper-cloud-save-card="true">
+        ${signedIn
+          ? `<div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Google cloud save is on</div><p class="mt-1 text-sm ${theme.subtle}">Signed in as ${escapeHtml(profile.name || profile.email || 'Member')}. Use Save Changes here to push the latest version to your Google-linked save so it is still there next time you open the site.</p><p class="mt-2 text-sm ${theme.subtle}">If you load another dance before saving the one you are editing now, that unsaved worksheet progress will not be kept.</p></div><div class="flex flex-wrap gap-3"><button type="button" data-stepper-saved-save-now="1" class="stepper-google-cta ${theme.button}">Save Changes</button><button type="button" data-stepper-open-subscription="1" class="stepper-google-cta ${theme.button}">Subscription</button><button type="button" data-stepper-open-signin="1" class="stepper-google-cta ${theme.button}">Account</button></div></div>`
+          : `<div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Sign in to save across devices</div><p class="mt-1 text-sm ${theme.subtle}">Local device saves still work without signing in. Use Google sign-in when you want the same dance to come back on other phones, tablets, and computers.</p></div><div class="flex flex-wrap gap-3"><button type="button" data-stepper-open-signin="1" class="stepper-google-cta ${theme.button}">Sign in with Google</button></div></div>`}
+      </section>
+      <section class="rounded-3xl border p-5 sm:p-6 ${theme.panel}">
+        <div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Cloud saves</div><p class="mt-1 text-sm ${theme.subtle}">Load any saved dance straight into the current worksheet. You will get a warning first if the worksheet you are on still has unsaved changes.</p></div>${signedIn ? `<span class="stepper-google-pill ${theme.orange}">${escapeHtml(String(state.cloudSaves.length))} saved</span>` : ''}</div>
+        <div class="mt-4 space-y-4">${cloudCards}</div>
+      </section>
+    `;
+
+    const openBtn = wrap.querySelector('[data-stepper-open-signin="1"]');
     if (openBtn) openBtn.addEventListener('click', ()=> openPage('signin'));
-    const subBtn = card.querySelector('[data-stepper-open-subscription="1"]');
+    const subBtn = wrap.querySelector('[data-stepper-open-subscription="1"]');
     if (subBtn) subBtn.addEventListener('click', ()=> openPage('subscription'));
-    const saveBtn = card.querySelector('[data-stepper-saved-save-now="1"]');
+    const saveBtn = wrap.querySelector('[data-stepper-saved-save-now="1"]');
     if (saveBtn) saveBtn.addEventListener('click', async ()=>{
       const ok = await saveChangesNow({ force:true });
       if (!ok) alert('Could not save to the backend just now.');
       patchSavedDancesPage();
+    });
+    wrap.querySelectorAll('[data-stepper-cloud-id]').forEach(card => {
+      const saveId = card.getAttribute('data-stepper-cloud-id');
+      const item = (state.cloudSaves || []).find(entry => String((entry && entry.id) || '') === String(saveId || ''));
+      const loadBtn = card.querySelector('[data-action="load-cloud"]');
+      if (loadBtn) loadBtn.addEventListener('click', () => { if (item) loadDanceIntoWorksheet(item); });
+      const deleteBtn = card.querySelector('[data-action="delete-cloud"]');
+      if (deleteBtn) deleteBtn.addEventListener('click', () => { if (item) deleteCloudSave(item.id); });
     });
   }
 
@@ -1434,17 +1572,26 @@
     }
 
     const pendingCards = state.submissions.length ? state.submissions.map(item => `
-      <article class="rounded-3xl border p-5 sm:p-6 ${theme.soft}" data-stepper-submission-id="${escapeHtml(item.id)}">
+      <article class="rounded-3xl border p-5 sm:p-6 ${theme.soft}" data-stepper-submission-id="${escapeHtml(item.id)}" data-stepper-submission-registry-id="${escapeHtml(item.registryId || '')}">
         <div class="flex flex-wrap items-start justify-between gap-4">
-          <div>
+          <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-3"><h3 class="text-lg font-black tracking-tight">${escapeHtml(item.title || 'Untitled Dance')}</h3><span class="stepper-google-pill ${theme.orange}">${escapeHtml(item.requestType || 'request')}</span></div>
             <p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.ownerName || item.ownerEmail || 'Member')} • ${escapeHtml(item.ownerEmail || '')}${item.priority ? ' • Premium priority' : ''}</p>
+            <p class="mt-2 text-sm font-semibold ${theme.subtle}">${escapeHtml(item.choreographer || 'Uncredited')}${item.country ? ` • ${escapeHtml(item.country)}` : ''}</p>
           </div>
           <div class="stepper-google-badge-row">
-            ${item.requestType === 'site' ? `<button type="button" class="stepper-google-cta ${theme.button}" data-action="approve-site">Approve upload</button>` : ''}
+            <button type="button" class="stepper-google-cta ${theme.button}" data-action="load-request">Load to worksheet</button>
+            ${item.requestType === 'site' ? `<button type="button" class="stepper-google-cta ${theme.button}" data-action="approve-site">Approve upload</button>` : `<button type="button" class="stepper-google-badge-btn" data-action="feature-request" data-tone="bronze">Bronze</button><button type="button" class="stepper-google-badge-btn" data-action="feature-request" data-tone="silver">Silver</button><button type="button" class="stepper-google-badge-btn" data-action="feature-request" data-tone="gold">Gold</button>`}
             <button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="reject-submission">Delete confirmation</button>
           </div>
         </div>
+        <div class="mt-4 stepper-google-grid text-sm">
+          <div class="stepper-google-stat ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Counts</div><div class="mt-1 font-bold">${escapeHtml(item.counts || '-')}</div></div>
+          <div class="stepper-google-stat ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Walls</div><div class="mt-1 font-bold">${escapeHtml(item.walls || '-')}</div></div>
+          <div class="stepper-google-stat ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Sections</div><div class="mt-1 font-bold">${escapeHtml(String(item.sections || 0))}</div></div>
+          <div class="stepper-google-stat ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Steps</div><div class="mt-1 font-bold">${escapeHtml(String(item.steps || 0))}</div></div>
+        </div>
+        <div class="mt-4">${buildPreviewSheetHtml(item, theme, 'Once the member saves the worksheet, the preview sheet will show here for admin review.')}</div>
       </article>
     `).join('') : `<div class="rounded-3xl border p-6 sm:p-8 text-center ${theme.soft}"><p class="text-lg font-black">No pending requests.</p><p class="mt-2 text-sm ${theme.subtle}">Feature and upload requests from members will show here.</p></div>`;
 
@@ -1470,7 +1617,9 @@
             <div class="stepper-google-stat ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Steps</div><div class="mt-1 font-bold">${escapeHtml(String(item.steps || 0))}</div></div>
           </div>
           <p class="mt-4 text-sm ${theme.subtle}">Updated ${escapeHtml(formatDate(item.updatedAt))}</p>
+          <div class="mt-4">${buildPreviewSheetHtml(item, theme, 'Save this dance once and its preview sheet will show here.')}</div>
           <div class="mt-5 flex flex-wrap items-center gap-3">
+            <button type="button" class="stepper-google-cta ${theme.button}" data-action="load-registry">Load to worksheet</button>
             <button type="button" class="stepper-google-badge-btn" data-action="feature" data-tone="bronze">Bronze</button>
             <button type="button" class="stepper-google-badge-btn" data-action="feature" data-tone="silver">Silver</button>
             <button type="button" class="stepper-google-badge-btn" data-action="feature" data-tone="gold">Gold</button>
@@ -1511,14 +1660,26 @@
 
     page.querySelectorAll('[data-stepper-submission-id]').forEach(card => {
       const submissionId = card.getAttribute('data-stepper-submission-id');
+      const registryId = card.getAttribute('data-stepper-submission-registry-id');
+      const submission = (state.submissions || []).find(item => String((item && item.id) || '') === String(submissionId || ''));
       const rejectBtn = card.querySelector('[data-action="reject-submission"]');
       if (rejectBtn) rejectBtn.addEventListener('click', () => rejectSubmission(submissionId));
       const approveBtn = card.querySelector('[data-action="approve-site"]');
       if (approveBtn) approveBtn.addEventListener('click', () => approveSiteSubmission(submissionId));
+      const loadBtn = card.querySelector('[data-action="load-request"]');
+      if (loadBtn) loadBtn.addEventListener('click', () => { if (submission) loadDanceIntoWorksheet(submission); });
+      card.querySelectorAll('[data-action="feature-request"]').forEach(button => {
+        button.addEventListener('click', () => {
+          featureDance(registryId, button.getAttribute('data-tone') || 'bronze');
+        });
+      });
     });
 
     page.querySelectorAll('[data-stepper-registry-id]').forEach(card => {
       const registryId = card.getAttribute('data-stepper-registry-id');
+      const item = (state.adminDances || []).find(entry => String((entry && entry.registryId) || '') === String(registryId || ''));
+      const loadBtn = card.querySelector('[data-action="load-registry"]');
+      if (loadBtn) loadBtn.addEventListener('click', () => { if (item) loadDanceIntoWorksheet(item); });
       card.querySelectorAll('[data-action="feature"]').forEach(button => {
         button.addEventListener('click', () => {
           featureDance(registryId, button.getAttribute('data-tone') || 'bronze');
@@ -1674,6 +1835,9 @@
       return;
     }
     try {
+      saveApiBase(state.apiBase || DEFAULT_BACKEND_BASE);
+      await saveChangesNow({ force:true }).catch(() => false);
+      localStorage.setItem('stepper_pending_checkout_plan_v1', String(plan || '').trim());
       const data = await authFetch('/api/subscription/create-checkout-session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1712,6 +1876,8 @@
         body: JSON.stringify({ sessionId })
       });
       await refreshSubscription();
+      localStorage.removeItem('stepper_pending_checkout_plan_v1');
+      await saveChangesNow({ force:true }).catch(() => false);
       url.searchParams.delete('checkout_session_id');
       url.searchParams.delete('session_id');
       history.replaceState({}, '', url.toString());

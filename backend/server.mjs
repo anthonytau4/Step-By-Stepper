@@ -636,15 +636,37 @@ app.get("/api/admin/dances", requireAdmin, async (_req, res) => {
     .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
     .map(item => ({
       ...item,
-      isFeatured: featuredIds.has(String(item?.registryId || ""))
+      isFeatured: featuredIds.has(String(item?.registryId || "")),
+      previewSections: buildPreviewSections(item)
     }));
   res.json({ ok: true, items, featuredIds: Array.from(featuredIds), adminEmail, onlineCount: getOnlineUsers(db).length });
 });
 
 app.get("/api/admin/submissions", requireAdmin, async (_req, res) => {
   const db = await readDb();
+  const registry = Array.isArray(db.danceRegistry) ? db.danceRegistry : [];
+  const featuredIds = new Set((db.featuredChoreo || []).map(item => String(item?.registryId || item?.id || "")).filter(Boolean));
   const items = (Array.isArray(db.submissions) ? db.submissions : [])
     .filter(item => String(item?.status || 'pending') === 'pending')
+    .map(item => {
+      const source = registry.find(row => row && row.registryId === String(item?.registryId || '').trim()) || null;
+      return {
+        ...item,
+        title: source?.title || item?.title,
+        choreographer: source?.choreographer || item?.choreographer || '',
+        country: source?.country || '',
+        level: source?.level || 'Unlabelled',
+        counts: source?.counts || '-',
+        walls: source?.walls || '-',
+        sections: source?.sections || 0,
+        steps: source?.steps || 0,
+        updatedAt: source?.updatedAt || item?.updatedAt,
+        snapshot: source?.snapshot || null,
+        previewSections: source ? buildPreviewSections(source) : [],
+        isFeatured: featuredIds.has(String(source?.registryId || item?.registryId || '')),
+        source
+      };
+    })
     .sort((a, b) => {
       const ap = a?.priority ? 1 : 0;
       const bp = b?.priority ? 1 : 0;
@@ -810,6 +832,7 @@ app.post('/api/subscription/confirm', requireGoogleUser, async (req, res) => {
 app.post('/api/chatbot/help', requireGoogleUser, async (req, res) => {
   const prompt = String(req.body?.prompt || '').trim();
   const context = req.body?.context && typeof req.body.context === 'object' ? req.body.context : {};
+  const history = Array.isArray(req.body?.history) ? req.body.history : [];
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);
   const bucket = touchUser(db, req.stepperUser, key);
@@ -820,6 +843,10 @@ app.post('/api/chatbot/help', requireGoogleUser, async (req, res) => {
   if (!prompt) {
     return res.status(400).json({ ok:false, error:'Missing prompt.' });
   }
+  const trimmedHistory = history.slice(-8).map((item) => ({
+    role: String(item?.role || 'user').trim().toLowerCase() === 'assistant' ? 'assistant' : 'user',
+    text: String(item?.text || '').trim().slice(0, 2000)
+  })).filter(item => item.text);
   if (!openaiClient) {
     return res.json({ ok:true, text: fallbackSiteHelp(prompt, context), mode:'fallback' });
   }
@@ -827,11 +854,28 @@ app.post('/api/chatbot/help', requireGoogleUser, async (req, res) => {
     const response = await openaiClient.responses.create({
       model,
       input: [
-        { role: 'system', content: [{ type: 'input_text', text: SITE_HELP_CONTEXT }] },
-        { role: 'user', content: [{ type: 'input_text', text: `Current tab: ${context.currentTab || 'unknown'}
+        {
+          role: 'system',
+          content: [{
+            type: 'input_text',
+            text: `${SITE_HELP_CONTEXT}
+Reply like a natural AI helper for the Step By Stepper site. Be specific, warm, and practical. Use the conversation history when it matters, and do not keep repeating the exact same canned answer.`
+          }]
+        },
+        {
+          role: 'user',
+          content: [{
+            type: 'input_text',
+            text: `Current tab: ${context.currentTab || 'unknown'}
 Signed in: ${context.signedIn ? 'yes' : 'no'}
 Admin: ${context.isAdmin ? 'yes' : 'no'}
-Question: ${prompt}` }] }
+Online count: ${context.onlineCount || 0}
+Current dance title: ${context.currentDanceTitle || 'none'}
+Conversation so far:
+${trimmedHistory.map(item => `${item.role}: ${item.text}`).join('\n') || '(none)'}
+Newest user question: ${prompt}`
+          }]
+        }
       ]
     });
     const text = String(response.output_text || '').trim() || fallbackSiteHelp(prompt, context);
