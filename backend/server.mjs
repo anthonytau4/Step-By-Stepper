@@ -17,12 +17,20 @@ const model = process.env.OPENAI_MODEL || "gpt-5";
 const googleClientId = String(process.env.GOOGLE_CLIENT_ID || "").trim();
 const googleClient = googleClientId ? new OAuth2Client(googleClientId) : null;
 const renderDiskRoot = String(process.env.RENDER_DISK_MOUNT_PATH || '').trim();
+const diskRootPath = renderDiskRoot ? path.resolve(renderDiskRoot) : '';
 const dataDir = process.env.DATA_DIR
   ? path.resolve(process.env.DATA_DIR)
-  : renderDiskRoot
-    ? path.join(path.resolve(renderDiskRoot), 'stepper-data')
+  : diskRootPath
+    ? diskRootPath
     : path.join(__dirname, "data");
-const dbPath = path.join(dataDir, "stepper-db.json");
+const dbPath = path.join(
+  process.env.DATA_DIR
+    ? dataDir
+    : diskRootPath
+      ? diskRootPath
+      : dataDir,
+  "stepper-db.json"
+);
 
 console.log('[Stepper] RENDER_DISK_MOUNT_PATH =', process.env.RENDER_DISK_MOUNT_PATH || '(not set)');
 console.log('[Stepper] DATA_DIR =', process.env.DATA_DIR || '(not set)');
@@ -319,7 +327,17 @@ function emptyDb() {
 }
 
 async function ensureDb() {
-  await fs.mkdir(dataDir, { recursive: true });
+  if (diskRootPath && !process.env.DATA_DIR) {
+    try {
+      await fs.access(diskRootPath);
+      console.log('[Stepper] Persistent disk mount is accessible:', diskRootPath);
+    } catch (error) {
+      console.error('[Stepper] Persistent disk mount root is not accessible:', diskRootPath, error?.code || error);
+      throw error;
+    }
+  } else {
+    await fs.mkdir(dataDir, { recursive: true });
+  }
   try {
     await fs.access(dbPath);
   } catch {
