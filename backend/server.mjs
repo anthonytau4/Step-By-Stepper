@@ -30,14 +30,16 @@ const dbTempPath = `${dbPath}.tmp`;
 const mongoUri = String(process.env.MONGODB_URI || process.env.MONGO_URL || '').trim();
 const mongoDbName = String(process.env.MONGODB_DB_NAME || process.env.MONGODB_DB || 'step_by_stepper').trim() || 'step_by_stepper';
 const mongoCollectionName = String(process.env.MONGODB_COLLECTION || 'app_state').trim() || 'app_state';
-const mongoEnabled = !!mongoUri;
+const mongoConfigured = !!mongoUri;
+let mongoAvailable = mongoConfigured;
 let mongoClient = null;
 let mongoCollection = null;
+let mongoFailureReason = '';
 console.log('[Stepper] RENDER_DISK_MOUNT_PATH =', process.env.RENDER_DISK_MOUNT_PATH || '(not set)');
 console.log('[Stepper] DATA_DIR =', process.env.DATA_DIR || '(not set)');
 console.log('[Stepper] resolved dataDir =', dataDir);
 console.log('[Stepper] resolved dbPath =', dbPath);
-console.log('[Stepper] storage mode =', mongoEnabled ? `mongodb (${mongoDbName}/${mongoCollectionName})` : 'json-file');
+console.log('[Stepper] storage mode =', mongoConfigured ? `mongodb (${mongoDbName}/${mongoCollectionName})` : 'json-file');
 const openaiClient = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
@@ -335,20 +337,33 @@ app.options('*', cors(corsOptions));
 app.use(express.json({ limit: "4mb" }));
 
 async function ensureMongo() {
-  if (!mongoEnabled) return null;
+  if (!mongoConfigured || !mongoAvailable) return null;
   if (mongoCollection) return mongoCollection;
-  if (!mongoClient) {
-    mongoClient = new MongoClient(mongoUri, {
-      maxPoolSize: 10,
-      minPoolSize: 0,
-      serverSelectionTimeoutMS: 10000
-    });
-    await mongoClient.connect();
+  try {
+    if (!mongoClient) {
+      mongoClient = new MongoClient(mongoUri, {
+        maxPoolSize: 10,
+        minPoolSize: 0,
+        serverSelectionTimeoutMS: 10000
+      });
+      await mongoClient.connect();
+    }
+    const db = mongoClient.db(mongoDbName);
+    mongoCollection = db.collection(mongoCollectionName);
+    await mongoCollection.createIndex({ updatedAt: -1 });
+    mongoFailureReason = '';
+    return mongoCollection;
+  } catch (error) {
+    mongoFailureReason = String(error?.message || error || 'Unknown MongoDB error');
+    mongoAvailable = false;
+    mongoCollection = null;
+    try {
+      if (mongoClient) await mongoClient.close();
+    } catch {}
+    mongoClient = null;
+    console.error('[Stepper] MongoDB unavailable; falling back to JSON storage.', mongoFailureReason);
+    return null;
   }
-  const db = mongoClient.db(mongoDbName);
-  mongoCollection = db.collection(mongoCollectionName);
-  await mongoCollection.createIndex({ updatedAt: -1 });
-  return mongoCollection;
 }
 
 function normalizeDbShape(parsed) {
@@ -392,8 +407,11 @@ function emptyDb() {
 }
 
 async function ensureDb() {
-  if (mongoEnabled) {
+  if (mongoAvailable) {
     const collection = await ensureMongo();
+    if (!collection) {
+      console.warn('[Stepper] MongoDB init skipped; using JSON storage fallback.');
+    } else {
     const existing = await collection.findOne({ _id: 'main' }, { projection: { _id: 1 } });
     if (!existing) {
       const initial = syncAdminRegistry(syncModeratorRegistry(syncAndPruneDb(emptyDb())));
@@ -411,7 +429,8 @@ async function ensureDb() {
         { upsert: true }
       );
     }
-    return;
+      return;
+    }
   }
   if (isRenderDiskMode) {
     try {
@@ -472,11 +491,14 @@ function syncModeratorRegistry(db) {
 
 async function readDb() {
   await ensureDb();
-  if (mongoEnabled) {
+  if (mongoAvailable) {
     const collection = await ensureMongo();
-    const doc = await collection.findOne({ _id: 'main' });
-    const parsed = normalizeDbShape(doc && doc.state ? doc.state : emptyDb());
-    return syncAdminRegistry(syncModeratorRegistry(syncAndPruneDb(parsed)));
+    if (collection) {
+      const doc = await collection.findOne({ _id: 'main' });
+      const parsed = normalizeDbShape(doc && doc.state ? doc.state : emptyDb());
+      return syncAdminRegistry(syncModeratorRegistry(syncAndPruneDb(parsed)));
+    }
+    console.warn('[Stepper] MongoDB read skipped; using JSON storage fallback.');
   }
   try {
     const parsed = await readDbFromPath(dbPath);
@@ -546,23 +568,26 @@ function syncAdminRegistry(db) {
 async function writeDb(payload) {
   await ensureDb();
   const normalized = syncAdminRegistry(syncModeratorRegistry(syncAndPruneDb(payload)));
-  if (mongoEnabled) {
+  if (mongoAvailable) {
     const collection = await ensureMongo();
-    await collection.updateOne(
-      { _id: 'main' },
-      {
-        $set: {
-          state: normalized,
-          updatedAt: new Date().toISOString(),
-          storage: 'mongodb'
+    if (collection) {
+      await collection.updateOne(
+        { _id: 'main' },
+        {
+          $set: {
+            state: normalized,
+            updatedAt: new Date().toISOString(),
+            storage: 'mongodb'
+          },
+          $setOnInsert: {
+            createdAt: new Date().toISOString()
+          }
         },
-        $setOnInsert: {
-          createdAt: new Date().toISOString()
-        }
-      },
-      { upsert: true }
-    );
-    return;
+        { upsert: true }
+      );
+      return;
+    }
+    console.warn('[Stepper] MongoDB write skipped; using JSON storage fallback.');
   }
   const data = JSON.stringify(normalized, null, 2);
   try {
@@ -1371,7 +1396,10 @@ app.get("/api/health", async (_req, res) => {
     googleEnabled: !!googleClientId,
     openaiEnabled: !!openaiClient,
     geminiEnabled: !!geminiApiKey,
-    cloudStorage: "json-file",
+    cloudStorage: mongoConfigured ? (mongoAvailable ? "mongodb" : "json-file-fallback") : "json-file",
+    mongoConfigured,
+    mongoAvailable,
+    mongoFailureReason,
     onlineCount: getOnlineUsers(db).length,
     danceCount: Array.isArray(db.danceRegistry) ? db.danceRegistry.length : 0,
     glossaryCount: Array.isArray(db.approvedGlossarySteps) ? db.approvedGlossarySteps.length : 0
@@ -1385,7 +1413,10 @@ app.get("/api/auth/config", (_req, res) => {
     googleClientId: googleClientId || "",
     openaiEnabled: !!openaiClient,
     geminiEnabled: !!geminiApiKey,
-    cloudStorage: "json-file",
+    cloudStorage: mongoConfigured ? (mongoAvailable ? "mongodb" : "json-file-fallback") : "json-file",
+    mongoConfigured,
+    mongoAvailable,
+    mongoFailureReason,
     authMode: googleClientId ? "google-id-token" : "none",
     adminEmail,
     onlineWindowMs,
