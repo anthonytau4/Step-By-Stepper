@@ -16,8 +16,8 @@
   const ADMIN_TAB_ID = 'stepper-google-admin-tab';
   const ADMIN_EMAIL = 'anthonytau4@gmail.com';
   const DEFAULT_RENDER_SERVICE_ID = 'srv-d6ss4295pdvs73e1iifg';
-  const DEFAULT_BACKEND_BASE = 'https://step-by-stepper-backend.onrender.com';
-  const ALT_BACKEND_BASE = 'https://api.step-by-stepper.com';
+  const DEFAULT_BACKEND_BASE = 'https://api.step-by-stepper.com';
+  const ALT_BACKEND_BASE = 'https://step-by-stepper-backend.onrender.com';
   const FALLBACK_GOOGLE_CLIENT_ID = '1038282546217-a7qv2i1puevmtjf38f6sv761vt7he26s.apps.googleusercontent.com';
   const SYNC_INTERVAL_MS = 6000;
   const PRESENCE_INTERVAL_MS = 30000;
@@ -109,8 +109,41 @@
     push(saved);
     push(DEFAULT_BACKEND_BASE);
     push(ALT_BACKEND_BASE);
-    push(currentOrigin);
+    if (currentOrigin && !/step-by-stepper\.com$/i.test(location.hostname)) push(currentOrigin);
     return list;
+  }
+
+  async function probeApiBaseCandidate(base){
+    const normalized = normalizeApiBase(base);
+    if (!normalized) return null;
+    try {
+      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const timeoutId = controller ? setTimeout(() => controller.abort(), 2800) : null;
+      const response = await fetch(`${normalized}/api/health`, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        mode: 'cors',
+        signal: controller ? controller.signal : undefined
+      });
+      if (timeoutId) clearTimeout(timeoutId);
+      if (!response.ok) return null;
+      const data = await response.json().catch(() => null);
+      return data && data.ok ? normalized : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function chooseWorkingApiBase(preferred){
+    const candidates = getApiBaseCandidates(preferred);
+    for (const candidate of candidates) {
+      const working = await probeApiBaseCandidate(candidate);
+      if (working) {
+        saveApiBase(working);
+        return working;
+      }
+    }
+    return normalizeApiBase(preferred) || DEFAULT_BACKEND_BASE;
   }
 
   function wireStartupBackendBase(){
@@ -118,8 +151,7 @@
     if (!button || button.dataset.stepperApiWired === 'true') return;
     button.dataset.stepperApiWired = 'true';
     button.addEventListener('click', () => {
-      const preferred = getApiBaseCandidates(state.apiBase)[0] || DEFAULT_BACKEND_BASE;
-      saveApiBase(preferred);
+      chooseWorkingApiBase(state.apiBase).catch(() => {});
     });
   }
 
@@ -602,7 +634,10 @@
       return;
     }
     try {
-      saveApiBase(window.STEPPER_API_BASE || state.apiBase || location.origin);
+      if (!normalizeApiBase(state.apiBase)) {
+        const preferredBase = await chooseWorkingApiBase(window.STEPPER_API_BASE || state.apiBase || DEFAULT_BACKEND_BASE);
+        if (preferredBase) saveApiBase(preferredBase);
+      }
       await ensureGsiLoaded();
       if (!(window.google && window.google.accounts && window.google.accounts.id)) {
         container.innerHTML = `<button type="button" disabled class="stepper-google-cta ${theme.button}" style="width:280px;max-width:100%;opacity:.65;cursor:not-allowed">Sign in with Google</button><p class="mt-3 text-sm ${theme.subtle}">Google sign-in script could not load on this device.</p>`;
@@ -1462,6 +1497,7 @@
       const savedBase = normalizeApiBase(localStorage.getItem(API_BASE_KEY) || '');
       const preferredBase = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') ? 'http://localhost:3000' : DEFAULT_BACKEND_BASE;
       if (!savedBase || savedBase === 'http://localhost:3000' || savedBase === 'https://localhost:3000' || savedBase === normalizeApiBase(location.origin)) saveApiBase(preferredBase);
+      await chooseWorkingApiBase(state.apiBase || preferredBase);
     }
     if (!locateUi()) return;
     ensureHost();
