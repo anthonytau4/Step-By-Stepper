@@ -1228,14 +1228,24 @@
 
   function localSiteHelp(prompt){
     const text = String(prompt || '').toLowerCase();
-    if (!text) return 'Try asking where to save, how sign-in works, how featuring works, or what tab to use.';
+    if (!text) return 'Ask about saving, featuring, premium, moderators, or which tab to use.';
     if (text.includes('save') || text.includes('changes')) return state.session && state.session.credential ? 'Use Save Changes in My Saved Dances to lock the newest version into your Google-linked cloud save. Your latest signed-in dance also auto-syncs in the background.' : 'Open My Saved Dances and use Save Changes there. Sign in with Google first if you want that save to follow you onto other devices.';
     if (text.includes('premium') || text.includes('subscription') || text.includes('pay')) return 'Open Subscription after signing in. Premium is NZ$12.50 monthly or NZ$100 yearly and gets priority review plus the paid site helper.';
     if (text.includes('feature') || text.includes('badge') || text.includes('bronze') || text.includes('silver') || text.includes('gold')) return 'Use Send to host for featuring. Premium requests go to the top of the admin queue, and the admin can approve them with Bronze, Silver, or Gold for Featured Choreo. Removing a feature takes it back off that public page.';
     if (text.includes('upload') || text.includes('site')) return 'Use Upload to site to send your dance into the admin moderation queue. The admin can approve it for the site or delete it.';
     if (text.includes('signin') || text.includes('google') || text.includes('sign in')) return 'Open the Sign In tab and use Sign in with Google. Once signed in, your dances can sync to the backend and the admin tab appears only for the admin email.';
+    if (text.includes('moderator')) return 'Open Sign In and use Apply for moderator. You need a Google account first. Approved moderators get moderator tools but not the Admin tab.';
     if (text.includes('tab') || text.includes('where') || text.includes('go')) return 'Use Build to make or edit a dance, Sheet for the clean sheet view, My Saved Dances for your cloud saves, Featured Choreo for public featured dances, and Sign In for Google saving and moderation actions.';
-    return 'Use Build to create or edit a dance, then open My Saved Dances to use Save Changes for cloud saving. Featured Choreo shows public featured dances and Sign In handles Google saving.';
+    return 'Tell me what you are trying to do and I will point you to the exact tab or button.';
+  }
+
+  function sanitizeHelperReply(reply, prompt){
+    const text = String(reply || '').replace(/\s+/g, ' ').trim();
+    if (!text) return '';
+    if (/^hi there!? what can i help you with today on step by stepper\??/i.test(text)) return localSiteHelp(prompt);
+    if (/feel free to ask about any tab or feature\.?$/i.test(text)) return localSiteHelp(prompt);
+    if (/^need help using the site\?/i.test(text)) return localSiteHelp(prompt);
+    return text;
   }
 
   async function askSiteHelper(question){
@@ -1264,7 +1274,7 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
-        text = String(data.text || '').trim();
+        text = sanitizeHelperReply(data.text || '', prompt);
       } catch (primaryError) {
         const backup = await fetchJson('/api/openai/respond', {
           method: 'POST',
@@ -1274,9 +1284,9 @@
             prompt: `Current tab: ${currentTab}\nSigned in: ${payload.context.signedIn ? 'yes' : 'no'}\nAdmin: ${payload.context.isAdmin ? 'yes' : 'no'}\nOnline count: ${payload.context.onlineCount}\nQuestion: ${prompt}`
           })
         });
-        text = String(backup.text || '').trim();
+        text = sanitizeHelperReply(backup.text || '', prompt);
       }
-      state.chatMessages.push({ role:'assistant', text: text || localSiteHelp(prompt) });
+      state.chatMessages.push({ role:'assistant', text: sanitizeHelperReply(text, prompt) || localSiteHelp(prompt) });
     } catch (error) {
       state.chatMessages.push({ role:'assistant', text: localSiteHelp(prompt) });
     } finally {
@@ -1316,15 +1326,12 @@
     host.style.top = getSiteHelperTopOffset();
     host.style.bottom = 'auto';
     host.style.zIndex = '8700';
-    if (!state.chatMessages.length) {
-      state.chatMessages = [{ role:'assistant', text:'Need help using the site? Ask me what tab to use, how featuring works, or how to save your dance.' }];
-    }
     if (!state.chatOpen) {
       host.innerHTML = `<button type="button" data-chat-open="1" aria-label="Open site helper" style="border:none;background:#4f46e5;color:#fff;width:58px;height:58px;border-radius:999px;font-size:26px;box-shadow:0 12px 30px rgba(0,0,0,.18);">💬</button>`;
       host.querySelector('[data-chat-open="1"]').addEventListener('click', ()=>{ state.chatOpen = true; renderSiteHelper(); });
       return;
     }
-    const messages = state.chatMessages.slice(-10).map(msg => `<div style="align-self:${msg.role==='user'?'flex-end':'stretch'};max-width:100%;background:${msg.role==='user'?'#4f46e5':'#ffffff'};color:${msg.role==='user'?'#ffffff':'#111827'};border:1px solid rgba(79,70,229,.12);padding:.75rem .85rem;border-radius:18px;font-size:14px;line-height:1.45;box-shadow:0 8px 24px rgba(0,0,0,.08);word-break:break-word;">${escapeHtml(msg.text)}</div>`).join('');
+    const messages = state.chatMessages.length ? state.chatMessages.slice(-10).map(msg => `<div style="align-self:${msg.role==='user'?'flex-end':'stretch'};max-width:100%;background:${msg.role==='user'?'#4f46e5':'#ffffff'};color:${msg.role==='user'?'#ffffff':'#111827'};border:1px solid rgba(79,70,229,.12);padding:.75rem .85rem;border-radius:18px;font-size:14px;line-height:1.45;box-shadow:0 8px 24px rgba(0,0,0,.08);word-break:break-word;">${escapeHtml(msg.text)}</div>`).join('') : `<div style="font-size:13px;color:#6b7280;background:#ffffff;border:1px dashed rgba(99,102,241,.18);padding:.8rem .9rem;border-radius:16px;">Ask what button to press, where to save, how featuring works, or anything else about the site.</div>`;
     host.innerHTML = `<div style="width:min(380px, calc(100vw - 24px));max-width:calc(100vw - 24px);background:#f8fafc;border:1px solid rgba(99,102,241,.16);border-radius:24px;box-shadow:0 18px 40px rgba(0,0,0,.18);overflow:hidden;"><div style="padding:.9rem 1rem;background:#4f46e5;color:#fff;display:flex;align-items:center;gap:.6rem;"><div style="font-weight:900;">Site helper${isPremiumSession() ? ' • Premium' : ''}</div><button type="button" data-chat-close="1" style="margin-left:auto;border:none;background:rgba(255,255,255,.18);color:#fff;border-radius:999px;padding:.35rem .65rem;font-weight:900;">Close</button></div><div data-chat-messages="1" style="padding:1rem;display:flex;flex-direction:column;gap:.7rem;max-height:min(45vh, 340px);overflow:auto;overscroll-behavior:contain;">${messages}${state.chatBusy ? '<div style="font-size:13px;color:#6b7280;">Thinking…</div>' : ''}</div><form data-chat-form="1" style="padding:0 1rem 1rem;display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;"><input data-chat-input="1" type="text" autocomplete="off" autocapitalize="sentences" spellcheck="true" placeholder="${isPremiumSession() ? 'Ask where to go or what to press' : 'Premium helper lives in Subscription'}" value="${escapeHtml(state.chatDraft || '')}" style="flex:1 1 220px;border:1px solid rgba(99,102,241,.18);border-radius:999px;padding:.9rem 1rem;background:#fff;font-size:16px;min-width:0;" /><button type="submit" ${isPremiumSession() ? '' : 'disabled'} style="border:none;background:#4f46e5;color:#fff;border-radius:999px;padding:.85rem 1rem;font-weight:900;white-space:nowrap;${isPremiumSession() ? '' : 'opacity:.5;cursor:not-allowed;'}">Send</button></form></div>`;
     const list = host.querySelector('[data-chat-messages="1"]');
     if (list) list.scrollTop = list.scrollHeight;
@@ -2373,18 +2380,6 @@
     return 'You are the premium Step By Stepper site helper. Reply like a natural AI assistant, not a canned bot. Stay focused on this site only. Give specific, practical guidance using the real tabs and buttons: Build, Sheet, Sign In, My Saved Dances, Featured Choreo, Subscription, Admin, Moderator, Save Changes, Send to host for featuring, Upload to site, and Apply for moderator. Mention cloud saving, moderator rules, badges, and premium perks when relevant. Keep answers helpful and concrete.';
   }
 
-  function buildCurrentDancePreviewText(appData){
-    const sections = Array.isArray(appData && appData.sections) ? appData.sections : [];
-    const lines = [];
-    sections.slice(0, 4).forEach((section, index) => {
-      const heading = String(section && (section.heading || section.title || section.name) || `Section ${index + 1}`).trim() || `Section ${index + 1}`;
-      const steps = Array.isArray(section && section.steps) ? section.steps : [];
-      const preview = steps.slice(0, 3).map(step => String(step && (step.text || step.label || step.description || step.name) || '').trim()).filter(Boolean).join(' | ');
-      lines.push(`${heading}: ${preview || `${steps.length} steps`}`);
-    });
-    return lines.join('\n').trim();
-  }
-
   function buildAiHelperPrompt(question, payload){
     const historyText = (payload.history || []).map(message => `${message.role}: ${message.text}`).join('\n') || '(none)';
     return `Current tab: ${payload.context.currentTab}
@@ -2394,10 +2389,6 @@ Moderator: ${payload.context.isModerator ? 'yes' : 'no'}
 Premium: ${payload.context.isPremium ? 'yes' : 'no'}
 Online count: ${payload.context.onlineCount}
 Current dance title: ${payload.context.currentDanceTitle || 'none'}
-Current dance choreographer: ${payload.context.currentDanceChoreographer || 'none'}
-Current dance meta: counts=${payload.context.currentDanceCounts || '-'}, walls=${payload.context.currentDanceWalls || '-'}, level=${payload.context.currentDanceLevel || '-'}
-Current dance preview:
-${payload.context.currentDancePreview || '(none)'}
 Current dance has unsaved changes: ${payload.context.hasUnsavedChanges ? 'yes' : 'no'}
 Conversation so far:
 ${historyText}
@@ -2416,7 +2407,6 @@ Newest user question: ${question}`;
     const appData = readAppData();
     const payload = {
       prompt,
-      preferredModel: 'gemini',
       history: (state.chatMessages || []).slice(-8).map(message => ({ role: message.role, text: message.text })),
       context: {
         currentTab,
@@ -2426,11 +2416,6 @@ Newest user question: ${question}`;
         isPremium: isPremiumSession(),
         onlineCount: (state.presence && state.presence.onlineCount) || 0,
         currentDanceTitle: appData && appData.meta ? String(appData.meta.title || '').trim() : '',
-        currentDanceChoreographer: appData && appData.meta ? String(appData.meta.choreographer || '').trim() : '',
-        currentDanceCounts: appData && appData.meta ? String(appData.meta.counts || '').trim() : '',
-        currentDanceWalls: appData && appData.meta ? String(appData.meta.walls || '').trim() : '',
-        currentDanceLevel: appData && appData.meta ? String(appData.meta.level || '').trim() : '',
-        currentDancePreview: buildCurrentDancePreviewText(appData),
         hasUnsavedChanges: hasUnsavedChanges()
       }
     };
@@ -2459,8 +2444,7 @@ Newest user question: ${question}`;
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 system: buildAiHelperSystemPrompt(),
-                prompt: buildAiHelperPrompt(prompt, payload),
-                preferredModel: 'gemini'
+                prompt: buildAiHelperPrompt(prompt, payload)
               })
             });
             text = String((backup && (backup.text || backup.output_text)) || '').trim();
@@ -2478,7 +2462,7 @@ Newest user question: ${question}`;
           }
         }
       }
-      state.chatMessages.push({ role:'assistant', text: text || localSiteHelp(prompt) });
+      state.chatMessages.push({ role:'assistant', text: sanitizeHelperReply(text, prompt) || localSiteHelp(prompt) });
     } catch (error) {
       const message = String(error && error.message || '').trim();
       state.chatMessages.push({ role:'assistant', text: message ? `The AI helper could not reach the backend just now: ${message}` : localSiteHelp(prompt) });

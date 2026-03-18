@@ -26,11 +26,6 @@ const dbPath = path.join(dataDir, "stepper-db.json");
 const openaiClient = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
-const geminiApiKey = String(process.env.GEMINI_API_KEY || '').trim();
-const geminiModel = String(process.env.GEMINI_MODEL || 'gemini-2.5-flash').trim() || 'gemini-2.5-flash';
-const geminiClient = geminiApiKey
-  ? new OpenAI({ apiKey: geminiApiKey, baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/' })
-  : null;
 const adminEmail = normalizeEmail(process.env.ADMIN_EMAIL || "anthonytau4@gmail.com");
 const onlineWindowMs = Math.max(30_000, Number(process.env.ONLINE_WINDOW_MS || 180_000));
 const stripeSecretKey = String(process.env.STRIPE_SECRET_KEY || '').trim();
@@ -569,98 +564,9 @@ function buildFeatureSummary(source, badgeLabel) {
 
 
 const SITE_HELP_CONTEXT = `You are the Step By Stepper site helper. Keep answers short, practical, and human. Only answer about using this site.
-Tabs and actions available: Build, Sheet, What's New, My Saved Dances, Featured Choreo, Sign In, Subscription, Moderator, and Admin for anthonytau4@gmail.com only.
-Important behaviours: users sign in with Google, Save Changes pushes the current dance to cloud save, Send to host for featuring creates a feature request, Upload to site creates a site-upload request, Featured Choreo shows public featured dances, removing a feature removes it from Featured Choreo, approved moderators can review dance requests with yellow or red badges plus notes, and signed-in users can get notifications when admin or moderators approve or reject requests.
+Tabs and actions available: Build, Sheet, What's New, My Saved Dances, Featured Choreo, Sign In, and Admin for anthonytau4@gmail.com only.
+Important behaviours: users sign in with Google, Save Changes pushes the current dance to cloud save, Send to host for featuring creates a feature request, Upload to site creates a site-upload request, Featured Choreo shows public featured dances, removing a feature removes it from Featured Choreo, and signed-in users can get notifications when admin approves or rejects requests.
 If someone asks where to go, tell them the exact tab or button to use.`;
-
-function buildSiteKnowledgeSnapshot(db, bucket = null, profile = null, context = {}) {
-  const featured = (Array.isArray(db?.featuredDances) ? db.featuredDances : [])
-    .filter(Boolean)
-    .slice(0, 8)
-    .map((item) => `- ${String(item.title || 'Untitled').trim()}${item.badge ? ` [${String(item.badge).trim()}]` : ''}`)
-    .join('\n') || '(none)';
-  const pendingRequests = (Array.isArray(db?.submissions) ? db.submissions : []).filter((item) => item && String(item.status || 'pending') === 'pending');
-  const moderatorQueue = pendingRequests.filter((item) => ['feature', 'upload'].includes(String(item.requestType || '').trim()));
-  const userSaves = Array.isArray(bucket?.cloudSaves) ? bucket.cloudSaves : [];
-  const latestSaveTitles = userSaves.slice(0, 5).map((item) => `- ${String(item?.title || 'Untitled').trim()}`).join('\n') || '(none)';
-  return `Site facts:
-- Signed-in role: ${isAdminProfile(profile) ? 'admin' : (isModeratorBucket(bucket) ? 'moderator' : 'member')}
-- Premium active: ${isPremiumUser(bucket, profile) ? 'yes' : 'no'}
-- Members online right now: ${getOnlineUsers(db).length}
-- Public featured dances: ${Array.isArray(db?.featuredDances) ? db.featuredDances.length : 0}
-- Pending admin/moderator dance requests: ${pendingRequests.length}
-- Pending moderator-reviewable dance requests: ${moderatorQueue.length}
-- Pending moderator applications: ${Array.isArray(db?.moderatorApplications) ? db.moderatorApplications.length : 0}
-- This user cloud saves: ${userSaves.length}
-- Current tab from frontend: ${context.currentTab || 'unknown'}
-- Current dance title from frontend: ${context.currentDanceTitle || 'none'}
-- Current dance choreographer from frontend: ${context.currentDanceChoreographer || 'none'}
-- Current dance has unsaved changes: ${context.hasUnsavedChanges ? 'yes' : 'no'}
-- Current dance preview from frontend:
-${context.currentDancePreview || '(none)'}
-- Current dance meta from frontend: counts=${context.currentDanceCounts || '-'}, walls=${context.currentDanceWalls || '-'}, level=${context.currentDanceLevel || '-'}
-
-Featured choreo sample:
-${featured}
-
-This user recent cloud saves:
-${latestSaveTitles}
-
-Moderator rules:
-1. No abusing rights. Do not falsely disapprove a good post.
-2. Fairness is key. If you do not like someone, their work stays untouched.
-3. Approvals and disapprovals need notes so admin can see exactly what was put on them.`;
-}
-
-async function generateTextWithOpenAI(systemPrompt, userPrompt) {
-  if (!openaiClient) return '';
-  const response = await openaiClient.responses.create({
-    model,
-    input: [
-      {
-        role: 'system',
-        content: [{ type: 'input_text', text: systemPrompt }]
-      },
-      {
-        role: 'user',
-        content: [{ type: 'input_text', text: userPrompt }]
-      }
-    ]
-  });
-  return String(response?.output_text || '').trim();
-}
-
-async function generateTextWithGemini(systemPrompt, userPrompt) {
-  if (!geminiClient) return '';
-  const response = await geminiClient.chat.completions.create({
-    model: geminiModel,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt }
-    ]
-  });
-  const content = response?.choices?.[0]?.message?.content;
-  if (Array.isArray(content)) {
-    return content.map((part) => typeof part === 'string' ? part : String(part?.text || '').trim()).filter(Boolean).join('\n').trim();
-  }
-  return String(content || '').trim();
-}
-
-async function generateBestAvailableAi(systemPrompt, userPrompt, preferred = 'openai') {
-  const order = preferred === 'gemini'
-    ? [['gemini', generateTextWithGemini], ['openai', generateTextWithOpenAI]]
-    : [['openai', generateTextWithOpenAI], ['gemini', generateTextWithGemini]];
-  const errors = [];
-  for (const [name, fn] of order) {
-    try {
-      const text = await fn(systemPrompt, userPrompt);
-      if (text) return { text, mode: name, errors };
-    } catch (error) {
-      errors.push({ provider: name, message: String(error?.message || error || 'Unknown AI error') });
-    }
-  }
-  return { text: '', mode: 'fallback', errors };
-}
 
 function fallbackSiteHelp(prompt, context = {}) {
   const q = String(prompt || '').toLowerCase();
@@ -681,7 +587,6 @@ app.get("/api/health", async (_req, res) => {
     service: "step-by-stepper-backend",
     googleEnabled: !!googleClientId,
     openaiEnabled: !!openaiClient,
-    geminiEnabled: !!geminiClient,
     cloudStorage: "json-file",
     onlineCount: getOnlineUsers(db).length,
     danceCount: Array.isArray(db.danceRegistry) ? db.danceRegistry.length : 0
@@ -694,8 +599,6 @@ app.get("/api/auth/config", (_req, res) => {
     googleEnabled: !!googleClientId,
     googleClientId: googleClientId || "",
     openaiEnabled: !!openaiClient,
-    geminiEnabled: !!geminiClient,
-    geminiModel,
     cloudStorage: "json-file",
     authMode: googleClientId ? "google-id-token" : "none",
     adminEmail,
@@ -1186,48 +1089,78 @@ app.post('/api/chatbot/help', requireGoogleUser, async (req, res) => {
     role: String(item?.role || 'user').trim().toLowerCase() === 'assistant' ? 'assistant' : 'user',
     text: String(item?.text || '').trim().slice(0, 2000)
   })).filter(item => item.text);
-  const systemPrompt = `${SITE_HELP_CONTEXT}
-Reply like a natural AI helper for the Step By Stepper site. Be specific, warm, and practical. Use the conversation history when it matters, and do not keep repeating the exact same canned answer. Prefer exact tabs and buttons over vague advice.`;
-  const userPrompt = `${buildSiteKnowledgeSnapshot(db, bucket, req.stepperUser, context)}
-
+  if (!openaiClient) {
+    return res.json({ ok:true, text: fallbackSiteHelp(prompt, context), mode:'fallback' });
+  }
+  try {
+    const response = await openaiClient.responses.create({
+      model,
+      input: [
+        {
+          role: 'system',
+          content: [{
+            type: 'input_text',
+            text: `${SITE_HELP_CONTEXT}
+Reply like a natural AI helper for the Step By Stepper site. Be specific, warm, and practical. Use the conversation history when it matters, and do not keep repeating the exact same canned answer.`
+          }]
+        },
+        {
+          role: 'user',
+          content: [{
+            type: 'input_text',
+            text: `Current tab: ${context.currentTab || 'unknown'}
+Signed in: ${context.signedIn ? 'yes' : 'no'}
+Admin: ${context.isAdmin ? 'yes' : 'no'}
+Online count: ${context.onlineCount || 0}
+Current dance title: ${context.currentDanceTitle || 'none'}
 Conversation so far:
 ${trimmedHistory.map(item => `${item.role}: ${item.text}`).join('\n') || '(none)'}
-
-Newest user question: ${prompt}`;
-  const preferred = String(req.body?.preferredModel || '').trim().toLowerCase() === 'gemini' ? 'gemini' : 'openai';
-  try {
-    const result = await generateBestAvailableAi(systemPrompt, userPrompt, preferred);
-    const text = String(result?.text || '').trim() || fallbackSiteHelp(prompt, context);
-    res.json({ ok:true, text, mode: result?.mode || 'fallback', providers: { openai: !!openaiClient, gemini: !!geminiClient }, errors: result?.errors || [] });
-  } catch (_error) {
-    res.json({ ok:true, text: fallbackSiteHelp(prompt, context), mode:'fallback-error', providers: { openai: !!openaiClient, gemini: !!geminiClient } });
+Newest user question: ${prompt}`
+          }]
+        }
+      ]
+    });
+    const text = String(response.output_text || '').trim() || fallbackSiteHelp(prompt, context);
+    res.json({ ok:true, text, mode:'openai' });
+  } catch (error) {
+    res.json({ ok:true, text: fallbackSiteHelp(prompt, context), mode:'fallback-error' });
   }
 });
 
 app.post("/api/openai/respond", async (req, res) => {
-  if (!openaiClient && !geminiClient) {
+  if (!openaiClient) {
     res.status(503).json({
       ok: false,
-      error: "No AI provider is configured on the backend yet."
+      error: "OPENAI_API_KEY is not set on the backend yet."
     });
     return;
   }
   try {
     const prompt = String(req.body?.prompt || "").trim();
     const system = String(req.body?.system || "You are Step-By-Stepper assistant logic.").trim();
-    const preferred = String(req.body?.preferredModel || '').trim().toLowerCase() === 'gemini' ? 'gemini' : 'openai';
 
     if (!prompt) {
       return res.status(400).json({ ok: false, error: "Missing prompt." });
     }
 
-    const result = await generateBestAvailableAi(system, prompt, preferred);
+    const response = await openaiClient.responses.create({
+      model,
+      input: [
+        {
+          role: "system",
+          content: [{ type: "input_text", text: system }]
+        },
+        {
+          role: "user",
+          content: [{ type: "input_text", text: prompt }]
+        }
+      ]
+    });
 
     res.json({
       ok: true,
-      text: result.text,
-      mode: result.mode,
-      errors: result.errors || []
+      text: response.output_text,
+      raw: response
     });
   } catch (error) {
     console.error(error);
