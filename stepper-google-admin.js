@@ -49,6 +49,7 @@
     communityGlossaryOpen: false,
     subscription: { isPremium: false, plan: 'free', status: 'free', source: 'unknown' },
     savedDancesUiSignature: '',
+    adminUiSignature: '',
     suspension: null,
     chatOpen: false,
     chatBusy: false,
@@ -849,6 +850,10 @@
     const container = document.getElementById('stepper-google-button-slot');
     if (!container) return;
     const theme = themeClasses();
+    const uiSignature = getAdminUiSignature();
+    if (!force && adminPageHasLiveTyping(page)) return;
+    if (!force && state.adminUiSignature === uiSignature) return;
+    state.adminUiSignature = uiSignature;
     container.innerHTML = '';
     const effectiveClientId = (state.config && state.config.googleClientId) || FALLBACK_GOOGLE_CLIENT_ID;
     if (!effectiveClientId) {
@@ -2157,10 +2162,39 @@
     renderPages();
   }
 
-  function renderAdminPage(){
+  function adminPageHasLiveTyping(page){
+    const active = document.activeElement;
+    if (!page || !active || !document.body.contains(active)) return false;
+    if (!page.contains(active)) return false;
+    return !!(active.matches && active.matches('input, textarea, [contenteditable="true"], [contenteditable=""]'));
+  }
+
+  function getAdminUiSignature(){
+    return JSON.stringify({
+      activePage: state.activePage || '',
+      isAdmin: isAdminSession(),
+      dark: !!(readAppData() && readAppData().isDarkMode),
+      adminDances: (state.adminDances || []).map(item => [item && item.registryId || '', item && item.updatedAt || '', item && item.featureTone || '', item && item.featuredAt || ''].join('~')).join('|'),
+      submissions: (state.submissions || []).map(item => [item && item.id || '', item && item.updatedAt || '', item && item.status || '', item && item.requestType || ''].join('~')).join('|'),
+      moderatorApplications: (state.moderatorApplications || []).map(item => [item && item.id || '', item && item.status || '', item && item.createdAt || ''].join('~')).join('|'),
+      activeModerators: (state.activeModerators || []).map(item => [item && item.userKey || '', item && item.email || '', item && item.updatedAt || ''].join('~')).join('|'),
+      suspensions: (state.suspensions || []).map(item => [item && item.userKey || '', item && item.untilAt || '', item && item.updatedAt || ''].join('~')).join('|'),
+      glossaryRequests: (state.glossaryRequests || []).map(item => [item && item.id || '', item && item.updatedAt || '', item && item.status || ''].join('~')).join('|'),
+      glossaryApproved: (state.glossaryApproved || []).map(item => [item && item.id || '', item && item.updatedAt || '', item && item.name || ''].join('~')).join('|'),
+      siteMemories: (state.siteMemories || []).map(item => [item && item.id || '', item && item.updatedAt || '', item && item.text || ''].join('~')).join('|'),
+      securityAlerts: (state.securityAlerts || []).map(item => [item && item.id || '', item && item.createdAt || '', item && item.kind || ''].join('~')).join('|'),
+      staffChat: (state.staffChat || []).map(item => [item && item.id || '', item && item.createdAt || '', item && item.text || ''].join('~')).join('|')
+    });
+  }
+
+  function renderAdminPage(force){
     const page = document.getElementById(ADMIN_PAGE_ID);
     if (!page) return;
     const theme = themeClasses();
+    const uiSignature = getAdminUiSignature();
+    if (!force && adminPageHasLiveTyping(page)) return;
+    if (!force && state.adminUiSignature === uiSignature) return;
+    state.adminUiSignature = uiSignature;
     if (!isAdminSession()) {
       page.className = `rounded-3xl border shadow-sm overflow-hidden ${theme.shell}`;
       page.innerHTML = `
@@ -2543,6 +2577,7 @@
   window.addEventListener('storage', () => {
     if (state.session && state.session.credential) syncCurrentDanceToBackend(false);
     state.savedDancesUiSignature = '';
+    state.adminUiSignature = '';
     renderPages();
   });
 

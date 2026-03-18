@@ -848,6 +848,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   let inlineHost = null;
   let thinkingAudio = null;
   let lastSyncedSignature = '';
+  let extraPagesSignature = '';
 
   function readAppData(){
     try {
@@ -1580,9 +1581,39 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     syncInlineHostVisibility();
   }
 
-  function renderExtraPages(){
+  function hasLiveTypingInExtraUi(){
+    const active = document.activeElement;
+    if (!active || !document.body.contains(active)) return false;
+    if (!(active.matches && active.matches('input, textarea, [contenteditable="true"], [contenteditable=""]'))) return false;
+    const extraHost = host || document.getElementById('stepper-extra-page-host');
+    const inlineWrap = inlineHost || document.getElementById(INLINE_HOST_ID);
+    return !!((extraHost && extraHost.contains(active)) || (inlineWrap && inlineWrap.contains(active)));
+  }
+
+  function getExtraPagesSignature(){
+    return JSON.stringify({
+      activeExtraPage: activeExtraPage || '',
+      dark: isDarkMode(),
+      data: localStorage.getItem(DATA_KEY) || '',
+      featured: localStorage.getItem(FEATURED_KEY) || '',
+      settings: localStorage.getItem(SETTINGS_KEY) || '',
+      phrased: localStorage.getItem(PHR_TOOLS_KEY) || '',
+      profile: localStorage.getItem(GOOGLE_FRONTEND_KEY) || '',
+      cloud: localStorage.getItem(CLOUD_SAVES_KEY) || ''
+    });
+  }
+
+  function renderExtraPages(force){
     if (!mainEl || !tabStrip) return;
     ensureHost();
+    const signature = getExtraPagesSignature();
+    if (!force && hasLiveTypingInExtraUi()) return;
+    if (!force && extraPagesSignature === signature) {
+      updateButtonState();
+      syncInlineHostVisibility();
+      return;
+    }
+    extraPagesSignature = signature;
     renderSavedDancesPage();
     renderChoreographyPanel(FEATURED_PAGE_ID);
     renderWhatsNewPage();
@@ -1604,7 +1635,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       if (savedPage) savedPage.hidden = true;
       if (featuredPage) featuredPage.hidden = true;
     } else {
-      renderExtraPages();
+      renderExtraPages(true);
       host.hidden = false;
       if (mainEl) mainEl.style.display = 'none';
       if (footerWrap) footerWrap.style.display = 'none';
@@ -1827,7 +1858,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     ensureHost();
     ensureInlineHost();
     wireNativeTabClose();
-    renderExtraPages();
+    renderExtraPages(true);
     return true;
   }
 
@@ -1856,14 +1887,14 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     setInterval(() => {
       saveFeaturedSnapshot();
       applyThinkingMusic();
-      renderExtraPages();
+      renderExtraPages(false);
       injectWhatsNewNotes();
       syncInlineHostVisibility();
     }, 1800);
     window.addEventListener('storage', () => {
       saveFeaturedSnapshot();
       applyThinkingMusic();
-      renderExtraPages();
+      renderExtraPages(false);
       injectWhatsNewNotes();
       syncInlineHostVisibility();
     });
