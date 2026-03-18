@@ -1659,6 +1659,33 @@
     return '96px';
   }
 
+
+  function isTypingSensitiveElement(element){
+    if (!element || element === document.body) return false;
+    if (element.closest && element.closest('[data-stepper-render-safe="1"]')) return false;
+    if (element.matches && element.matches('button,[type="button"],[type="submit"],[type="checkbox"],[type="radio"]')) return false;
+    if (element.matches && element.matches('input, textarea, select')) {
+      if (element.disabled || element.readOnly) return false;
+      return true;
+    }
+    if (element.isContentEditable) return true;
+    if (element.closest) {
+      const editableParent = element.closest('textarea, input, select, [contenteditable=""], [contenteditable="true"]');
+      if (editableParent && !editableParent.disabled && !editableParent.readOnly) return true;
+    }
+    return false;
+  }
+
+  function isUserEditingUi(){
+    return isTypingSensitiveElement(document.activeElement);
+  }
+
+  function flushDeferredRenderPages(){
+    if (!state.deferRenderPages) return;
+    if (isUserEditingUi()) return;
+    renderPages({ force:true });
+  }
+
   function ensureSiteHelperHost(){
     let host = document.getElementById('stepper-site-helper-host');
     if (host) return host;
@@ -2302,8 +2329,10 @@
     updateTabButtons();
     renderPresenceOnly();
     patchFeaturedPageCopy();
-    patchSavedDancesPage();
-    renderSaveButton();
+    if (!isUserEditingUi()) {
+      patchSavedDancesPage();
+      renderSaveButton();
+    }
   }, 2200);
 
   setInterval(() => {
@@ -3043,7 +3072,13 @@ Newest user question: ${question}`;
   }
 
   const __origRenderPages = renderPages;
-  renderPages = function(){
+  renderPages = function(options){
+    const force = !!(options && options.force);
+    if (!force && isUserEditingUi()) {
+      state.deferRenderPages = true;
+      return;
+    }
+    state.deferRenderPages = false;
     __origRenderPages();
     ensureHost();
     renderModeratorPage();
@@ -3064,6 +3099,14 @@ Newest user question: ${question}`;
       autoGenerateCountsForWorksheet
     };
   };
+
+  document.addEventListener('focusout', () => {
+    window.setTimeout(flushDeferredRenderPages, 40);
+  }, true);
+
+  document.addEventListener('pointerdown', () => {
+    window.setTimeout(flushDeferredRenderPages, 40);
+  }, true);
 
   let __stepperLiveQueueRefreshBusy = false;
   setInterval(() => {
