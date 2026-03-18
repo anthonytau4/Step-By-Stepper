@@ -1795,9 +1795,6 @@
     wrap.className = 'space-y-4';
     wrap.innerHTML = `
       <section class="rounded-3xl border p-5 sm:p-6 ${theme.soft}" data-stepper-cloud-save-card="true">
-        ${signedIn
-          ? `<div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Google cloud save is on</div><p class="mt-1 text-sm ${theme.subtle}">Signed in as ${escapeHtml(profile.name || profile.email || 'Member')}. Use Save Changes here to push the latest version to your Google-linked save so it is still there next time you open the site.</p><p class="mt-2 text-sm ${theme.subtle}">If you load another dance before saving the one you are editing now, that unsaved worksheet progress will not be kept.</p></div><div class="flex flex-wrap gap-3"><button type="button" data-stepper-saved-save-now="1" class="stepper-google-cta ${theme.button}">Save Changes</button><button type="button" data-stepper-open-subscription="1" class="stepper-google-cta ${theme.button}">Subscription</button><button type="button" data-stepper-open-signin="1" class="stepper-google-cta ${theme.button}">Account</button></div></div>`
-          : `<div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Sign in to save across devices</div><p class="mt-1 text-sm ${theme.subtle}">Local device saves still work without signing in. Use Google sign-in when you want the same dance to come back on other phones, tablets, and computers.</p></div><div class="flex flex-wrap gap-3"><button type="button" data-stepper-open-signin="1" class="stepper-google-cta ${theme.button}">Sign in with Google</button></div></div>`}
       </section>
       <section class="rounded-3xl border p-5 sm:p-6 ${theme.panel}">
         <div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Cloud saves</div><p class="mt-1 text-sm ${theme.subtle}">Load any saved dance straight into the current worksheet. You will get a warning first if the worksheet you are on still has unsaved changes.</p></div>${signedIn ? `<span class="stepper-google-pill ${theme.orange}">${escapeHtml(String(state.cloudSaves.length))} saved</span>` : ''}</div>
@@ -1913,6 +1910,19 @@
             <div class="mt-4 ${theme.panel} rounded-3xl border p-4"><textarea data-stepper-glossary-description="1" class="stepper-google-input" rows="4" placeholder="Describe the step clearly so Admin can preview it."></textarea></div>
             <div class="mt-4 flex flex-wrap gap-3"><button type="button" data-stepper-action="request-glossary-step" class="stepper-google-cta ${theme.button}">Send glossary step request</button></div>
           </div>
+          <div class="mx-auto max-w-3xl rounded-3xl border p-5 sm:p-6 ${theme.soft}">
+            <div class="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <div class="text-lg font-black tracking-tight">Cloud save status</div>
+                <p class="mt-2 text-sm ${theme.subtle}">Signed in as ${escapeHtml(profile.name || profile.email || 'Member')}. Google cloud save follows you onto other devices. Use Save Changes in My Saved Dances when you want to lock the newest version in straight away.</p>
+                <p class="mt-2 text-sm ${theme.subtle}">If you load another dance before saving the one you are editing now, that unsaved worksheet progress will not be kept.</p>
+              </div>
+              <div class="flex flex-wrap gap-3">
+                <span class="stepper-google-pill ${theme.orange}">${escapeHtml(String(state.cloudSaves.length || 0))} cloud saves</span>
+                <button type="button" data-stepper-open-saved="1" class="stepper-google-cta ${theme.button}">Open My Saved Dances</button>
+              </div>
+            </div>
+          </div>
         </div>
       `;
     } else {
@@ -1937,6 +1947,15 @@
             </div>
             <div id="stepper-google-button-slot" class="stepper-google-google-btn mt-6 flex justify-center"></div>
           </div>
+          <div class="mx-auto max-w-2xl rounded-3xl border p-5 sm:p-6 ${theme.soft}">
+            <div class="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <div class="text-lg font-black tracking-tight">Cloud save status</div>
+                <p class="mt-2 text-sm ${theme.subtle}">Google cloud save sits behind sign-in and lives in My Saved Dances, not as a popup. Once you sign in, your saves can follow you onto other devices.</p>
+              </div>
+              <button type="button" data-stepper-open-saved="1" class="stepper-google-cta ${theme.button}">Open My Saved Dances</button>
+            </div>
+          </div>
         </div>
       `;
     }
@@ -1954,6 +1973,12 @@
     if (uploadSiteBtn) uploadSiteBtn.addEventListener('click', () => requestModeration('site'));
     const openSubBtn = page.querySelector('[data-stepper-action="open-subscription"]');
     if (openSubBtn) openSubBtn.addEventListener('click', () => { openPage('subscription'); renderPages(); });
+    const openSavedBtn = page.querySelector('[data-stepper-open-saved="1"]');
+    if (openSavedBtn) openSavedBtn.addEventListener('click', () => {
+      const btn = state.ui && state.ui.savedBtn;
+      if (btn && typeof btn.click === 'function') btn.click();
+      else openPage('signin');
+    });
     const applyModBtn = page.querySelector('[data-stepper-action="apply-moderator"]');
     if (applyModBtn) applyModBtn.addEventListener('click', () => applyForModerator());
     const applyNeedsSignInBtn = page.querySelector('[data-stepper-action="apply-moderator-needs-signin"]');
