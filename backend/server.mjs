@@ -17,26 +17,17 @@ const model = process.env.OPENAI_MODEL || "gpt-5";
 const googleClientId = String(process.env.GOOGLE_CLIENT_ID || "").trim();
 const googleClient = googleClientId ? new OAuth2Client(googleClientId) : null;
 const renderDiskRoot = String(process.env.RENDER_DISK_MOUNT_PATH || '').trim();
-const diskRootPath = renderDiskRoot ? path.resolve(renderDiskRoot) : '';
+const isRenderDiskMode = !process.env.DATA_DIR && !!renderDiskRoot;
 const dataDir = process.env.DATA_DIR
   ? path.resolve(process.env.DATA_DIR)
-  : diskRootPath
-    ? diskRootPath
+  : isRenderDiskMode
+    ? path.resolve(renderDiskRoot)
     : path.join(__dirname, "data");
-const dbPath = path.join(
-  process.env.DATA_DIR
-    ? dataDir
-    : diskRootPath
-      ? diskRootPath
-      : dataDir,
-  "stepper-db.json"
-);
-
+const dbPath = path.join(dataDir, "stepper-db.json");
 console.log('[Stepper] RENDER_DISK_MOUNT_PATH =', process.env.RENDER_DISK_MOUNT_PATH || '(not set)');
 console.log('[Stepper] DATA_DIR =', process.env.DATA_DIR || '(not set)');
 console.log('[Stepper] resolved dataDir =', dataDir);
 console.log('[Stepper] resolved dbPath =', dbPath);
-
 const openaiClient = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
@@ -57,20 +48,6 @@ const builtInAllowedOrigins = [
 
 function normalizeEmail(value) {
   return String(value || "").trim().toLowerCase();
-}
-
-function normalizeUsername(value) {
-  return String(value || '').trim();
-}
-
-function isValidUsername(value) {
-  return /^(?=.*\d)[A-Za-z0-9]{6,}$/.test(String(value || '').trim());
-}
-
-function findUserKeyByUsername(db, username) {
-  const wanted = normalizeUsername(username).toLowerCase();
-  if (!wanted) return '';
-  return Object.keys(db.users || {}).find((key) => String(db.users?.[key]?.username || '').trim().toLowerCase() === wanted) || '';
 }
 
 function safeOrigin(value) {
@@ -317,22 +294,23 @@ function emptyDb() {
     danceRegistry: [],
     submissions: [],
     moderatorApplications: [],
+    pendingModeratorInvites: [],
+    pendingSuspensions: [],
     glossaryRequests: [],
     approvedGlossarySteps: [],
     siteMemory: [],
     securityAlerts: [],
-    staffChat: [],
-    pendingModeratorInvites: []
+    staffChat: []
   };
 }
 
 async function ensureDb() {
-  if (diskRootPath && !process.env.DATA_DIR) {
+  if (isRenderDiskMode) {
     try {
-      await fs.access(diskRootPath);
-      console.log('[Stepper] Persistent disk mount is accessible:', diskRootPath);
+      await fs.access(dataDir);
+      console.log('[Stepper] Persistent disk mount is accessible:', dataDir);
     } catch (error) {
-      console.error('[Stepper] Persistent disk mount root is not accessible:', diskRootPath, error?.code || error);
+      console.error('[Stepper] Persistent disk mount root is not accessible:', dataDir, error?.code || error?.message || error);
       throw error;
     }
   } else {
@@ -356,12 +334,13 @@ async function readDb() {
     if (!Array.isArray(parsed.danceRegistry)) parsed.danceRegistry = [];
     if (!Array.isArray(parsed.submissions)) parsed.submissions = [];
     if (!Array.isArray(parsed.moderatorApplications)) parsed.moderatorApplications = [];
+    if (!Array.isArray(parsed.pendingModeratorInvites)) parsed.pendingModeratorInvites = [];
+    if (!Array.isArray(parsed.pendingSuspensions)) parsed.pendingSuspensions = [];
     if (!Array.isArray(parsed.glossaryRequests)) parsed.glossaryRequests = [];
     if (!Array.isArray(parsed.approvedGlossarySteps)) parsed.approvedGlossarySteps = [];
     if (!Array.isArray(parsed.siteMemory)) parsed.siteMemory = [];
     if (!Array.isArray(parsed.securityAlerts)) parsed.securityAlerts = [];
     if (!Array.isArray(parsed.staffChat)) parsed.staffChat = [];
-    if (!Array.isArray(parsed.pendingModeratorInvites)) parsed.pendingModeratorInvites = [];
     return parsed;
   } catch {
     return emptyDb();
@@ -392,10 +371,6 @@ function isAdminProfile(profile) {
 
 function isModeratorBucket(bucket) {
   return String(bucket?.role || '').trim().toLowerCase() === 'moderator';
-}
-
-function isSignupComplete(bucket) {
-  return !!(bucket && bucket.signupCompleted && normalizeUsername(bucket.username));
 }
 
 function readBearerToken(req) {
@@ -451,17 +426,6 @@ async function requireGoogleUser(req, res, next) {
       suspension: error?.suspension || null
     });
   }
-}
-
-
-async function requireCompletedGoogleUser(req, res, next) {
-  requireCompletedGoogleUser(req, res, async () => {
-    if (!isSignupComplete(req.stepperUserBucket)) {
-      res.status(403).json({ ok: false, error: 'Finish signing up with a locked username before using the site.', code: 'SIGNUP_REQUIRED', signupCompleted: false });
-      return;
-    }
-    next();
-  });
 }
 
 async function requireAdmin(req, res, next) {
@@ -666,33 +630,120 @@ function buildFeaturedItemFromRegistry(entry, featuredBy, badgeTone, badgeLabel)
   };
 }
 
+
+function findPendingModeratorInviteIndex(db, email) {
+  const wanted = normalizeEmail(email);
+  if (!wanted) return -1;
+  const list = Array.isArray(db?.pendingModeratorInvites) ? db.pendingModeratorInvites : [];
+  return list.findIndex(item => normalizeEmail(item?.email) === wanted);
+}
+
+function upsertPendingModeratorInvite(db, payload = {}) {
+  if (!Array.isArray(db.pendingModeratorInvites)) db.pendingModeratorInvites = [];
+  const email = normalizeEmail(payload.email);
+  if (!email) return null;
+  const item = {
+    id: String(payload.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`).trim(),
+    email,
+    name: String(payload.name || email).trim().slice(0, 200),
+    invitedAt: String(payload.invitedAt || new Date().toISOString()).trim(),
+    invitedBy: {
+      email: String(payload.invitedBy?.email || '').trim(),
+      name: String(payload.invitedBy?.name || payload.invitedBy?.email || '').trim()
+    },
+    note: String(payload.note || '').trim().slice(0, 800)
+  };
+  const idx = findPendingModeratorInviteIndex(db, email);
+  if (idx >= 0) db.pendingModeratorInvites[idx] = { ...db.pendingModeratorInvites[idx], ...item, id: String(db.pendingModeratorInvites[idx]?.id || item.id).trim() };
+  else db.pendingModeratorInvites.unshift(item);
+  db.pendingModeratorInvites = db.pendingModeratorInvites.slice(0, 1000);
+  return db.pendingModeratorInvites.find(entry => normalizeEmail(entry?.email) === email) || item;
+}
+
+function removePendingModeratorInvite(db, email) {
+  const wanted = normalizeEmail(email);
+  if (!wanted) return false;
+  const before = Array.isArray(db.pendingModeratorInvites) ? db.pendingModeratorInvites.length : 0;
+  db.pendingModeratorInvites = (Array.isArray(db.pendingModeratorInvites) ? db.pendingModeratorInvites : []).filter(item => normalizeEmail(item?.email) !== wanted);
+  return db.pendingModeratorInvites.length !== before;
+}
+
+function findPendingSuspensionIndex(db, email) {
+  const wanted = normalizeEmail(email);
+  if (!wanted) return -1;
+  const list = Array.isArray(db?.pendingSuspensions) ? db.pendingSuspensions : [];
+  return list.findIndex(item => normalizeEmail(item?.email) === wanted);
+}
+
+function upsertPendingSuspension(db, payload = {}) {
+  if (!Array.isArray(db.pendingSuspensions)) db.pendingSuspensions = [];
+  const email = normalizeEmail(payload.email);
+  if (!email) return null;
+  const item = {
+    id: String(payload.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`).trim(),
+    email,
+    reason: String(payload.reason || 'an admin decision').trim().slice(0, 800) || 'an admin decision',
+    durationLabel: String(payload.durationLabel || 'a while').trim().slice(0, 120) || 'a while',
+    startedAt: String(payload.startedAt || new Date().toISOString()).trim(),
+    untilAt: String(payload.untilAt || '').trim(),
+    byEmail: String(payload.byEmail || '').trim(),
+    byName: String(payload.byName || payload.byEmail || '').trim()
+  };
+  const idx = findPendingSuspensionIndex(db, email);
+  if (idx >= 0) db.pendingSuspensions[idx] = { ...db.pendingSuspensions[idx], ...item, id: String(db.pendingSuspensions[idx]?.id || item.id).trim() };
+  else db.pendingSuspensions.unshift(item);
+  db.pendingSuspensions = db.pendingSuspensions.slice(0, 1000);
+  return db.pendingSuspensions.find(entry => normalizeEmail(entry?.email) === email) || item;
+}
+
+function removePendingSuspension(db, email) {
+  const wanted = normalizeEmail(email);
+  if (!wanted) return false;
+  const before = Array.isArray(db.pendingSuspensions) ? db.pendingSuspensions.length : 0;
+  db.pendingSuspensions = (Array.isArray(db.pendingSuspensions) ? db.pendingSuspensions : []).filter(item => normalizeEmail(item?.email) !== wanted);
+  return db.pendingSuspensions.length !== before;
+}
+
+function applyPendingAccountState(db, bucket, profile) {
+  if (!db || !bucket || !profile) return bucket;
+  const email = normalizeEmail(profile?.email || bucket?.profile?.email);
+  if (!email) return bucket;
+  const inviteIndex = findPendingModeratorInviteIndex(db, email);
+  if (inviteIndex >= 0 && !isAdminProfile(profile)) {
+    bucket.role = 'moderator';
+    bucket.membership = getUserMembership({ ...bucket, role: 'moderator' }, profile);
+    removePendingModeratorInvite(db, email);
+  }
+  const suspensionIndex = findPendingSuspensionIndex(db, email);
+  if (suspensionIndex >= 0 && !isAdminProfile(profile)) {
+    const pending = db.pendingSuspensions[suspensionIndex];
+    const untilMs = Date.parse(pending?.untilAt || 0);
+    if (Number.isFinite(untilMs) && untilMs > Date.now()) {
+      bucket.suspension = {
+        startedAt: String(pending?.startedAt || new Date().toISOString()).trim(),
+        untilAt: String(pending?.untilAt || '').trim(),
+        reason: String(pending?.reason || 'an admin decision').trim() || 'an admin decision',
+        durationLabel: String(pending?.durationLabel || 'a while').trim() || 'a while',
+        byEmail: String(pending?.byEmail || '').trim()
+      };
+    }
+    removePendingSuspension(db, email);
+  }
+  return bucket;
+}
+
 function touchUser(db, profile, userKey) {
   const key = String(userKey || profile?.sub || profile?.email || "").trim();
   if (!key) return null;
-  const email = normalizeEmail(profile?.email);
-  const existingKey = email ? findUserKeyByEmail(db, email) : "";
-  const existingBucket = existingKey && db.users[existingKey] && typeof db.users[existingKey] === "object" ? db.users[existingKey] : null;
-  const ownBucket = db.users[key] && typeof db.users[key] === "object" ? db.users[key] : null;
-  const bucket = ownBucket || existingBucket || {};
-  const createdAt = String(bucket.createdAt || "").trim() || new Date().toISOString();
-  const username = normalizeUsername(bucket.username || '');
-  const signupCompleted = !!(bucket.signupCompleted && username);
-  const googleName = String(profile?.name || bucket?.profile?.googleName || bucket?.profile?.name || profile?.email || "").trim();
-  const merged = {
+  const bucket = db.users[key] && typeof db.users[key] === "object" ? db.users[key] : {};
+  db.users[key] = {
     ...bucket,
-    username,
-    signupCompleted,
-    signupCompletedAt: signupCompleted ? (String(bucket.signupCompletedAt || '').trim() || new Date().toISOString()) : null,
     profile: {
       sub: String(profile?.sub || bucket?.profile?.sub || "").trim(),
       email: String(profile?.email || bucket?.profile?.email || "").trim(),
-      name: String(username || googleName || profile?.email || "").trim(),
-      googleName,
+      name: String(profile?.name || bucket?.profile?.name || profile?.email || "").trim(),
       picture: String(profile?.picture || bucket?.profile?.picture || "").trim()
     },
-    createdAt,
-    updatedAt: new Date().toISOString(),
-    authProvider: 'google',
     lastSeenAt: new Date().toISOString(),
     cloudSaves: Array.isArray(bucket.cloudSaves) ? bucket.cloudSaves : [],
     notifications: Array.isArray(bucket.notifications) ? bucket.notifications : [],
@@ -701,9 +752,7 @@ function touchUser(db, profile, userKey) {
     suspension: bucket.suspension && typeof bucket.suspension === 'object' ? bucket.suspension : null,
     securityStrikes: Math.max(0, Number(bucket.securityStrikes || 0))
   };
-  db.users[key] = merged;
-  if (existingKey && existingKey !== key) delete db.users[existingKey];
-  applyPendingModeratorInvite(db, profile, db.users[key]);
+  applyPendingAccountState(db, db.users[key], profile);
   db.users[key].membership = getUserMembership(db.users[key], profile);
   return db.users[key];
 }
@@ -728,45 +777,6 @@ function findUserKeyByEmail(db, email) {
   const wanted = normalizeEmail(email);
   if (!wanted) return "";
   return Object.keys(db.users || {}).find((key) => normalizeEmail(db.users?.[key]?.profile?.email) === wanted) || "";
-}
-
-function getPendingModeratorInvite(db, email) {
-  const wanted = normalizeEmail(email);
-  if (!wanted) return null;
-  if (!Array.isArray(db.pendingModeratorInvites)) db.pendingModeratorInvites = [];
-  return db.pendingModeratorInvites.find(item => normalizeEmail(item?.email) === wanted) || null;
-}
-
-function listPendingModeratorInvites(db) {
-  if (!Array.isArray(db.pendingModeratorInvites)) db.pendingModeratorInvites = [];
-  return db.pendingModeratorInvites
-    .map(item => ({
-      email: String(item?.email || '').trim(),
-      createdAt: String(item?.createdAt || '').trim() || null,
-      updatedAt: String(item?.updatedAt || '').trim() || null,
-      invitedByEmail: String(item?.invitedByEmail || '').trim() || null,
-      invitedByName: String(item?.invitedByName || '').trim() || null,
-      status: String(item?.status || 'pending-signin').trim() || 'pending-signin'
-    }))
-    .filter(item => item.email)
-    .sort((a,b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
-}
-
-function applyPendingModeratorInvite(db, profile, bucket) {
-  const email = normalizeEmail(profile?.email || bucket?.profile?.email);
-  if (!email) return false;
-  const invite = getPendingModeratorInvite(db, email);
-  if (!invite) return false;
-  bucket.role = 'moderator';
-  bucket.membership = getUserMembership({ ...bucket, role: 'moderator' }, bucket.profile || profile);
-  bucket.suspension = null;
-  db.pendingModeratorInvites = (Array.isArray(db.pendingModeratorInvites) ? db.pendingModeratorInvites : []).filter(item => normalizeEmail(item?.email) !== email);
-  pushNotification(db, { email }, {
-    kind: 'Moderator',
-    title: 'Moderator access granted',
-    message: 'Your approved Gmail now has moderator access on sign-in.'
-  });
-  return true;
 }
 
 function pushNotification(db, target, payload) {
@@ -1041,11 +1051,10 @@ app.post("/api/auth/google", async (req, res) => {
     const profile = pickProfile(claims);
     const db = await readDb();
     const userKey = userKeyFromClaims(claims);
-    const hadUserBefore = !!findUserKeyByEmail(db, profile?.email);
     const bucket = touchUser(db, profile, userKey);
     assertNotSuspended(bucket, profile);
     await writeDb(db);
-    res.json({ ok: true, profile: bucket?.profile || profile, createdUser: !hadUserBefore, isAdmin: isAdminProfile(profile), isModerator: isModeratorBucket(bucket), role: getRoleForBucket(bucket, profile), username: String(bucket?.username || '').trim(), signupCompleted: isSignupComplete(bucket), needsSignup: !isSignupComplete(bucket), onlineCount: getOnlineUsers(db).length, membership: bucket?.membership || getUserMembership(null, profile), suspension: suspensionPayload(bucket) });
+    res.json({ ok: true, profile, isAdmin: isAdminProfile(profile), isModerator: isModeratorBucket(bucket), role: getRoleForBucket(bucket, profile), onlineCount: getOnlineUsers(db).length, membership: bucket?.membership || getUserMembership(null, profile), suspension: suspensionPayload(bucket) });
   } catch (error) {
     res.status(error.status || 401).json({ ok: false, error: error?.message || "Google sign-in failed." });
   }
@@ -1056,30 +1065,7 @@ app.get("/api/auth/me", requireGoogleUser, async (req, res) => {
   const bucket = touchUser(db, req.stepperUser, userKeyFromClaims(req.stepperClaims));
   assertNotSuspended(bucket, req.stepperUser);
   await writeDb(db);
-  res.json({ ok: true, profile: bucket?.profile || req.stepperUser, isAdmin: isAdminProfile(req.stepperUser), isModerator: isModeratorBucket(bucket), role: getRoleForBucket(bucket, req.stepperUser), username: String(bucket?.username || '').trim(), signupCompleted: isSignupComplete(bucket), needsSignup: !isSignupComplete(bucket), onlineCount: getOnlineUsers(db).length, membership: bucket?.membership || getUserMembership(null, req.stepperUser), suspension: suspensionPayload(bucket) });
-});
-
-
-app.post("/api/auth/signup", requireGoogleUser, async (req, res) => {
-  const username = normalizeUsername(req.body?.username);
-  const confirmUsername = normalizeUsername(req.body?.confirmUsername);
-  if (username !== confirmUsername) return res.status(400).json({ ok:false, error:'Usernames must match exactly.' });
-  if (!isValidUsername(username)) return res.status(400).json({ ok:false, error:'Username must be at least 6 characters, letters/numbers only, and include at least 1 number.' });
-  const db = await readDb();
-  const key = userKeyFromClaims(req.stepperClaims);
-  const bucket = touchUser(db, req.stepperUser, key);
-  if (isSignupComplete(bucket)) return res.status(409).json({ ok:false, error:'This username is locked and cannot be changed.' });
-  const existingKey = findUserKeyByUsername(db, username);
-  if (existingKey && existingKey !== key) return res.status(409).json({ ok:false, error:'That username is already taken.' });
-  bucket.username = username;
-  bucket.signupCompleted = true;
-  bucket.signupCompletedAt = new Date().toISOString();
-  if (!bucket.profile || typeof bucket.profile !== 'object') bucket.profile = {};
-  bucket.profile.name = username;
-  if (!String(bucket.profile.googleName || '').trim()) bucket.profile.googleName = String(req.stepperUser?.name || req.stepperUser?.email || '').trim();
-  db.users[key] = bucket;
-  await writeDb(db);
-  res.json({ ok:true, username, signupCompleted:true, profile: bucket.profile, isAdmin: isAdminProfile(req.stepperUser), isModerator: isModeratorBucket(bucket), role: getRoleForBucket(bucket, req.stepperUser), membership: bucket?.membership || getUserMembership(bucket, req.stepperUser), suspension: suspensionPayload(bucket) });
+  res.json({ ok: true, profile: req.stepperUser, isAdmin: isAdminProfile(req.stepperUser), isModerator: isModeratorBucket(bucket), role: getRoleForBucket(bucket, req.stepperUser), onlineCount: getOnlineUsers(db).length, membership: bucket?.membership || getUserMembership(null, req.stepperUser), suspension: suspensionPayload(bucket) });
 });
 
 app.get("/api/presence", async (_req, res) => {
@@ -1088,7 +1074,7 @@ app.get("/api/presence", async (_req, res) => {
   res.json({ ok: true, onlineCount: onlineUsers.length, members: onlineUsers });
 });
 
-app.post("/api/presence/heartbeat", requireCompletedGoogleUser, async (req, res) => {
+app.post("/api/presence/heartbeat", requireGoogleUser, async (req, res) => {
   const db = await readDb();
   touchUser(db, req.stepperUser, userKeyFromClaims(req.stepperClaims));
   await writeDb(db);
@@ -1097,7 +1083,7 @@ app.post("/api/presence/heartbeat", requireCompletedGoogleUser, async (req, res)
   res.json({ ok: true, onlineCount: onlineUsers.length, members: onlineUsers, isAdmin: isAdminProfile(req.stepperUser), isModerator: isModeratorBucket(bucket), role: getRoleForBucket(bucket, req.stepperUser), suspension: suspensionPayload(bucket) });
 });
 
-app.get("/api/cloud-saves", requireCompletedGoogleUser, async (req, res) => {
+app.get("/api/cloud-saves", requireGoogleUser, async (req, res) => {
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);
   touchUser(db, req.stepperUser, key);
@@ -1106,7 +1092,7 @@ app.get("/api/cloud-saves", requireCompletedGoogleUser, async (req, res) => {
   res.json({ ok: true, items: bucket.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0)) });
 });
 
-app.post("/api/cloud-saves/upsert", requireCompletedGoogleUser, async (req, res) => {
+app.post("/api/cloud-saves/upsert", requireGoogleUser, async (req, res) => {
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);
   touchUser(db, req.stepperUser, key);
@@ -1124,7 +1110,7 @@ app.post("/api/cloud-saves/upsert", requireCompletedGoogleUser, async (req, res)
   res.json({ ok: true, item: entry, registryItem, items: db.users[key].cloudSaves });
 });
 
-app.delete("/api/cloud-saves/:id", requireCompletedGoogleUser, async (req, res) => {
+app.delete("/api/cloud-saves/:id", requireGoogleUser, async (req, res) => {
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);
   touchUser(db, req.stepperUser, key);
@@ -1134,7 +1120,7 @@ app.delete("/api/cloud-saves/:id", requireCompletedGoogleUser, async (req, res) 
   res.json({ ok: true, deletedId: String(req.params.id || "").trim() });
 });
 
-app.post("/api/submissions/request", requireCompletedGoogleUser, async (req, res) => {
+app.post("/api/submissions/request", requireGoogleUser, async (req, res) => {
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);
   touchUser(db, req.stepperUser, key);
@@ -1163,7 +1149,7 @@ app.post("/api/submissions/request", requireCompletedGoogleUser, async (req, res
   res.json({ ok: true, submission });
 });
 
-app.get("/api/notifications", requireCompletedGoogleUser, async (req, res) => {
+app.get("/api/notifications", requireGoogleUser, async (req, res) => {
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);
   touchUser(db, req.stepperUser, key);
@@ -1172,7 +1158,7 @@ app.get("/api/notifications", requireCompletedGoogleUser, async (req, res) => {
   res.json({ ok: true, items, unreadCount: items.filter(item => !item.readAt).length });
 });
 
-app.post("/api/notifications/mark-read", requireCompletedGoogleUser, async (req, res) => {
+app.post("/api/notifications/mark-read", requireGoogleUser, async (req, res) => {
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);
   touchUser(db, req.stepperUser, key);
@@ -1239,7 +1225,7 @@ app.get("/api/admin/submissions", requireAdmin, async (_req, res) => {
       if (ap !== bp) return bp - ap;
       return new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0);
     });
-  res.json({ ok: true, items });
+  res.json({ ok: true, items, pendingInvites: (Array.isArray(db.pendingModeratorInvites) ? db.pendingModeratorInvites.slice().sort((a,b)=> new Date(b.invitedAt||0)-new Date(a.invitedAt||0)) : []) });
 });
 
 app.post("/api/admin/submissions/:id/reject", requireAdmin, async (req, res) => {
@@ -1317,7 +1303,17 @@ app.delete("/api/admin/feature/:registryId", requireAdmin, async (req, res) => {
   res.json({ ok: true, registryId });
 });
 
-app.post('/api/moderator/apply', requireCompletedGoogleUser, async (req, res) => {
+
+app.get('/api/moderator/application-status', requireGoogleUser, async (req, res) => {
+  const db = await readDb();
+  const key = userKeyFromClaims(req.stepperClaims);
+  const bucket = touchUser(db, req.stepperUser, key);
+  const pending = (Array.isArray(db.moderatorApplications) ? db.moderatorApplications : []).find(item => String(item?.ownerKey || '').trim() === key && String(item?.status || '').trim() === 'pending');
+  await writeDb(db);
+  res.json({ ok: true, status: isAdminProfile(req.stepperUser) ? 'admin' : isModeratorBucket(bucket) ? 'approved' : pending ? 'pending' : 'none', pending: !!pending, isModerator: isModeratorBucket(bucket), isAdmin: isAdminProfile(req.stepperUser) });
+});
+
+app.post('/api/moderator/apply', requireGoogleUser, async (req, res) => {
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);
   const bucket = touchUser(db, req.stepperUser, key);
@@ -1352,43 +1348,43 @@ app.get('/api/admin/moderator-applications', requireAdmin, async (_req, res) => 
   const items = (Array.isArray(db.moderatorApplications) ? db.moderatorApplications : [])
     .filter(item => String(item?.status || 'pending') === 'pending')
     .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
-  res.json({ ok: true, items });
+  res.json({ ok: true, items, pending: (Array.isArray(db.pendingSuspensions) ? db.pendingSuspensions.slice().sort((a,b)=> new Date(b.startedAt||0)-new Date(a.startedAt||0)) : []).map(item => ({ userKey: '', email: String(item.email || '').trim(), name: String(item.name || item.email || '').trim(), suspension: { reason: String(item.reason || '').trim(), untilAt: String(item.untilAt || '').trim() || null, startedAt: String(item.startedAt || '').trim() || null, durationLabel: String(item.durationLabel || '').trim() || null, byEmail: String(item.byEmail || '').trim() || null, active: true }, pending: true })) });
 });
 
 app.post('/api/admin/moderator-applications/:id/approve', requireAdmin, async (req, res) => {
   const db = await readDb();
   const id = String(req.params.id || '').trim();
   const item = (Array.isArray(db.moderatorApplications) ? db.moderatorApplications : []).find(row => row && row.id === id);
-  if (!item) return res.status(404).json({ ok: false, error: 'Moderator application not found.' });
-  item.status = 'approved';
-  item.updatedAt = new Date().toISOString();
-  const bucket = db.users[item.ownerKey] && typeof db.users[item.ownerKey] === 'object' ? db.users[item.ownerKey] : { profile: { email: item.ownerEmail, name: item.ownerName, picture: item.ownerPicture } };
+  if (!item) return res.status(404).json({ ok: false, error: 'Moderator request not found.' });
+  const bucket = db.users[item.ownerKey] && typeof db.users[item.ownerKey] === 'object' ? db.users[item.ownerKey] : null;
+  if (!bucket) return res.status(404).json({ ok: false, error: 'User account no longer exists.' });
   bucket.role = 'moderator';
   bucket.membership = getUserMembership({ ...bucket, role: 'moderator' }, bucket.profile);
   db.users[item.ownerKey] = { ...bucket, membership: getUserMembership({ ...bucket, role: 'moderator' }, bucket.profile), role: 'moderator' };
+  db.moderatorApplications = (Array.isArray(db.moderatorApplications) ? db.moderatorApplications : []).filter(row => row && row.id !== id);
+  removePendingModeratorInvite(db, bucket.profile?.email);
   pushNotification(db, { userKey: item.ownerKey, email: item.ownerEmail }, {
     kind: 'Moderator',
     title: 'Moderator request approved',
     message: 'You now have moderator access and the premium helper perks, without the Admin tab.'
   });
   await writeDb(db);
-  res.json({ ok: true, item, user: db.users[item.ownerKey] });
+  res.json({ ok: true });
 });
 
 app.post('/api/admin/moderator-applications/:id/decline', requireAdmin, async (req, res) => {
   const db = await readDb();
   const id = String(req.params.id || '').trim();
   const item = (Array.isArray(db.moderatorApplications) ? db.moderatorApplications : []).find(row => row && row.id === id);
-  if (!item) return res.status(404).json({ ok: false, error: 'Moderator application not found.' });
-  item.status = 'declined';
-  item.updatedAt = new Date().toISOString();
+  if (!item) return res.status(404).json({ ok: false, error: 'Moderator request not found.' });
+  db.moderatorApplications = (Array.isArray(db.moderatorApplications) ? db.moderatorApplications : []).filter(row => row && row.id !== id);
   pushNotification(db, { userKey: item.ownerKey, email: item.ownerEmail }, {
     kind: 'Moderator',
     title: 'Moderator request declined',
     message: 'The admin declined your moderator request this time.'
   });
   await writeDb(db);
-  res.json({ ok: true, item });
+  res.json({ ok: true });
 });
 
 
@@ -1406,45 +1402,37 @@ app.get('/api/admin/moderators', requireAdmin, async (_req, res) => {
     };
   }).filter(item => item.role === 'moderator').sort((a, b) => a.name.localeCompare(b.name));
   await writeDb(db);
-  res.json({ ok: true, items, pendingInvites: listPendingModeratorInvites(db) });
+  res.json({ ok: true, items });
 });
 
 app.post('/api/admin/moderators/add', requireAdmin, async (req, res) => {
   const email = normalizeEmail(req.body?.email);
   if (!email) return res.status(400).json({ ok: false, error: 'Enter a Google email address.' });
-  if (email === adminEmail) return res.status(400).json({ ok: false, error: 'Admin already has admin access.' });
+  if (email === adminEmail) return res.status(400).json({ ok: false, error: 'That Google account is already the admin.' });
   const db = await readDb();
   const userKey = findUserKeyByEmail(db, email);
   const bucket = userKey && db.users[userKey] && typeof db.users[userKey] === 'object' ? db.users[userKey] : null;
-  if (!Array.isArray(db.pendingModeratorInvites)) db.pendingModeratorInvites = [];
-  const existingInvite = getPendingModeratorInvite(db, email);
   if (!bucket) {
-    const now = new Date().toISOString();
-    const invite = existingInvite || {
+    const invite = upsertPendingModeratorInvite(db, {
       email,
-      createdAt: now,
-      invitedByEmail: String(req.stepperUser?.email || '').trim(),
-      invitedByName: String(req.stepperUser?.name || req.stepperUser?.email || 'Admin').trim(),
-      status: 'pending-signin'
-    };
-    invite.updatedAt = now;
-    invite.status = 'pending-signin';
-    if (!existingInvite) db.pendingModeratorInvites.unshift(invite);
+      name: String(req.body?.name || email).trim(),
+      invitedBy: req.stepperUser,
+      note: 'Admin granted moderator access before first sign-in.'
+    });
     await writeDb(db);
-    return res.json({ ok: true, invited: true, pending: true, item: invite, pendingInvites: listPendingModeratorInvites(db) });
+    return res.json({ ok: true, pending: true, item: { userKey: '', email, name: String(invite?.name || email).trim(), role: 'moderator-pending' } });
   }
   bucket.role = 'moderator';
   bucket.membership = getUserMembership({ ...bucket, role: 'moderator' }, bucket.profile);
-  bucket.suspension = null;
   db.users[userKey] = { ...bucket, role: 'moderator', membership: bucket.membership };
-  db.pendingModeratorInvites = db.pendingModeratorInvites.filter(item => normalizeEmail(item?.email) !== email);
+  removePendingModeratorInvite(db, email);
   pushNotification(db, { userKey, email }, {
     kind: 'Moderator',
     title: 'Moderator access granted',
     message: 'Admin added moderator access to your account.'
   });
   await writeDb(db);
-  res.json({ ok: true, item: { userKey, email, name: String(bucket.profile?.name || email).trim(), role: 'moderator' }, pendingInvites: listPendingModeratorInvites(db) });
+  res.json({ ok: true, item: { userKey, email, name: String(bucket.profile?.name || email).trim(), role: 'moderator' } });
 });
 
 app.post('/api/admin/moderators/:userKey/remove', requireAdmin, async (req, res) => {
@@ -1463,17 +1451,18 @@ app.post('/api/admin/moderators/:userKey/remove', requireAdmin, async (req, res)
     message: `You were removed as moderator because: ${note || 'No admin reason was supplied.'}`
   });
   await writeDb(db);
-  res.json({ ok: true, pendingInvites: listPendingModeratorInvites(db) });
+  res.json({ ok: true });
 });
 
-app.post('/api/admin/moderators/invites/remove', requireAdmin, async (req, res) => {
+
+app.post('/api/admin/moderators/remove-by-email', requireAdmin, async (req, res) => {
   const email = normalizeEmail(req.body?.email);
   if (!email) return res.status(400).json({ ok: false, error: 'Enter a Google email address.' });
   const db = await readDb();
-  const before = Array.isArray(db.pendingModeratorInvites) ? db.pendingModeratorInvites.length : 0;
-  db.pendingModeratorInvites = (Array.isArray(db.pendingModeratorInvites) ? db.pendingModeratorInvites : []).filter(item => normalizeEmail(item?.email) !== email);
+  const removed = removePendingModeratorInvite(db, email);
+  if (!removed) return res.status(404).json({ ok: false, error: 'Pending moderator invite not found.' });
   await writeDb(db);
-  res.json({ ok: true, removed: before !== db.pendingModeratorInvites.length, pendingInvites: listPendingModeratorInvites(db) });
+  res.json({ ok: true, email });
 });
 
 app.get('/api/admin/suspensions', requireAdmin, async (_req, res) => {
@@ -1503,8 +1492,20 @@ app.post('/api/admin/suspend', requireAdmin, async (req, res) => {
   const db = await readDb();
   const userKey = findUserKeyByEmail(db, email);
   const bucket = userKey && db.users[userKey] && typeof db.users[userKey] === 'object' ? db.users[userKey] : null;
-  if (!bucket) return res.status(404).json({ ok: false, error: 'That Google account has not signed into the site yet.' });
   const untilAt = new Date(Date.now() + durationMs).toISOString();
+  if (!bucket) {
+    const pending = upsertPendingSuspension(db, {
+      email,
+      reason: reason || 'an admin decision',
+      durationLabel,
+      startedAt: new Date().toISOString(),
+      untilAt,
+      byEmail: String(req.stepperUser?.email || '').trim(),
+      byName: String(req.stepperUser?.name || req.stepperUser?.email || '').trim()
+    });
+    await writeDb(db);
+    return res.json({ ok: true, pending: true, item: { userKey: '', email, name: email, suspension: suspensionPayload({ suspension: pending }) } });
+  }
   bucket.suspension = {
     startedAt: new Date().toISOString(),
     untilAt,
@@ -1513,6 +1514,7 @@ app.post('/api/admin/suspend', requireAdmin, async (req, res) => {
     byEmail: String(req.stepperUser?.email || '').trim()
   };
   db.users[userKey] = bucket;
+  removePendingSuspension(db, email);
   pushNotification(db, { userKey, email }, {
     kind: 'Suspension',
     title: 'You were barred',
@@ -1520,6 +1522,17 @@ app.post('/api/admin/suspend', requireAdmin, async (req, res) => {
   });
   await writeDb(db);
   res.json({ ok: true, item: { userKey, email, name: String(bucket.profile?.name || email).trim(), suspension: suspensionPayload(bucket) } });
+});
+
+
+app.post('/api/admin/suspensions/remove-by-email', requireAdmin, async (req, res) => {
+  const email = normalizeEmail(req.body?.email);
+  if (!email) return res.status(400).json({ ok: false, error: 'Enter a Google email address.' });
+  const db = await readDb();
+  const removed = removePendingSuspension(db, email);
+  if (!removed) return res.status(404).json({ ok: false, error: 'Pending bar not found.' });
+  await writeDb(db);
+  res.json({ ok: true, email });
 });
 
 app.post('/api/admin/suspensions/:userKey/lift', requireAdmin, async (req, res) => {
@@ -1573,7 +1586,7 @@ app.get('/api/admin/security-alerts', requireAdmin, async (_req, res) => {
   res.json({ ok: true, items });
 });
 
-app.post('/api/security-alerts/strike', requireCompletedGoogleUser, async (req, res) => {
+app.post('/api/security-alerts/strike', requireGoogleUser, async (req, res) => {
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);
   const bucket = touchUser(db, req.stepperUser, key);
@@ -1657,7 +1670,7 @@ app.post('/api/moderator/submissions/:id/approve', requireModerator, async (req,
   res.json({ ok: true, item });
 });
 
-app.get('/api/subscription/status', requireCompletedGoogleUser, async (req, res) => {
+app.get('/api/subscription/status', requireGoogleUser, async (req, res) => {
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);
   const bucket = touchUser(db, req.stepperUser, key);
@@ -1666,7 +1679,7 @@ app.get('/api/subscription/status', requireCompletedGoogleUser, async (req, res)
   res.json({ ok: true, ...membership, role: getRoleForBucket(bucket, req.stepperUser), isModerator: isModeratorBucket(bucket), stripeEnabled: !!stripeSecretKey, stripePublishableKey, suspension: suspensionPayload(bucket) });
 });
 
-app.post('/api/subscription/create-checkout-session', requireCompletedGoogleUser, async (req, res) => {
+app.post('/api/subscription/create-checkout-session', requireGoogleUser, async (req, res) => {
   try {
     const plan = String(req.body?.plan || 'monthly').trim().toLowerCase() === 'yearly' ? 'yearly' : 'monthly';
     const db = await readDb();
@@ -1707,7 +1720,7 @@ app.post('/api/subscription/create-checkout-session', requireCompletedGoogleUser
   }
 });
 
-app.post('/api/subscription/confirm', requireCompletedGoogleUser, async (req, res) => {
+app.post('/api/subscription/confirm', requireGoogleUser, async (req, res) => {
   try {
     const sessionId = String(req.body?.sessionId || '').trim();
     if (!sessionId) return res.status(400).json({ ok:false, error:'Missing sessionId.' });
@@ -1742,7 +1755,7 @@ app.get('/api/glossary/steps', async (_req, res) => {
   res.json({ ok:true, items });
 });
 
-app.post('/api/glossary/request', requireCompletedGoogleUser, async (req, res) => {
+app.post('/api/glossary/request', requireGoogleUser, async (req, res) => {
   const raw = req.body?.step && typeof req.body.step === 'object' ? req.body.step : {};
   const name = String(raw.name || '').trim();
   const description = String(raw.description || raw.desc || '').trim();
@@ -1844,7 +1857,7 @@ app.delete('/api/admin/site-memory/:id', requireAdmin, async (req, res) => {
   res.json({ ok:true, items: db.siteMemory });
 });
 
-app.post('/api/ai/dance-tools', requireCompletedGoogleUser, async (req, res) => {
+app.post('/api/ai/dance-tools', requireGoogleUser, async (req, res) => {
   const requestedMode = String(req.body?.mode || 'judge').trim().toLowerCase();
   const mode = requestedMode === 'add' ? 'add' : (requestedMode === 'counts' ? 'counts' : 'judge');
   const prompt = String(req.body?.prompt || '').trim();
@@ -1887,7 +1900,7 @@ ${approved.map(item => `- ${item.name} [${item.foot}] ${item.counts}: ${item.des
   }
 });
 
-app.post('/api/chatbot/help', requireCompletedGoogleUser, async (req, res) => {
+app.post('/api/chatbot/help', requireGoogleUser, async (req, res) => {
   const prompt = String(req.body?.prompt || '').trim();
   const context = req.body?.context && typeof req.body.context === 'object' ? req.body.context : {};
   const history = Array.isArray(req.body?.history) ? req.body.history : [];

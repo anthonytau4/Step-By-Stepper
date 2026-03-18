@@ -78,7 +78,6 @@
       sync: false
     }
   };
-  window.__stepperGoogleAdminState = state;
 
   function normalizeEmail(value){
     return String(value || '').trim().toLowerCase();
@@ -1987,7 +1986,7 @@
             <div class="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <div class="text-lg font-black tracking-tight">Apply for moderator</div>
-                <p class="mt-2 text-sm ${theme.subtle}">Sign in with Google first. Your Gmail is added to the site database on first sign-in, then you can send the moderator request from this same page.</p>
+                <p class="mt-2 text-sm ${theme.subtle}">Must have a Google account to do so. Sign in first, then send the moderator request from this same page.</p>
               </div>
               <button type="button" data-stepper-action="apply-moderator-needs-signin" class="stepper-google-cta ${theme.button}">Apply for moderator</button>
             </div>
@@ -1995,7 +1994,7 @@
           <div class="mx-auto max-w-2xl rounded-3xl border p-6 sm:p-8 ${theme.soft}">
             <div class="text-center">
               <div class="text-2xl font-black tracking-tight">Sign in with Google</div>
-              <p class="mt-3 text-sm leading-relaxed ${theme.subtle}">Use your Google account to sign in. Your Gmail is added to the site database on first sign-in so cloud saves, moderator requests, and staff actions have a real account bucket to attach to. The admin tab appears only for <strong>${escapeHtml(ADMIN_EMAIL)}</strong>.</p>
+              <p class="mt-3 text-sm leading-relaxed ${theme.subtle}">Use your Google account to sign in. The admin tab appears only for <strong>${escapeHtml(ADMIN_EMAIL)}</strong>.</p>
             </div>
             <div id="stepper-google-button-slot" class="stepper-google-google-btn mt-6 flex justify-center"></div>
           </div>
@@ -2268,7 +2267,7 @@
               <div class="flex flex-wrap gap-3"><button type="button" class="stepper-google-cta ${theme.button}" data-action="approve-modapp">Approve moderator</button><button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="decline-modapp">Decline</button></div>
             </div>
           </article>`).join('') : `<p class="text-sm ${theme.subtle}">No pending moderator applications.</p>`}</div></div>
-        <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-active-moderators="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Moderator management</div><p class="mt-1 text-sm ${theme.subtle}">Add moderators by Google email, approve applications, or remove moderators immediately.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.activeModerators || []).length))} active</span></div><div class="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]"><input data-add-moderator-email="1" class="stepper-google-input" placeholder="person@gmail.com" /><button type="button" class="stepper-google-cta ${theme.button}" data-action="add-moderator-email">Add moderator from Gmail</button></div><div class="mt-4 grid gap-3">${(state.activeModerators || []).length ? state.activeModerators.map(item => `
+        <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-active-moderators="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Moderator management</div><p class="mt-1 text-sm ${theme.subtle}">Add moderators by Google email, approve applications, or remove moderators immediately.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String(((state.activeModerators || []).length + (state.pendingModeratorInvites || []).length)))} saved</span></div><div class="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]"><input data-add-moderator-email="1" class="stepper-google-input" placeholder="person@gmail.com" /><button type="button" class="stepper-google-cta ${theme.button}" data-action="add-moderator-email">Add moderator from Gmail</button></div><div class="mt-4 grid gap-3">${(state.activeModerators || []).length ? state.activeModerators.map(item => `
           <article class="rounded-2xl border p-4 ${theme.soft}" data-stepper-active-mod-key="${escapeHtml(item.userKey)}">
             <div class="flex flex-wrap items-center justify-between gap-3">
               <div><div class="text-base font-black">${escapeHtml(item.name || item.email || 'Moderator')}</div><p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.email || '')}</p></div>
@@ -2277,7 +2276,7 @@
             <div class="mt-4 ${theme.panel} rounded-2xl border p-4"><label class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Removal note</label><textarea data-remove-mod-note="1" class="stepper-google-input mt-3" rows="3" placeholder="Tell them why they were removed as moderator."></textarea></div>
             <div class="mt-4 flex flex-wrap gap-3"><button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="remove-moderator">Delete moderator</button></div>
           </article>`).join('') : `<p class="text-sm ${theme.subtle}">No active moderators yet.</p>`}</div></div>
-        <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-suspension-management="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Suspend persons</div><p class="mt-1 text-sm ${theme.subtle}">Enter a Google email to bar someone for a set time. Admins cannot be banned.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.suspensions || []).length))} barred</span></div><div class="mt-4 grid gap-3 sm:grid-cols-2"><input data-suspend-email="1" class="stepper-google-input" placeholder="person@gmail.com" /><select data-suspend-duration="1" class="stepper-google-input"><option value="300000">5 minutes</option><option value="1200000">20 minutes</option><option value="3600000">1 hour</option><option value="18000000">5 hours</option><option value="86400000">1 day</option><option value="259200000">3 days</option><option value="604800000">1 week</option><option value="1814400000">3 weeks</option><option value="2592000000">1 month</option><option value="5184000000">2 months</option><option value="31536000000">1 Year</option><option value="157680000000">5 years</option></select></div><div class="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]"><textarea data-suspend-reason="1" class="stepper-google-input" rows="3" placeholder="Reason for the bar"></textarea><button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="suspend-person">Bar account</button></div><div class="mt-4 grid gap-3">${(state.suspensions || []).length ? state.suspensions.map(item => `<article class="rounded-2xl border p-4 ${theme.soft}" data-stepper-suspension-key="${escapeHtml(item.userKey)}"><div class="flex flex-wrap items-center justify-between gap-3"><div><div class="text-base font-black">${escapeHtml(item.name || item.email || 'Member')}</div><p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.email || '')}</p><p class="mt-2 text-xs font-semibold ${theme.subtle}">${escapeHtml((item.suspension && item.suspension.durationLabel) || '')} • ${escapeHtml((item.suspension && item.suspension.reason) || '')}</p></div><button type="button" class="stepper-google-cta ${theme.button}" data-action="lift-suspension">Turn back on</button></div></article>`).join('') : `<p class="text-sm ${theme.subtle}">Nobody is currently barred.</p>`}</div></div>
+        <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-suspension-management="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Suspend persons</div><p class="mt-1 text-sm ${theme.subtle}">Enter a Google email to bar someone for a set time. Admins cannot be banned.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.suspensions || []).length))} barred</span></div><div class="mt-4 grid gap-3 sm:grid-cols-2"><input data-suspend-email="1" class="stepper-google-input" placeholder="person@gmail.com" /><select data-suspend-duration="1" class="stepper-google-input"><option value="300000">5 minutes</option><option value="1200000">20 minutes</option><option value="3600000">1 hour</option><option value="18000000">5 hours</option><option value="86400000">1 day</option><option value="259200000">3 days</option><option value="604800000">1 week</option><option value="1814400000">3 weeks</option><option value="2592000000">1 month</option><option value="5184000000">2 months</option><option value="31536000000">1 Year</option><option value="157680000000">5 years</option></select></div><div class="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]"><textarea data-suspend-reason="1" class="stepper-google-input" rows="3" placeholder="Reason for the bar"></textarea><button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="suspend-person">Bar account</button></div><div class="mt-4 grid gap-3">${(state.suspensions || []).length ? state.suspensions.map(item => `<article class="rounded-2xl border p-4 ${theme.soft}" data-stepper-suspension-key="${escapeHtml(item.userKey || '')}" data-stepper-suspension-email="${escapeHtml(item.email || '')}"><div class="flex flex-wrap items-center justify-between gap-3"><div><div class="text-base font-black">${escapeHtml(item.name || item.email || 'Member')}</div><p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.email || '')}</p><p class="mt-2 text-xs font-semibold ${theme.subtle}">${escapeHtml((item.suspension && item.suspension.durationLabel) || '')} • ${escapeHtml((item.suspension && item.suspension.reason) || '')}</p></div><button type="button" class="stepper-google-cta ${theme.button}" data-action="lift-suspension">${item.pending ? 'Delete pending bar' : 'Turn back on'}</button></div></article>`).join('') : `<p class="text-sm ${theme.subtle}">Nobody is currently barred.</p>`}</div></div>
         <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-security-alerts="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Security alerts</div><p class="mt-1 text-sm ${theme.subtle}">Client-side inspection warnings show here after 3 strikes. This is only a nuisance detector, not perfect protection.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.securityAlerts || []).length))} alerts</span></div><div class="mt-4 grid gap-3">${(state.securityAlerts || []).length ? state.securityAlerts.slice(0,20).map(item => `<article class="rounded-2xl border p-4 ${theme.soft}"><div class="flex flex-wrap items-center justify-between gap-3"><div><div class="text-base font-black">${escapeHtml(item.name || item.email || 'User')}</div><p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.email || '')}</p><p class="mt-2 text-xs font-semibold ${theme.subtle}">${escapeHtml(item.reason || '')} • ${escapeHtml(String(item.strikeCount || 0))} strikes</p></div></div>${item.detail ? `<p class="mt-3 text-sm ${theme.subtle}">${escapeHtml(item.detail)}</p>` : ''}</article>`).join('') : `<p class="text-sm ${theme.subtle}">No security alerts yet.</p>`}</div></div>
         ${cards}
 
@@ -2845,13 +2844,15 @@
   }
 
   async function refreshActiveModerators(){
-    if (!isAdminSession()) { state.activeModerators = []; return []; }
+    if (!isAdminSession()) { state.activeModerators = []; state.pendingModeratorInvites = []; return []; }
     try {
       const data = await authFetch('/api/admin/moderators');
       state.activeModerators = Array.isArray(data.items) ? data.items : [];
+      state.pendingModeratorInvites = Array.isArray(data.pendingInvites) ? data.pendingInvites : [];
       return state.activeModerators;
     } catch {
       state.activeModerators = [];
+      state.pendingModeratorInvites = [];
       return [];
     }
   }
@@ -2860,7 +2861,9 @@
     if (!isAdminSession()) { state.suspensions = []; return []; }
     try {
       const data = await authFetch('/api/admin/suspensions');
-      state.suspensions = Array.isArray(data.items) ? data.items : [];
+      const active = Array.isArray(data.items) ? data.items : [];
+      const pending = Array.isArray(data.pending) ? data.pending : [];
+      state.suspensions = [...active, ...pending];
       return state.suspensions;
     } catch {
       state.suspensions = [];
@@ -2895,9 +2898,13 @@
     }
   }
 
-  async function liftSuspension(userKey){
+  async function liftSuspension(userKey, email){
     try {
-      await authFetch(`/api/admin/suspensions/${encodeURIComponent(userKey)}/lift`, { method:'POST' });
+      if (userKey) {
+        await authFetch(`/api/admin/suspensions/${encodeURIComponent(userKey)}/lift`, { method:'POST' });
+      } else {
+        await authFetch('/api/admin/suspensions/remove-by-email', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ email }) });
+      }
       await refreshSuspensions();
       renderPages();
     } catch (error) {
@@ -2914,7 +2921,7 @@
       });
       await Promise.all([refreshActiveModerators(), refreshModeratorApplications()]);
       renderPages();
-      alert('Moderator added.');
+      alert('Moderator saved to the backend. If they have not signed in yet, the invite stays pending on disk until they do.');
     } catch (error) {
       alert(error.message || 'Could not add moderator.');
     }
@@ -2950,19 +2957,26 @@
   }
 
 
-  async function removeModeratorAccess(userKey, reason){
+  async function removeModeratorAccess(userKey, reason, email){
     const note = String(reason || '').trim();
-    if (!userKey) return;
-    if (!note) {
-      alert('Add a reason so the removed moderator can see why on next startup.');
-      return;
-    }
     try {
-      await authFetch(`/api/admin/moderators/${encodeURIComponent(userKey)}/remove`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: note })
-      });
+      if (userKey) {
+        if (!note) {
+          alert('Add a reason so the removed moderator can see why on next startup.');
+          return;
+        }
+        await authFetch(`/api/admin/moderators/${encodeURIComponent(userKey)}/remove`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: note })
+        });
+      } else {
+        await authFetch('/api/admin/moderators/remove-by-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email })
+        });
+      }
       await refreshActiveModerators().catch(() => []);
       renderPages();
     } catch (error) {
@@ -3382,156 +3396,4 @@ Newest user question: ${question}`;
     }).catch(() => {}).finally(() => { __stepperLiveQueueRefreshBusy = false; });
   }, LIVE_QUEUE_SYNC_INTERVAL_MS);
 
-
-  state.pendingModeratorInvites = Array.isArray(state.pendingModeratorInvites) ? state.pendingModeratorInvites : [];
-
-  function hasDangerousTypingFocus(){
-    const el = document.activeElement;
-    if (!el) return false;
-    const editable = el instanceof HTMLTextAreaElement
-      || el instanceof HTMLSelectElement
-      || (el instanceof HTMLInputElement && !['button','submit','reset','checkbox','radio','file','color','range'].includes(String(el.type || 'text').toLowerCase()))
-      || !!(el.closest && el.closest('[contenteditable="true"]'));
-    if (!editable) return false;
-    return !!(el.closest && el.closest('#' + ADMIN_PAGE_ID + ', #' + MODERATOR_PAGE_ID + ', #' + SIGNIN_PAGE_ID + ', #' + SUBSCRIPTION_PAGE_ID));
-  }
-
-  let __stepperPendingDangerRender = false;
-  const __dangerRenderPages = renderPages;
-  renderPages = function(){
-    if (hasDangerousTypingFocus()) {
-      __stepperPendingDangerRender = true;
-      return;
-    }
-    __stepperPendingDangerRender = false;
-    __dangerRenderPages();
-
-    const signinPage = document.getElementById(SIGNIN_PAGE_ID);
-    if (signinPage) {
-      const applyBtn = signinPage.querySelector('[data-stepper-action="apply-moderator"]');
-      const applyCard = applyBtn ? applyBtn.closest('.rounded-3xl.border') : null;
-      if (applyCard) {
-        const title = applyCard.querySelector('.text-lg.font-black.tracking-tight');
-        const subtle = applyCard.querySelector('p');
-        if (title) title.textContent = 'Staff access';
-        if (subtle) subtle.textContent = 'Moderator access is invite-only now. Admin can approve a Gmail in the database first, and it will unlock automatically on sign-in.';
-        if (applyBtn.parentElement) applyBtn.parentElement.innerHTML = '<span class="stepper-google-pill ' + themeClasses().orange + '">Invite only</span>';
-      }
-    }
-
-    const adminPage = document.getElementById(ADMIN_PAGE_ID);
-    if (adminPage) {
-      const activeSection = adminPage.querySelector('[data-stepper-active-moderators="1"]');
-      if (activeSection) {
-        let wrap = activeSection.querySelector('[data-stepper-pending-invites="1"]');
-        const theme = themeClasses();
-        if (!wrap) {
-          wrap = document.createElement('div');
-          wrap.setAttribute('data-stepper-pending-invites', '1');
-          wrap.className = 'mt-4 rounded-2xl border p-4 ' + theme.soft;
-          activeSection.appendChild(wrap);
-        }
-        const pending = Array.isArray(state.pendingModeratorInvites) ? state.pendingModeratorInvites : [];
-        wrap.innerHTML = `
-          <div class="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div class="text-sm font-black uppercase tracking-widest">Invite-only roadblock</div>
-              <p class="mt-1 text-sm ${theme.subtle}">If the Gmail has never signed in yet, the invite stays in the database and auto-activates later.</p>
-            </div>
-            <span class="stepper-google-pill ${theme.orange}">${escapeHtml(String(pending.length))} waiting</span>
-          </div>
-          <div class="mt-4 grid gap-3">${pending.length ? pending.map(item => `
-            <article class="rounded-2xl border p-4 ${theme.panel}" data-stepper-pending-invite-email="${escapeHtml(item.email || '')}">
-              <div class="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <div class="text-base font-black">${escapeHtml(item.email || '')}</div>
-                  <p class="mt-1 text-sm ${theme.subtle}">Waiting for first Google sign-in</p>
-                </div>
-                <button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="remove-pending-invite">Delete invite</button>
-              </div>
-            </article>`).join('') : `<p class="text-sm ${theme.subtle}">No pending Gmail invites.</p>`}
-          </div>`;
-        wrap.querySelectorAll('[data-stepper-pending-invite-email]').forEach(card => {
-          const email = card.getAttribute('data-stepper-pending-invite-email');
-          const btn = card.querySelector('[data-action="remove-pending-invite"]');
-          if (btn) btn.addEventListener('click', () => removePendingModeratorInvite(email));
-        });
-      }
-    }
-  };
-
-  window.addEventListener('focusin', () => {
-    if (!__stepperPendingDangerRender) return;
-    clearTimeout(window.__stepperPendingDangerRenderTimer);
-    window.__stepperPendingDangerRenderTimer = setTimeout(() => {
-      if (!hasDangerousTypingFocus() && __stepperPendingDangerRender) renderPages();
-    }, 250);
-  }, true);
-
-  const __dangerOpenPage = openPage;
-  openPage = function(pageName){
-    const result = __dangerOpenPage(pageName);
-    if (state.ui.mainEl) state.ui.mainEl.style.display = state.activePage ? 'none' : '';
-    if (state.ui.footerWrap) state.ui.footerWrap.style.display = state.activePage ? 'none' : '';
-    return result;
-  };
-
-  const __dangerClosePages = closePages;
-  closePages = function(){
-    const result = __dangerClosePages();
-    if (state.ui.mainEl) state.ui.mainEl.style.display = '';
-    if (state.ui.footerWrap) state.ui.footerWrap.style.display = '';
-    return result;
-  };
-
-  async function removePendingModeratorInvite(email){
-    try {
-      const data = await authFetch('/api/admin/moderators/invites/remove', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email })
-      });
-      state.pendingModeratorInvites = Array.isArray(data && data.pendingInvites) ? data.pendingInvites : [];
-      renderPages();
-    } catch (error) {
-      alert(error.message || 'Could not remove that pending invite.');
-    }
-  }
-
-  const __dangerRefreshActiveModerators = refreshActiveModerators;
-  refreshActiveModerators = async function(){
-    if (!isAdminSession()) { state.activeModerators = []; state.pendingModeratorInvites = []; return []; }
-    try {
-      const data = await authFetch('/api/admin/moderators');
-      state.activeModerators = Array.isArray(data.items) ? data.items : [];
-      state.pendingModeratorInvites = Array.isArray(data.pendingInvites) ? data.pendingInvites : [];
-      return state.activeModerators;
-    } catch (error) {
-      state.pendingModeratorInvites = [];
-      return __dangerRefreshActiveModerators();
-    }
-  };
-
-  addModeratorByEmail = async function(email){
-    try {
-      const data = await authFetch('/api/admin/moderators/add', {
-        method:'POST',
-        headers:{ 'Content-Type':'application/json' },
-        body: JSON.stringify({ email })
-      });
-      state.pendingModeratorInvites = Array.isArray(data && data.pendingInvites) ? data.pendingInvites : state.pendingModeratorInvites;
-      await Promise.all([refreshActiveModerators(), refreshModeratorApplications()]);
-      renderPages();
-      alert(data && data.pending ? 'Moderator invite saved to the database. It activates when that Gmail signs in.' : 'Moderator added.');
-    } catch (error) {
-      alert(error.message || 'Could not add moderator.');
-    }
-  };
-
-  applyForModerator = async function(){
-    alert('Moderator access is invite-only now. Admin needs to add your Gmail in the database first.');
-    return false;
-  };
-
 })();
-
