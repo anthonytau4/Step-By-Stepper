@@ -2373,6 +2373,18 @@
     return 'You are the premium Step By Stepper site helper. Reply like a natural AI assistant, not a canned bot. Stay focused on this site only. Give specific, practical guidance using the real tabs and buttons: Build, Sheet, Sign In, My Saved Dances, Featured Choreo, Subscription, Admin, Moderator, Save Changes, Send to host for featuring, Upload to site, and Apply for moderator. Mention cloud saving, moderator rules, badges, and premium perks when relevant. Keep answers helpful and concrete.';
   }
 
+  function buildCurrentDancePreviewText(appData){
+    const sections = Array.isArray(appData && appData.sections) ? appData.sections : [];
+    const lines = [];
+    sections.slice(0, 4).forEach((section, index) => {
+      const heading = String(section && (section.heading || section.title || section.name) || `Section ${index + 1}`).trim() || `Section ${index + 1}`;
+      const steps = Array.isArray(section && section.steps) ? section.steps : [];
+      const preview = steps.slice(0, 3).map(step => String(step && (step.text || step.label || step.description || step.name) || '').trim()).filter(Boolean).join(' | ');
+      lines.push(`${heading}: ${preview || `${steps.length} steps`}`);
+    });
+    return lines.join('\n').trim();
+  }
+
   function buildAiHelperPrompt(question, payload){
     const historyText = (payload.history || []).map(message => `${message.role}: ${message.text}`).join('\n') || '(none)';
     return `Current tab: ${payload.context.currentTab}
@@ -2382,6 +2394,10 @@ Moderator: ${payload.context.isModerator ? 'yes' : 'no'}
 Premium: ${payload.context.isPremium ? 'yes' : 'no'}
 Online count: ${payload.context.onlineCount}
 Current dance title: ${payload.context.currentDanceTitle || 'none'}
+Current dance choreographer: ${payload.context.currentDanceChoreographer || 'none'}
+Current dance meta: counts=${payload.context.currentDanceCounts || '-'}, walls=${payload.context.currentDanceWalls || '-'}, level=${payload.context.currentDanceLevel || '-'}
+Current dance preview:
+${payload.context.currentDancePreview || '(none)'}
 Current dance has unsaved changes: ${payload.context.hasUnsavedChanges ? 'yes' : 'no'}
 Conversation so far:
 ${historyText}
@@ -2400,6 +2416,7 @@ Newest user question: ${question}`;
     const appData = readAppData();
     const payload = {
       prompt,
+      preferredModel: 'gemini',
       history: (state.chatMessages || []).slice(-8).map(message => ({ role: message.role, text: message.text })),
       context: {
         currentTab,
@@ -2409,6 +2426,11 @@ Newest user question: ${question}`;
         isPremium: isPremiumSession(),
         onlineCount: (state.presence && state.presence.onlineCount) || 0,
         currentDanceTitle: appData && appData.meta ? String(appData.meta.title || '').trim() : '',
+        currentDanceChoreographer: appData && appData.meta ? String(appData.meta.choreographer || '').trim() : '',
+        currentDanceCounts: appData && appData.meta ? String(appData.meta.counts || '').trim() : '',
+        currentDanceWalls: appData && appData.meta ? String(appData.meta.walls || '').trim() : '',
+        currentDanceLevel: appData && appData.meta ? String(appData.meta.level || '').trim() : '',
+        currentDancePreview: buildCurrentDancePreviewText(appData),
         hasUnsavedChanges: hasUnsavedChanges()
       }
     };
@@ -2437,7 +2459,8 @@ Newest user question: ${question}`;
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 system: buildAiHelperSystemPrompt(),
-                prompt: buildAiHelperPrompt(prompt, payload)
+                prompt: buildAiHelperPrompt(prompt, payload),
+                preferredModel: 'gemini'
               })
             });
             text = String((backup && (backup.text || backup.output_text)) || '').trim();

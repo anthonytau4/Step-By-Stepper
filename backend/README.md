@@ -10,7 +10,9 @@ Key env vars:
 - GOOGLE_CLIENT_ID
 - ADMIN_EMAIL
 - ALLOWED_ORIGIN
-- OPENAI_API_KEY (optional, used for AI-generated feature badge labels)
+- OPENAI_API_KEY (optional, used for helper + badge AI)
+- GEMINI_API_KEY (optional, helper fallback via Gemini 2.5 Flash)
+- GEMINI_MODEL (optional, defaults to gemini-2.5-flash)
 
 
 ## Premium subscriptions
@@ -19,3 +21,6 @@ Set `STRIPE_SECRET_KEY` on the backend and optionally `STRIPE_PUBLISHABLE_KEY`. 
 
 
 Use `https://step-by-stepper.onrender.com` as the default backend base in the frontend build unless you move the API to another hostname.
+
+
+The premium site helper now tries OpenAI first and Gemini 2.5 Flash as a backend fallback, while also feeding the helper current site context such as the active tab, current dance summary, featured choreo sample, queue counts, and moderator rules.

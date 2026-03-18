@@ -1,19 +1,11 @@
-Step by Stepper
+Google sign-in/admin patch updated. Added moderation requests, persistent notifications, featured-owner badge, and admin approval/rejection flow.
 
-Files to keep together after unzipping:
-- index.html
-- light-mode.mp3
-- dark-mode.mp3
-- tab-change.wav
-- ui-action.mp3
-- open-right-click.mp3
-- delete.mp3
 
-This build now includes:
-- a Google Sign In page
-- online member count
-- automatic signed-in dance syncing to the backend registry
-- an admin-only tab for Anthonytau4@gmail.com
-- admin featuring with Bronze / Silver / Gold badge choices
-- your Render service ID baked into the sign-in page for reference: srv-d6ss4295pdvs73e1iifg
-- the sign-in screen now keeps the backend URL controls tucked under an Advanced section instead of putting setup in your face
+Added in this build:
+- Subscription tab after Google sign-in
+- Premium monthly/yearly checkout hooks
+- Premium priority review in admin submissions
+- Premium-only AI site helper
+- Admin account automatically treated as premium
+
+Gemini helper support added in this build: set GEMINI_API_KEY on the backend to enable a Gemini 2.5 Flash fallback for the premium site helper.
