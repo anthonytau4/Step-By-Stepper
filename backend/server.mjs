@@ -768,23 +768,42 @@ function applyPendingAccountState(db, bucket, profile) {
 function touchUser(db, profile, userKey) {
   const key = String(userKey || profile?.sub || profile?.email || "").trim();
   if (!key) return null;
-  const bucket = db.users[key] && typeof db.users[key] === "object" ? db.users[key] : {};
+  const email = normalizeEmail(profile?.email);
+  const emailKey = email ? findUserKeyByEmail(db, email) : '';
+  const keyBucket = db.users[key] && typeof db.users[key] === "object" ? db.users[key] : null;
+  const emailBucket = emailKey && db.users[emailKey] && typeof db.users[emailKey] === "object" ? db.users[emailKey] : null;
+  const baseBucket = keyBucket || emailBucket || {};
+  const migratedBucket = keyBucket && emailBucket && emailKey !== key ? emailBucket : (!keyBucket && emailBucket && emailKey !== key ? emailBucket : null);
+  const mergedCloudSaves = [
+    ...(Array.isArray(baseBucket.cloudSaves) ? baseBucket.cloudSaves : []),
+    ...(Array.isArray(migratedBucket?.cloudSaves) ? migratedBucket.cloudSaves : [])
+  ];
+  const mergedNotifications = [
+    ...(Array.isArray(baseBucket.notifications) ? baseBucket.notifications : []),
+    ...(Array.isArray(migratedBucket?.notifications) ? migratedBucket.notifications : [])
+  ];
+  const mergedRole = isModeratorBucket(baseBucket) || isModeratorBucket(migratedBucket) ? 'moderator' : '';
+  const mergedSuspension = (baseBucket.suspension && typeof baseBucket.suspension === 'object')
+    ? baseBucket.suspension
+    : (migratedBucket?.suspension && typeof migratedBucket.suspension === 'object' ? migratedBucket.suspension : null);
   db.users[key] = {
-    ...bucket,
+    ...migratedBucket,
+    ...baseBucket,
     profile: {
-      sub: String(profile?.sub || bucket?.profile?.sub || "").trim(),
-      email: String(profile?.email || bucket?.profile?.email || "").trim(),
-      name: String(profile?.name || bucket?.profile?.name || profile?.email || "").trim(),
-      picture: String(profile?.picture || bucket?.profile?.picture || "").trim()
+      sub: String(profile?.sub || baseBucket?.profile?.sub || migratedBucket?.profile?.sub || "").trim(),
+      email: String(profile?.email || baseBucket?.profile?.email || migratedBucket?.profile?.email || "").trim(),
+      name: String(profile?.name || baseBucket?.profile?.name || migratedBucket?.profile?.name || profile?.email || "").trim(),
+      picture: String(profile?.picture || baseBucket?.profile?.picture || migratedBucket?.profile?.picture || "").trim()
     },
     lastSeenAt: new Date().toISOString(),
-    cloudSaves: Array.isArray(bucket.cloudSaves) ? bucket.cloudSaves : [],
-    notifications: Array.isArray(bucket.notifications) ? bucket.notifications : [],
-    role: isModeratorBucket(bucket) ? 'moderator' : '',
-    membership: getUserMembership(bucket, profile),
-    suspension: bucket.suspension && typeof bucket.suspension === 'object' ? bucket.suspension : null,
-    securityStrikes: Math.max(0, Number(bucket.securityStrikes || 0))
+    cloudSaves: mergedCloudSaves,
+    notifications: mergedNotifications,
+    role: mergedRole,
+    membership: getUserMembership({ ...migratedBucket, ...baseBucket, role: mergedRole }, profile),
+    suspension: mergedSuspension,
+    securityStrikes: Math.max(0, Number(baseBucket.securityStrikes || 0), Number(migratedBucket?.securityStrikes || 0))
   };
+  if (emailKey && emailKey !== key) delete db.users[emailKey];
   applyPendingAccountState(db, db.users[key], profile);
   db.users[key].membership = getUserMembership(db.users[key], profile);
   return db.users[key];
