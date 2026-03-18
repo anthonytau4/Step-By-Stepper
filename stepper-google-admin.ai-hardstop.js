@@ -2288,8 +2288,7 @@
     if (!noteCard) return;
     if (noteCard.dataset.stepperAdminPatched === 'true') return;
     noteCard.dataset.stepperAdminPatched = 'true';
-    const theme = themeClasses();
-    noteCard.innerHTML = `<p class="text-base sm:text-lg font-bold leading-relaxed">Featured dances now come from the admin workflow instead of Gmail submissions. Signed-in members can have their work auto-synced to the registry, and the admin account decides what gets a Bronze, Silver, or Gold feature badge.</p><p class="mt-3 text-sm ${theme.subtle}">Public members can still browse everything here once it has been featured.</p>`;
+    noteCard.remove();
   }
 
   function renderPages(){
