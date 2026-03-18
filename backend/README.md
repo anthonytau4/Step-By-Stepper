@@ -19,3 +19,6 @@ Set `STRIPE_SECRET_KEY` on the backend and optionally `STRIPE_PUBLISHABLE_KEY`. 
 
 
 Use `https://step-by-stepper.onrender.com` as the default backend base in the frontend build unless you move the API to another hostname.
+
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_MODEL=gemini-2.5-flash

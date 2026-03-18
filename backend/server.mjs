@@ -26,6 +26,8 @@ const dbPath = path.join(dataDir, "stepper-db.json");
 const openaiClient = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
+const geminiApiKey = String(process.env.GEMINI_API_KEY || '').trim();
+const geminiModel = String(process.env.GEMINI_MODEL || 'gemini-2.5-flash').trim() || 'gemini-2.5-flash';
 const adminEmail = normalizeEmail(process.env.ADMIN_EMAIL || "anthonytau4@gmail.com");
 const onlineWindowMs = Math.max(30_000, Number(process.env.ONLINE_WINDOW_MS || 180_000));
 const stripeSecretKey = String(process.env.STRIPE_SECRET_KEY || '').trim();
@@ -69,6 +71,92 @@ async function stripeRequest(endpoint, params = null, method = 'POST') {
     throw error;
   }
   return data;
+}
+
+async function geminiGenerate({ system = '', prompt = '', history = [] } = {}) {
+  if (!geminiApiKey) {
+    const error = new Error('GEMINI_API_KEY is not set on the backend yet.');
+    error.status = 503;
+    throw error;
+  }
+  const contents = [];
+  const safeHistory = Array.isArray(history) ? history.slice(-8) : [];
+  for (const item of safeHistory) {
+    const role = String(item?.role || 'user').trim().toLowerCase() === 'assistant' ? 'model' : 'user';
+    const text = String(item?.text || '').trim().slice(0, 4000);
+    if (!text) continue;
+    contents.push({ role, parts: [{ text }] });
+  }
+  if (prompt) contents.push({ role: 'user', parts: [{ text: String(prompt) }] });
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(geminiModel)}:generateContent?key=${encodeURIComponent(geminiApiKey)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      systemInstruction: system ? { role: 'system', parts: [{ text: String(system).slice(0, 12000) }] } : undefined,
+      contents,
+      generationConfig: { temperature: 0.55 }
+    })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = data?.error?.message || `Gemini request failed (${response.status}).`;
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
+  }
+  const text = Array.isArray(data?.candidates)
+    ? data.candidates.map(candidate => Array.isArray(candidate?.content?.parts) ? candidate.content.parts.map(part => String(part?.text || '')).join('') : '').join('\n').trim()
+    : '';
+  if (!text) {
+    const error = new Error('Gemini returned no usable text.');
+    error.status = 502;
+    throw error;
+  }
+  return text;
+}
+
+async function runSiteHelperAI({ system, prompt, history = [], preferredModel = '' } = {}) {
+  const order = [];
+  const pref = String(preferredModel || '').trim().toLowerCase();
+  if (pref === 'gemini') {
+    if (geminiApiKey) order.push('gemini');
+    if (openaiClient) order.push('openai');
+  } else {
+    if (openaiClient) order.push('openai');
+    if (geminiApiKey) order.push('gemini');
+  }
+  if (!order.length) {
+    const error = new Error('No AI provider is configured on the backend.');
+    error.status = 503;
+    throw error;
+  }
+  let lastError = null;
+  for (const provider of order) {
+    try {
+      if (provider === 'gemini') {
+        const text = await geminiGenerate({ system, prompt, history });
+        return { provider, text };
+      }
+      const response = await openaiClient.responses.create({
+        model,
+        input: [
+          { role: 'system', content: [{ type: 'input_text', text: String(system || '').slice(0, 12000) }] },
+          ...history.slice(-8).map(item => ({ role: String(item?.role || 'user').trim().toLowerCase() === 'assistant' ? 'assistant' : 'user', content: [{ type: 'input_text', text: String(item?.text || '').trim().slice(0, 4000) }] })),
+          { role: 'user', content: [{ type: 'input_text', text: String(prompt || '').slice(0, 12000) }] }
+        ]
+      });
+      const text = String(response.output_text || '').trim();
+      if (!text) {
+        const error = new Error('OpenAI returned no usable text.');
+        error.status = 502;
+        throw error;
+      }
+      return { provider, text };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error('AI request failed.');
 }
 
 function getUserMembership(bucket, profile = null) {
@@ -582,11 +670,11 @@ function fallbackSiteHelp(prompt, context = {}) {
 
 function sanitizeHelperText(text, prompt, context = {}) {
   const clean = String(text || '').replace(/\s+/g, ' ').trim();
-  if (!clean) return fallbackSiteHelp(prompt, context);
-  if (/^hi there!? what can i help you with today on step by stepper\??/i.test(clean)) return fallbackSiteHelp(prompt, context);
-  if (/feel free to ask about any tab or feature\.?$/i.test(clean)) return fallbackSiteHelp(prompt, context);
-  if (/^need help using the site\?/i.test(clean)) return fallbackSiteHelp(prompt, context);
-  if ((/what can i help you with/i.test(clean) || /any tab or feature/i.test(clean)) && /step by stepper/i.test(clean)) return fallbackSiteHelp(prompt, context);
+  if (!clean) return '';
+  if (/^hi there!? what can i help you with today on step by stepper\??/i.test(clean)) return '';
+  if (/feel free to ask about any tab or feature\.?$/i.test(clean)) return '';
+  if (/^need help using the site\?/i.test(clean)) return '';
+  if ((/what can i help you with/i.test(clean) || /any tab or feature/i.test(clean)) && /step by stepper/i.test(clean)) return '';
   return clean;
 }
 
@@ -598,6 +686,7 @@ app.get("/api/health", async (_req, res) => {
     service: "step-by-stepper-backend",
     googleEnabled: !!googleClientId,
     openaiEnabled: !!openaiClient,
+    geminiEnabled: !!geminiApiKey,
     cloudStorage: "json-file",
     onlineCount: getOnlineUsers(db).length,
     danceCount: Array.isArray(db.danceRegistry) ? db.danceRegistry.length : 0
@@ -610,6 +699,7 @@ app.get("/api/auth/config", (_req, res) => {
     googleEnabled: !!googleClientId,
     googleClientId: googleClientId || "",
     openaiEnabled: !!openaiClient,
+    geminiEnabled: !!geminiApiKey,
     cloudStorage: "json-file",
     authMode: googleClientId ? "google-id-token" : "none",
     adminEmail,
@@ -1086,6 +1176,7 @@ app.post('/api/chatbot/help', requireGoogleUser, async (req, res) => {
   const prompt = String(req.body?.prompt || '').trim();
   const context = req.body?.context && typeof req.body.context === 'object' ? req.body.context : {};
   const history = Array.isArray(req.body?.history) ? req.body.history : [];
+  const preferredModel = String(req.body?.preferredModel || 'gemini').trim().toLowerCase();
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);
   const bucket = touchUser(db, req.stepperUser, key);
@@ -1100,87 +1191,55 @@ app.post('/api/chatbot/help', requireGoogleUser, async (req, res) => {
     role: String(item?.role || 'user').trim().toLowerCase() === 'assistant' ? 'assistant' : 'user',
     text: String(item?.text || '').trim().slice(0, 2000)
   })).filter(item => item.text);
-  if (!openaiClient) {
-    return res.json({ ok:true, text: fallbackSiteHelp(prompt, context), mode:'fallback' });
-  }
   try {
-    const response = await openaiClient.responses.create({
-      model,
-      input: [
-        {
-          role: 'system',
-          content: [{
-            type: 'input_text',
-            text: `${SITE_HELP_CONTEXT}
-Reply like a natural AI helper for the Step By Stepper site. Be specific, warm, and practical. Use the conversation history when it matters, and do not keep repeating the exact same canned answer.`
-          }]
-        },
-        {
-          role: 'user',
-          content: [{
-            type: 'input_text',
-            text: `Current tab: ${context.currentTab || 'unknown'}
+    const system = `${SITE_HELP_CONTEXT}
+Reply like a natural AI helper for the Step By Stepper site. Be specific, warm, and practical. Use the conversation history when it matters, and do not keep repeating the exact same canned answer.`;
+    const userPrompt = `Current tab: ${context.currentTab || 'unknown'}
 Signed in: ${context.signedIn ? 'yes' : 'no'}
 Admin: ${context.isAdmin ? 'yes' : 'no'}
+Moderator: ${context.isModerator ? 'yes' : 'no'}
+Premium: ${context.isPremium ? 'yes' : 'no'}
 Online count: ${context.onlineCount || 0}
 Current dance title: ${context.currentDanceTitle || 'none'}
 Conversation so far:
 ${trimmedHistory.map(item => `${item.role}: ${item.text}`).join('\n') || '(none)'}
-Newest user question: ${prompt}`
-          }]
-        }
-      ]
-    });
-    const text = sanitizeHelperText(String(response.output_text || '').trim(), prompt, context);
-    res.json({ ok:true, text, mode:'openai' });
+Newest user question: ${prompt}`;
+    const ai = await runSiteHelperAI({ system, prompt: userPrompt, history: trimmedHistory, preferredModel });
+    const text = sanitizeHelperText(String(ai.text || '').trim(), prompt, context);
+    if (!text) {
+      return res.status(502).json({ ok:false, error:'AI helper returned a blank or generic response.', provider: ai.provider });
+    }
+    res.json({ ok:true, text, mode: ai.provider });
   } catch (error) {
-    res.json({ ok:true, text: fallbackSiteHelp(prompt, context), mode:'fallback-error' });
+    res.status(error.status || 502).json({ ok:false, error: error.message || 'AI helper request failed.', provider: preferredModel });
   }
 });
 
+
 app.post("/api/openai/respond", async (req, res) => {
-  if (!openaiClient) {
-    res.status(503).json({
-      ok: false,
-      error: "OPENAI_API_KEY is not set on the backend yet."
-    });
-    return;
-  }
   try {
     const prompt = String(req.body?.prompt || "").trim();
     const system = String(req.body?.system || "You are Step-By-Stepper assistant logic.").trim();
-
+    const preferredModel = String(req.body?.preferredModel || '').trim().toLowerCase();
     if (!prompt) {
       return res.status(400).json({ ok: false, error: "Missing prompt." });
     }
-
-    const response = await openaiClient.responses.create({
-      model,
-      input: [
-        {
-          role: "system",
-          content: [{ type: "input_text", text: system }]
-        },
-        {
-          role: "user",
-          content: [{ type: "input_text", text: prompt }]
-        }
-      ]
-    });
-
-    res.json({
-      ok: true,
-      text: response.output_text,
-      raw: response
-    });
+    const history = Array.isArray(req.body?.history) ? req.body.history : [];
+    const ai = await runSiteHelperAI({ system, prompt, history, preferredModel });
+    const text = sanitizeHelperText(String(ai.text || '').trim(), prompt, {});
+    if (!text) {
+      return res.status(502).json({ ok:false, error:'AI returned a blank or generic response.', provider: ai.provider });
+    }
+    res.json({ ok: true, text, provider: ai.provider });
   } catch (error) {
     console.error(error);
-    res.status(500).json({
+    res.status(error.status || 500).json({
       ok: false,
       error: error?.message || "Backend request failed."
     });
   }
 });
+
 
 ensureDb().then(() => {
   app.listen(port, () => {
