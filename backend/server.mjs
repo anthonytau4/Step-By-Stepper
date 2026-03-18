@@ -238,6 +238,10 @@ function pruneExpiredUserSuspensions(db) {
   return cleared;
 }
 
+function syncAndPruneDb(db) {
+  return pruneDbState(db);
+}
+
 function pruneDbState(db) {
   if (!db || typeof db !== 'object') return db;
   pruneExpiredPendingSuspensions(db);
