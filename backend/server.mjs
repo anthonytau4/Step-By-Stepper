@@ -41,15 +41,20 @@ function parseAllowedOrigins(value) {
 }
 
 const allowedOrigins = parseAllowedOrigins(process.env.ALLOWED_ORIGIN || "*");
-app.use(cors({
+const corsOptions = {
   origin(origin, callback) {
     if (allowedOrigins === "*" || !origin || allowedOrigins.includes(origin)) {
       callback(null, true);
       return;
     }
     callback(new Error("Origin not allowed by Step-By-Stepper backend."));
-  }
-}));
+  },
+  methods: ["GET", "POST", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Stepper-Google-Token", "X-Google-Credential"],
+  optionsSuccessStatus: 204
+};
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json({ limit: "4mb" }));
 
 function emptyDb() {

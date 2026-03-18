@@ -16,6 +16,8 @@
   const ADMIN_TAB_ID = 'stepper-google-admin-tab';
   const ADMIN_EMAIL = 'anthonytau4@gmail.com';
   const DEFAULT_RENDER_SERVICE_ID = 'srv-d6ss4295pdvs73e1iifg';
+  const DEFAULT_BACKEND_BASE = 'https://step-by-stepper-backend.onrender.com';
+  const ALT_BACKEND_BASE = 'https://api.step-by-stepper.com';
   const FALLBACK_GOOGLE_CLIENT_ID = '1038282546217-a7qv2i1puevmtjf38f6sv761vt7he26s.apps.googleusercontent.com';
   const SYNC_INTERVAL_MS = 6000;
   const PRESENCE_INTERVAL_MS = 30000;
@@ -73,14 +75,52 @@
     if (explicit) return explicit;
     const saved = normalizeApiBase(localStorage.getItem(API_BASE_KEY) || '');
     if (saved) return saved;
-    if (location.protocol === 'http:' || location.protocol === 'https:') return normalizeApiBase(location.origin);
-    return 'http://localhost:3000';
+    if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') return 'http://localhost:3000';
+    return DEFAULT_BACKEND_BASE;
   }
 
   function saveApiBase(value){
     const normalized = normalizeApiBase(value);
-    state.apiBase = normalized || 'http://localhost:3000';
+    state.apiBase = normalized || DEFAULT_BACKEND_BASE;
     localStorage.setItem(API_BASE_KEY, state.apiBase);
+    window.STEPPER_API_BASE = state.apiBase;
+  }
+
+  function getApiBaseCandidates(preferred){
+    const list = [];
+    const push = (value) => {
+      const normalized = normalizeApiBase(value);
+      if (!normalized) return;
+      if (!list.includes(normalized)) list.push(normalized);
+    };
+    const saved = normalizeApiBase(localStorage.getItem(API_BASE_KEY) || '');
+    const explicit = normalizeApiBase(window.STEPPER_API_BASE || '');
+    const currentOrigin = (location.protocol === 'http:' || location.protocol === 'https:') ? normalizeApiBase(location.origin) : '';
+    if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+      push(preferred);
+      push(explicit);
+      push(saved);
+      push('http://localhost:3000');
+      push(currentOrigin);
+      return list;
+    }
+    push(preferred);
+    push(explicit);
+    push(saved);
+    push(DEFAULT_BACKEND_BASE);
+    push(ALT_BACKEND_BASE);
+    push(currentOrigin);
+    return list;
+  }
+
+  function wireStartupBackendBase(){
+    const button = document.querySelector('.stepper-static-startup__button');
+    if (!button || button.dataset.stepperApiWired === 'true') return;
+    button.dataset.stepperApiWired = 'true';
+    button.addEventListener('click', () => {
+      const preferred = getApiBaseCandidates(state.apiBase)[0] || DEFAULT_BACKEND_BASE;
+      saveApiBase(preferred);
+    });
   }
 
   function readJson(key, fallback){
@@ -366,21 +406,40 @@
   }
 
   async function fetchJson(path, options){
-    const url = `${normalizeApiBase(state.apiBase)}${path}`;
-    const response = await fetch(url, options || {});
-    let data = null;
-    try {
-      data = await response.json();
-    } catch {
-      data = null;
+    const retryableStatuses = new Set([0, 404, 405, 502, 503, 504]);
+    const bases = String(path || '').startsWith('/api/') ? getApiBaseCandidates(state.apiBase) : [normalizeApiBase(state.apiBase) || DEFAULT_BACKEND_BASE];
+    let lastError = null;
+    for (const base of bases) {
+      const url = `${normalizeApiBase(base)}${path}`;
+      try {
+        const headers = Object.assign({ Accept: 'application/json' }, options && options.headers ? options.headers : {});
+        const response = await fetch(url, Object.assign({}, options || {}, { headers, mode: 'cors' }));
+        let data = null;
+        try {
+          data = await response.json();
+        } catch {
+          data = null;
+        }
+        if (response.ok && data && data.ok !== false) {
+          if (base && base !== state.apiBase) saveApiBase(base);
+          return data;
+        }
+        const message = data && data.error ? data.error : `Request failed (${response.status})`;
+        const error = new Error(message);
+        error.status = response.status;
+        error.base = base;
+        lastError = error;
+        if (retryableStatuses.has(Number(response.status)) && base !== bases[bases.length - 1]) continue;
+        throw error;
+      } catch (error) {
+        lastError = error;
+        const status = Number(error && error.status || 0);
+        const retryable = !status || retryableStatuses.has(status) || /Failed to fetch|NetworkError|Load failed/i.test(String(error && error.message || ''));
+        if (retryable && base !== bases[bases.length - 1]) continue;
+        throw error;
+      }
     }
-    if (!response.ok || !data || data.ok === false) {
-      const message = data && data.error ? data.error : `Request failed (${response.status})`;
-      const error = new Error(message);
-      error.status = response.status;
-      throw error;
-    }
-    return data;
+    throw lastError || new Error('Could not reach backend.');
   }
 
   async function authFetch(path, options){
@@ -408,30 +467,9 @@
     if (state.busy.config) return state.config;
     state.busy.config = true;
     try {
-      const candidates = [];
-      const pushCandidate = (value) => {
-        const normalized = normalizeApiBase(value);
-        if (!normalized) return;
-        if (!candidates.includes(normalized)) candidates.push(normalized);
-      };
-      pushCandidate(state.apiBase);
-      pushCandidate(window.STEPPER_API_BASE || '');
-      if (location.protocol === 'http:' || location.protocol === 'https:') pushCandidate(location.origin);
-      pushCandidate('https://step-by-stepper.com');
-      let lastError = null;
-      for (const candidate of candidates) {
-        try {
-          const previous = state.apiBase;
-          state.apiBase = candidate;
-          const config = await fetchJson('/api/auth/config');
-          state.config = config;
-          saveApiBase(candidate);
-          return state.config;
-        } catch (error) {
-          lastError = error;
-        }
-      }
-      throw lastError || new Error('Could not reach backend.');
+      const config = await fetchJson('/api/auth/config');
+      state.config = config;
+      return state.config;
     } catch (error) {
       state.config = {
         ok: false,
@@ -1008,17 +1046,21 @@
   function renderSaveButton(){
     const host = ensureSaveHost();
     const entry = buildCurrentDanceEntry();
-    host.style.bottom = state.chatOpen ? '92px' : '18px';
     const hasSession = !!(state.session && state.session.credential);
-    if (!entry) { host.style.display='none'; host.innerHTML=''; return; }
+    const wide = window.innerWidth >= 980;
+    const shouldShow = !!entry && hasSession && wide && !state.activePage;
+    host.style.position = 'fixed';
+    host.style.top = 'auto';
+    host.style.left = 'auto';
+    host.style.transform = 'none';
+    host.style.right = '18px';
+    host.style.bottom = state.chatOpen ? '92px' : '18px';
+    host.style.zIndex = '8500';
+    if (!shouldShow) { host.style.display='none'; host.innerHTML=''; return; }
     const dirty = hasUnsavedChanges();
     host.style.display='';
-    host.innerHTML = `<button type="button" data-save-now="1" style="border:1px solid rgba(79,70,229,.25);background:${dirty ? '#4f46e5' : '#ffffff'};color:${dirty ? '#ffffff' : '#111827'};padding:.72rem 1rem;border-radius:999px;font-weight:900;box-shadow:0 10px 30px rgba(0,0,0,.12);display:inline-flex;align-items:center;gap:.55rem;">${dirty ? 'Save changes' : 'Saved'}<span style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.78;">${hasSession ? (dirty ? 'cloud needed' : 'cloud up to date') : 'sign in to save'}</span></button>`;
+    host.innerHTML = `<button type="button" data-save-now="1" style="border:1px solid rgba(79,70,229,.25);background:${dirty ? '#4f46e5' : '#ffffff'};color:${dirty ? '#ffffff' : '#111827'};padding:.72rem 1rem;border-radius:999px;font-weight:900;box-shadow:0 10px 30px rgba(0,0,0,.12);display:inline-flex;align-items:center;gap:.55rem;max-width:min(280px,calc(100vw - 28px));">${dirty ? 'Save changes' : 'Saved'}<span style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.78;">${dirty ? 'cloud needed' : 'cloud up to date'}</span></button>`;
     host.querySelector('[data-save-now="1"]').addEventListener('click', async () => {
-      if (!hasSession) {
-        openPage('signin');
-        return;
-      }
       const ok = await saveChangesNow({ force:true });
       if (!ok) alert('Could not save to the backend just now.');
     });
@@ -1027,12 +1069,12 @@
   function localSiteHelp(prompt){
     const text = String(prompt || '').toLowerCase();
     if (!text) return 'Try asking where to save, how sign-in works, how featuring works, or what tab to use.';
-    if (text.includes('save') || text.includes('changes')) return state.session && state.session.credential ? 'Use Save Changes at the top to lock the newest version into your Google-linked cloud save. Your latest signed-in dance also auto-syncs in the background.' : 'Use Save Changes at the top. Sign in with Google first if you want that save to follow you onto other devices.';
+    if (text.includes('save') || text.includes('changes')) return state.session && state.session.credential ? 'Use Save Changes in My Saved Dances to lock the newest version into your Google-linked cloud save. Your latest signed-in dance also auto-syncs in the background.' : 'Open My Saved Dances and use Save Changes there. Sign in with Google first if you want that save to follow you onto other devices.';
     if (text.includes('feature') || text.includes('badge') || text.includes('bronze') || text.includes('silver') || text.includes('gold')) return 'Use Send to host for featuring. The admin account can approve it, add Bronze, Silver, or Gold, and it will appear in Featured Choreo. Removing a feature takes it back off that public page.';
     if (text.includes('upload') || text.includes('site')) return 'Use Upload to site to send your dance into the admin moderation queue. The admin can approve it for the site or delete it.';
     if (text.includes('signin') || text.includes('google') || text.includes('sign in')) return 'Open the Sign In tab and use Sign in with Google. Once signed in, your dances can sync to the backend and the admin tab appears only for the admin email.';
     if (text.includes('tab') || text.includes('where') || text.includes('go')) return 'Use Build to make or edit a dance, Sheet for the clean sheet view, My Saved Dances for your cloud saves, Featured Choreo for public featured dances, and Sign In for Google saving and moderation actions.';
-    return 'Use Build to create or edit a dance, Save Changes to lock it in, Sign In for Google saving, My Saved Dances for your cloud work, and Featured Choreo to browse featured dances.';
+    return 'Use Build to create or edit a dance, then open My Saved Dances to use Save Changes for cloud saving. Featured Choreo shows public featured dances and Sign In handles Google saving.';
   }
 
   async function askSiteHelper(question){
@@ -1093,6 +1135,8 @@
   }
 
   function renderSiteHelper(){
+    const activeInput = document.activeElement;
+    if (state.chatOpen && activeInput && activeInput.matches && activeInput.matches('[data-chat-input=\"1\"]')) return;
     const host = ensureSiteHelperHost();
     host.style.right = '14px';
     host.style.bottom = '20px';
@@ -1106,7 +1150,7 @@
       return;
     }
     const messages = state.chatMessages.slice(-10).map(msg => `<div style="align-self:${msg.role==='user'?'flex-end':'stretch'};max-width:100%;background:${msg.role==='user'?'#4f46e5':'#ffffff'};color:${msg.role==='user'?'#ffffff':'#111827'};border:1px solid rgba(79,70,229,.12);padding:.75rem .85rem;border-radius:18px;font-size:14px;line-height:1.45;box-shadow:0 8px 24px rgba(0,0,0,.08);word-break:break-word;">${escapeHtml(msg.text)}</div>`).join('');
-    host.innerHTML = `<div style="width:min(380px, calc(100vw - 24px));max-width:calc(100vw - 24px);background:#f8fafc;border:1px solid rgba(99,102,241,.16);border-radius:24px;box-shadow:0 18px 40px rgba(0,0,0,.18);overflow:hidden;"><div style="padding:.9rem 1rem;background:#4f46e5;color:#fff;display:flex;align-items:center;gap:.6rem;"><div style="font-weight:900;">Site helper</div><button type="button" data-chat-close="1" style="margin-left:auto;border:none;background:rgba(255,255,255,.18);color:#fff;border-radius:999px;padding:.35rem .65rem;font-weight:900;">Close</button></div><div data-chat-messages="1" style="padding:1rem;display:flex;flex-direction:column;gap:.7rem;max-height:min(45vh, 340px);overflow:auto;overscroll-behavior:contain;">${messages}${state.chatBusy ? '<div style="font-size:13px;color:#6b7280;">Thinking…</div>' : ''}</div><form data-chat-form="1" style="padding:0 1rem 1rem;display:flex;gap:.6rem;align-items:center;"><input data-chat-input="1" type="text" autocomplete="off" autocapitalize="sentences" spellcheck="true" placeholder="Ask where to go or what to press" value="${escapeHtml(state.chatDraft || '')}" style="flex:1;border:1px solid rgba(99,102,241,.18);border-radius:999px;padding:.9rem 1rem;background:#fff;font-size:16px;" /><button type="submit" style="border:none;background:#4f46e5;color:#fff;border-radius:999px;padding:.85rem 1rem;font-weight:900;white-space:nowrap;">Send</button></form></div>`;
+    host.innerHTML = `<div style="width:min(380px, calc(100vw - 24px));max-width:calc(100vw - 24px);background:#f8fafc;border:1px solid rgba(99,102,241,.16);border-radius:24px;box-shadow:0 18px 40px rgba(0,0,0,.18);overflow:hidden;"><div style="padding:.9rem 1rem;background:#4f46e5;color:#fff;display:flex;align-items:center;gap:.6rem;"><div style="font-weight:900;">Site helper</div><button type="button" data-chat-close="1" style="margin-left:auto;border:none;background:rgba(255,255,255,.18);color:#fff;border-radius:999px;padding:.35rem .65rem;font-weight:900;">Close</button></div><div data-chat-messages="1" style="padding:1rem;display:flex;flex-direction:column;gap:.7rem;max-height:min(45vh, 340px);overflow:auto;overscroll-behavior:contain;">${messages}${state.chatBusy ? '<div style="font-size:13px;color:#6b7280;">Thinking…</div>' : ''}</div><form data-chat-form="1" style="padding:0 1rem 1rem;display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;"><input data-chat-input="1" type="text" autocomplete="off" autocapitalize="sentences" spellcheck="true" placeholder="Ask where to go or what to press" value="${escapeHtml(state.chatDraft || '')}" style="flex:1 1 220px;border:1px solid rgba(99,102,241,.18);border-radius:999px;padding:.9rem 1rem;background:#fff;font-size:16px;min-width:0;" /><button type="submit" style="border:none;background:#4f46e5;color:#fff;border-radius:999px;padding:.85rem 1rem;font-weight:900;white-space:nowrap;">Send</button></form></div>`;
     const list = host.querySelector('[data-chat-messages="1"]');
     if (list) list.scrollTop = list.scrollHeight;
     host.querySelector('[data-chat-close="1"]').addEventListener('click', ()=>{ state.chatOpen = false; renderSiteHelper(); });
@@ -1138,11 +1182,41 @@
     }
     const hasSession = !!(state.session && state.session.credential);
     const entry = buildCurrentDanceEntry();
-    if (!hasSession || !entry) { host.style.display='none'; host.innerHTML=''; return; }
+    const wide = window.innerWidth >= 980;
+    if (!hasSession || !entry || !wide || state.activePage) { host.style.display='none'; host.innerHTML=''; return; }
     host.style.display='';
     host.innerHTML = `<div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end;"><button type="button" data-quick="feature" style="border:1px solid rgba(99,102,241,.18);background:#fff;padding:.75rem 1rem;border-radius:999px;font-weight:900;box-shadow:0 10px 30px rgba(0,0,0,.12);">Send to host for featuring</button><button type="button" data-quick="site" style="border:1px solid rgba(99,102,241,.18);background:#fff;padding:.75rem 1rem;border-radius:999px;font-weight:900;box-shadow:0 10px 30px rgba(0,0,0,.12);">Upload to site</button></div>`;
     host.querySelector('[data-quick="feature"]').addEventListener('click', ()=>requestModeration('feature'));
     host.querySelector('[data-quick="site"]').addEventListener('click', ()=>requestModeration('site'));
+  }
+
+  function patchSavedDancesPage(){
+    const page = document.getElementById('stepper-saved-dances-page');
+    if (!page) return;
+    const body = page.querySelector('[class*="p-6"]') || page;
+    if (!body) return;
+    let card = page.querySelector('[data-stepper-cloud-save-card="true"]');
+    if (!card) {
+      card = document.createElement('section');
+      card.setAttribute('data-stepper-cloud-save-card', 'true');
+      card.style.marginBottom = '20px';
+      body.insertBefore(card, body.firstElementChild || null);
+    }
+    const theme = themeClasses();
+    const signedIn = !!(state.session && state.session.credential);
+    const profile = signedIn ? state.session.profile || {} : null;
+    card.className = `rounded-3xl border p-5 sm:p-6 ${theme.soft}`;
+    card.innerHTML = signedIn
+      ? `<div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Google cloud save is on</div><p class="mt-1 text-sm ${theme.subtle}">Signed in as ${escapeHtml(profile.name || profile.email || 'Member')}. Use Save Changes here to push the latest version to your Google-linked save so it is still there next time you open the site.</p></div><div class="flex flex-wrap gap-3"><button type="button" data-stepper-saved-save-now="1" class="stepper-google-cta ${theme.button}">Save Changes</button><button type="button" data-stepper-open-signin="1" class="stepper-google-cta ${theme.button}">Account</button></div></div>`
+      : `<div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Sign in to save across devices</div><p class="mt-1 text-sm ${theme.subtle}">Local device saves still work without signing in. Use Google sign-in when you want the same dance to come back on other phones, tablets, and computers.</p></div><div class="flex flex-wrap gap-3"><button type="button" data-stepper-open-signin="1" class="stepper-google-cta ${theme.button}">Sign in with Google</button></div></div>`;
+    const openBtn = card.querySelector('[data-stepper-open-signin="1"]');
+    if (openBtn) openBtn.addEventListener('click', ()=> openPage('signin'));
+    const saveBtn = card.querySelector('[data-stepper-saved-save-now="1"]');
+    if (saveBtn) saveBtn.addEventListener('click', async ()=>{
+      const ok = await saveChangesNow({ force:true });
+      if (!ok) alert('Could not save to the backend just now.');
+      patchSavedDancesPage();
+    });
   }
 
   function renderPresenceOnly(){
@@ -1375,6 +1449,7 @@
     updateAdminTabVisibility();
     updateTabButtons();
     renderQuickActions();
+    patchSavedDancesPage();
     renderSaveButton();
     renderFeatureBadge();
     renderSiteHelper();
@@ -1384,12 +1459,13 @@
   async function prime(){
     ensureStyles();
     if (location.protocol === 'http:' || location.protocol === 'https:') {
-      const currentOrigin = normalizeApiBase(location.origin);
       const savedBase = normalizeApiBase(localStorage.getItem(API_BASE_KEY) || '');
-      if (!savedBase || savedBase === 'http://localhost:3000' || savedBase === 'https://localhost:3000') saveApiBase(currentOrigin);
+      const preferredBase = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') ? 'http://localhost:3000' : DEFAULT_BACKEND_BASE;
+      if (!savedBase || savedBase === 'http://localhost:3000' || savedBase === 'https://localhost:3000' || savedBase === normalizeApiBase(location.origin)) saveApiBase(preferredBase);
     }
     if (!locateUi()) return;
     ensureHost();
+    wireStartupBackendBase();
     await refreshConfig();
     await refreshPresence();
     if (state.session && state.session.credential) {
@@ -1414,11 +1490,13 @@
   setInterval(() => {
     if (!locateUi()) return;
     ensureHost();
+    wireStartupBackendBase();
     updateAdminTabVisibility();
     updateTabButtons();
     renderPresenceOnly();
     patchFeaturedPageCopy();
-    if (state.activePage) renderPages();
+    patchSavedDancesPage();
+    renderSaveButton();
   }, 2200);
 
   setInterval(() => {
