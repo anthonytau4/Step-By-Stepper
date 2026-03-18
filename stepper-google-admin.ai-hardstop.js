@@ -81,6 +81,38 @@
     }
   };
 
+  let pendingRenderPagesTimer = null;
+  let lastUserTypingAt = 0;
+  let lastUserClickAt = 0;
+  function isEditableTarget(node){
+    return !!(node && (node.closest('input, textarea, select, [contenteditable="true"], [contenteditable=""], [contenteditable]')));
+  }
+  function isUserActivelyEditing(){
+    const active = document.activeElement;
+    if (isEditableTarget(active)) return true;
+    return Date.now() - lastUserTypingAt < 2000;
+  }
+  function scheduleRenderPages(delay = 2000, force = false){
+    if (pendingRenderPagesTimer) clearTimeout(pendingRenderPagesTimer);
+    pendingRenderPagesTimer = setTimeout(() => {
+      pendingRenderPagesTimer = null;
+      renderPages(force);
+    }, Math.max(0, delay));
+  }
+  document.addEventListener('input', (event) => {
+    if (isEditableTarget(event.target)) lastUserTypingAt = Date.now();
+  }, true);
+  document.addEventListener('keydown', (event) => {
+    if (isEditableTarget(event.target)) lastUserTypingAt = Date.now();
+  }, true);
+  document.addEventListener('focusin', (event) => {
+    if (isEditableTarget(event.target)) lastUserTypingAt = Date.now();
+  }, true);
+  document.addEventListener('click', () => {
+    lastUserClickAt = Date.now();
+  }, true);
+
+
   function normalizeEmail(value){
     return String(value || '').trim().toLowerCase();
   }
@@ -306,7 +338,7 @@
     data.meta.counts = String(totalCounts);
     writeAppData(data);
     updateSavedSignature('');
-    renderPages();
+    renderPages(true);
     openBuildWorksheet();
     return { totalCounts, sections: sectionCounter };
   }
@@ -2540,7 +2572,11 @@
     observer.observe(page, { childList: true, subtree: true, characterData: true });
   }
 
-  function renderPages(){
+  function renderPages(force = false){
+    if (!force && isUserActivelyEditing()) {
+      scheduleRenderPages(2000, false);
+      return;
+    }
     locateUi();
     ensureHost();
     renderSignInPage();
@@ -2606,9 +2642,6 @@
     updateTabButtons();
     renderPresenceOnly();
     renderSuspensionBanner();
-    patchFeaturedPageCopy();
-    const __savedPage = document.getElementById('stepper-saved-dances-page');
-    if (__savedPage && ((__savedPage.offsetParent || __savedPage.getClientRects().length) && getComputedStyle(__savedPage).display !== 'none' && getComputedStyle(__savedPage).visibility !== 'hidden')) patchSavedDancesPage();
     renderSaveButton();
   }, 2200);
 
@@ -2639,7 +2672,7 @@
   window.addEventListener('storage', () => {
     if (state.session && state.session.credential) syncCurrentDanceToBackend(false);
     state.savedDancesUiSignature = '';
-    renderPages();
+    scheduleRenderPages(2000, false);
   });
 
   async function refreshSubscription(){
