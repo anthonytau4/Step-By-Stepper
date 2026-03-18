@@ -1242,9 +1242,12 @@
   function sanitizeHelperReply(reply, prompt){
     const text = String(reply || '').replace(/\s+/g, ' ').trim();
     if (!text) return '';
+    const boringGreeting = /^(hi|hello|hey)( there)?[!,. ]*(what can i help you with( today)?( on step by stepper)?)?/i;
     if (/^hi there!? what can i help you with today on step by stepper\??/i.test(text)) return localSiteHelp(prompt);
     if (/feel free to ask about any tab or feature\.?$/i.test(text)) return localSiteHelp(prompt);
     if (/^need help using the site\?/i.test(text)) return localSiteHelp(prompt);
+    if ((/step by stepper/i.test(text) || /any tab or feature/i.test(text) || /what can i help you with/i.test(text)) && boringGreeting.test(text)) return localSiteHelp(prompt);
+    if (/^(hi|hello|hey)( there)?[!,. ]*$/i.test(text)) return localSiteHelp(prompt);
     return text;
   }
 

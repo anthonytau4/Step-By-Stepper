@@ -566,7 +566,8 @@ function buildFeatureSummary(source, badgeLabel) {
 const SITE_HELP_CONTEXT = `You are the Step By Stepper site helper. Keep answers short, practical, and human. Only answer about using this site.
 Tabs and actions available: Build, Sheet, What's New, My Saved Dances, Featured Choreo, Sign In, and Admin for anthonytau4@gmail.com only.
 Important behaviours: users sign in with Google, Save Changes pushes the current dance to cloud save, Send to host for featuring creates a feature request, Upload to site creates a site-upload request, Featured Choreo shows public featured dances, removing a feature removes it from Featured Choreo, and signed-in users can get notifications when admin approves or rejects requests.
-If someone asks where to go, tell them the exact tab or button to use.`;
+If someone asks where to go, tell them the exact tab or button to use.
+Do not open with generic greetings like "Hi there! What can I help you with today on Step By Stepper?" and do not tell people to ask about any tab or feature. Just answer the actual question.`;
 
 function fallbackSiteHelp(prompt, context = {}) {
   const q = String(prompt || '').toLowerCase();
@@ -577,6 +578,16 @@ function fallbackSiteHelp(prompt, context = {}) {
   if (q.includes('sign in') || q.includes('google')) return 'Open the Sign In tab and press Sign in with Google.';
   if (q.includes('saved')) return 'Use My Saved Dances for your saved items, and Save Changes at the top to push the current one to cloud save.';
   return 'Use Build to make or edit a dance, Save Changes at the top to keep it, Sign In for Google saving, My Saved Dances for your saved work, and Featured Choreo to browse featured dances.';
+}
+
+function sanitizeHelperText(text, prompt, context = {}) {
+  const clean = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!clean) return fallbackSiteHelp(prompt, context);
+  if (/^hi there!? what can i help you with today on step by stepper\??/i.test(clean)) return fallbackSiteHelp(prompt, context);
+  if (/feel free to ask about any tab or feature\.?$/i.test(clean)) return fallbackSiteHelp(prompt, context);
+  if (/^need help using the site\?/i.test(clean)) return fallbackSiteHelp(prompt, context);
+  if ((/what can i help you with/i.test(clean) || /any tab or feature/i.test(clean)) && /step by stepper/i.test(clean)) return fallbackSiteHelp(prompt, context);
+  return clean;
 }
 
 
@@ -1120,7 +1131,7 @@ Newest user question: ${prompt}`
         }
       ]
     });
-    const text = String(response.output_text || '').trim() || fallbackSiteHelp(prompt, context);
+    const text = sanitizeHelperText(String(response.output_text || '').trim(), prompt, context);
     res.json({ ok:true, text, mode:'openai' });
   } catch (error) {
     res.json({ ok:true, text: fallbackSiteHelp(prompt, context), mode:'fallback-error' });
