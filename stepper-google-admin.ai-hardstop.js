@@ -46,6 +46,7 @@
     aiDance: { busy: false, mode: 'judge', prompt: '', result: null },
     communityGlossaryOpen: false,
     subscription: { isPremium: false, plan: 'free', status: 'free', source: 'unknown' },
+    savedDancesUiSignature: '',
     chatOpen: false,
     chatBusy: false,
     chatMessages: [],
@@ -782,6 +783,7 @@
       await refreshSession();
       await heartbeat();
       await refreshCloudSaves();
+    state.savedDancesUiSignature = '';
       await restoreLatestCloudSaveIfNeeded();
       await syncCurrentDanceToBackend(true);
       await refreshNotifications();
@@ -1044,6 +1046,7 @@
     const synced = await syncCurrentDanceToBackend(force || true);
     if (synced) {
       await refreshCloudSaves();
+    state.savedDancesUiSignature = '';
       renderSaveButton();
       return true;
     }
@@ -1083,6 +1086,7 @@
     try {
       await authFetch(`/api/cloud-saves/${encodeURIComponent(saveId)}`, { method: 'DELETE' });
       await refreshCloudSaves();
+    state.savedDancesUiSignature = '';
       renderPages();
       return true;
     } catch (error) {
@@ -1659,33 +1663,6 @@
     return '96px';
   }
 
-
-  function isTypingSensitiveElement(element){
-    if (!element || element === document.body) return false;
-    if (element.closest && element.closest('[data-stepper-render-safe="1"]')) return false;
-    if (element.matches && element.matches('button,[type="button"],[type="submit"],[type="checkbox"],[type="radio"]')) return false;
-    if (element.matches && element.matches('input, textarea, select')) {
-      if (element.disabled || element.readOnly) return false;
-      return true;
-    }
-    if (element.isContentEditable) return true;
-    if (element.closest) {
-      const editableParent = element.closest('textarea, input, select, [contenteditable=""], [contenteditable="true"]');
-      if (editableParent && !editableParent.disabled && !editableParent.readOnly) return true;
-    }
-    return false;
-  }
-
-  function isUserEditingUi(){
-    return isTypingSensitiveElement(document.activeElement);
-  }
-
-  function flushDeferredRenderPages(){
-    if (!state.deferRenderPages) return;
-    if (isUserEditingUi()) return;
-    renderPages({ force:true });
-  }
-
   function ensureSiteHelperHost(){
     let host = document.getElementById('stepper-site-helper-host');
     if (host) return host;
@@ -1754,7 +1731,26 @@
     host.querySelector('[data-quick="site"]').addEventListener('click', ()=>requestModeration('site'));
   }
 
-  function patchSavedDancesPage(){
+  function getSavedDancesUiSignature(){
+    const signedIn = !!(state.session && state.session.credential);
+    const profile = signedIn ? (state.session.profile || {}) : null;
+    const cloudSig = (state.cloudSaves || []).slice(0, 12).map(item => [
+      item && item.id || '',
+      item && item.updatedAt || '',
+      item && item.title || '',
+      item && item.steps || 0,
+      item && item.sections || 0
+    ].join('~')).join('|');
+    return JSON.stringify({
+      signedIn,
+      activePage: state.activePage || '',
+      email: signedIn ? normalizeEmail(profile && profile.email) : '',
+      cloudCount: (state.cloudSaves || []).length,
+      cloudSig
+    });
+  }
+
+  function patchSavedDancesPage(force){
     const page = document.getElementById('stepper-saved-dances-page');
     if (!page) return;
     const body = page.querySelector('[class*="p-6"]') || page;
@@ -1769,6 +1765,9 @@
     const theme = themeClasses();
     const signedIn = !!(state.session && state.session.credential);
     const profile = signedIn ? state.session.profile || {} : null;
+    const uiSignature = getSavedDancesUiSignature();
+    if (!force && wrap && state.savedDancesUiSignature === uiSignature) return;
+    state.savedDancesUiSignature = uiSignature;
     const cloudCards = signedIn && state.cloudSaves.length ? state.cloudSaves.slice(0, 12).map(item => `
       <article class="rounded-3xl border p-5 sm:p-6 ${theme.soft}" data-stepper-cloud-id="${escapeHtml(item.id)}">
         <div class="flex flex-wrap items-start justify-between gap-4">
@@ -1814,7 +1813,8 @@
     if (saveBtn) saveBtn.addEventListener('click', async ()=>{
       const ok = await saveChangesNow({ force:true });
       if (!ok) alert('Could not save to the backend just now.');
-      patchSavedDancesPage();
+      state.savedDancesUiSignature = '';
+      patchSavedDancesPage(true);
     });
     wrap.querySelectorAll('[data-stepper-cloud-id]').forEach(card => {
       const saveId = card.getAttribute('data-stepper-cloud-id');
@@ -2303,6 +2303,7 @@
       await refreshSession();
       await heartbeat();
       await refreshCloudSaves();
+    state.savedDancesUiSignature = '';
       await restoreLatestCloudSaveIfNeeded();
       await syncCurrentDanceToBackend(false);
       await refreshNotifications();
@@ -2329,10 +2330,8 @@
     updateTabButtons();
     renderPresenceOnly();
     patchFeaturedPageCopy();
-    if (!isUserEditingUi()) {
-      patchSavedDancesPage();
-      renderSaveButton();
-    }
+    patchSavedDancesPage();
+    renderSaveButton();
   }, 2200);
 
   setInterval(() => {
@@ -2361,6 +2360,7 @@
 
   window.addEventListener('storage', () => {
     if (state.session && state.session.credential) syncCurrentDanceToBackend(false);
+    state.savedDancesUiSignature = '';
     renderPages();
   });
 
@@ -3072,13 +3072,7 @@ Newest user question: ${question}`;
   }
 
   const __origRenderPages = renderPages;
-  renderPages = function(options){
-    const force = !!(options && options.force);
-    if (!force && isUserEditingUi()) {
-      state.deferRenderPages = true;
-      return;
-    }
-    state.deferRenderPages = false;
+  renderPages = function(){
     __origRenderPages();
     ensureHost();
     renderModeratorPage();
@@ -3099,14 +3093,6 @@ Newest user question: ${question}`;
       autoGenerateCountsForWorksheet
     };
   };
-
-  document.addEventListener('focusout', () => {
-    window.setTimeout(flushDeferredRenderPages, 40);
-  }, true);
-
-  document.addEventListener('pointerdown', () => {
-    window.setTimeout(flushDeferredRenderPages, 40);
-  }, true);
 
   let __stepperLiveQueueRefreshBusy = false;
   setInterval(() => {
