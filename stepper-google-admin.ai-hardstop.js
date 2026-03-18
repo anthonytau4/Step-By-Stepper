@@ -40,6 +40,9 @@
     moderatorApplications: [],
     activeModerators: [],
     moderatorQueue: [],
+    staffChat: [],
+    staffChatDraft: '',
+    staffChatBusy: false,
     suspensions: [],
     securityAlerts: [],
     glossaryApproved: [],
@@ -2234,6 +2237,7 @@
             <div class="mt-4 ${theme.panel} rounded-2xl border p-4"><label class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Removal note</label><textarea data-remove-mod-note="1" class="stepper-google-input mt-3" rows="3" placeholder="Tell them why they were removed as moderator."></textarea></div>
             <div class="mt-4 flex flex-wrap gap-3"><button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="remove-moderator">Delete moderator</button></div>
           </article>`).join('') : `<p class="text-sm ${theme.subtle}">No active moderators yet.</p>`}</div></div>
+        ${buildStaffChatHtml(theme)}
         <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-suspension-management="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Suspend persons</div><p class="mt-1 text-sm ${theme.subtle}">Enter a Google email to bar someone for a set time. Admins cannot be banned.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.suspensions || []).length))} barred</span></div><div class="mt-4 grid gap-3 sm:grid-cols-2"><input data-suspend-email="1" class="stepper-google-input" placeholder="person@gmail.com" /><select data-suspend-duration="1" class="stepper-google-input"><option value="300000">5 minutes</option><option value="1200000">20 minutes</option><option value="3600000">1 hour</option><option value="18000000">5 hours</option><option value="86400000">1 day</option><option value="259200000">3 days</option><option value="604800000">1 week</option><option value="1814400000">3 weeks</option><option value="2592000000">1 month</option><option value="5184000000">2 months</option><option value="31536000000">1 Year</option><option value="157680000000">5 years</option></select></div><div class="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]"><textarea data-suspend-reason="1" class="stepper-google-input" rows="3" placeholder="Reason for the bar"></textarea><button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="suspend-person">Bar account</button></div><div class="mt-4 grid gap-3">${(state.suspensions || []).length ? state.suspensions.map(item => `<article class="rounded-2xl border p-4 ${theme.soft}" data-stepper-suspension-key="${escapeHtml(item.userKey)}"><div class="flex flex-wrap items-center justify-between gap-3"><div><div class="text-base font-black">${escapeHtml(item.name || item.email || 'Member')}</div><p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.email || '')}</p><p class="mt-2 text-xs font-semibold ${theme.subtle}">${escapeHtml((item.suspension && item.suspension.durationLabel) || '')} • ${escapeHtml((item.suspension && item.suspension.reason) || '')}</p></div><button type="button" class="stepper-google-cta ${theme.button}" data-action="lift-suspension">Turn back on</button></div></article>`).join('') : `<p class="text-sm ${theme.subtle}">Nobody is currently barred.</p>`}</div></div>
         <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-security-alerts="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Security alerts</div><p class="mt-1 text-sm ${theme.subtle}">Client-side inspection warnings show here after 3 strikes. This is only a nuisance detector, not perfect protection.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.securityAlerts || []).length))} alerts</span></div><div class="mt-4 grid gap-3">${(state.securityAlerts || []).length ? state.securityAlerts.slice(0,20).map(item => `<article class="rounded-2xl border p-4 ${theme.soft}"><div class="flex flex-wrap items-center justify-between gap-3"><div><div class="text-base font-black">${escapeHtml(item.name || item.email || 'User')}</div><p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.email || '')}</p><p class="mt-2 text-xs font-semibold ${theme.subtle}">${escapeHtml(item.reason || '')} • ${escapeHtml(String(item.strikeCount || 0))} strikes</p></div></div>${item.detail ? `<p class="mt-3 text-sm ${theme.subtle}">${escapeHtml(item.detail)}</p>` : ''}</article>`).join('') : `<p class="text-sm ${theme.subtle}">No security alerts yet.</p>`}</div></div>
         ${cards}
@@ -2282,6 +2286,10 @@
       addModeratorByEmail(emailEl && emailEl.value);
       if (emailEl) emailEl.value = '';
     });
+    const staffDraft = page.querySelector('[data-staff-chat-draft="1"]');
+    if (staffDraft) staffDraft.addEventListener('input', ()=>{ state.staffChatDraft = staffDraft.value; });
+    const sendStaffBtn = page.querySelector('[data-action="send-staff-chat"]');
+    if (sendStaffBtn) sendStaffBtn.addEventListener('click', ()=> sendStaffChatMessage(state.staffChatDraft));
     const suspendBtn = page.querySelector('[data-action="suspend-person"]');
     if (suspendBtn) suspendBtn.addEventListener('click', () => {
       const emailEl = page.querySelector('[data-suspend-email="1"]');
@@ -2579,7 +2587,10 @@
   state.ui.moderatorBtn = state.ui.moderatorBtn || null;
 
   function isModeratorSession(){
-    return !isAdminSession() && !!((state.session && state.session.isModerator) || (state.subscription && (state.subscription.isModerator || state.subscription.role === 'moderator')));
+    return !isAdminSession() && !!(
+      (state.session && (state.session.isModerator || state.session.role === 'moderator')) ||
+      (state.subscription && (state.subscription.isModerator || state.subscription.role === 'moderator'))
+    );
   }
 
   const __origPaymentStatusLabel = paymentStatusLabel;
@@ -2733,11 +2744,20 @@
   refreshSubscription = async function(){
     const wasAdmin = isAdminSession();
     const wasModerator = isModeratorSession();
+    const before = Object.assign({}, state.subscription || {});
     const data = await __origRefreshSubscription();
     state.subscription = Object.assign({ role: 'member', isModerator: false }, state.subscription || {}, data || {});
+    if (wasModerator && !(state.subscription && (state.subscription.isModerator || state.subscription.role === 'moderator'))) {
+      state.subscription.isModerator = true;
+      state.subscription.role = 'moderator';
+      if (!state.subscription.isPremium) state.subscription.isPremium = true;
+      if (!state.subscription.plan || state.subscription.plan === 'free') state.subscription.plan = 'moderator';
+      if (!state.subscription.status || state.subscription.status === 'free') state.subscription.status = 'active';
+      if (state.session) saveSession(Object.assign({}, state.session, { isModerator: true, role: state.session.role === 'admin' ? 'admin' : 'moderator' }));
+    }
     const nowAdmin = isAdminSession();
     const nowModerator = isModeratorSession();
-    if ((wasAdmin && !nowAdmin) || (wasModerator && !nowModerator)) {
+    if ((wasAdmin && !nowAdmin) || (wasModerator && !nowModerator && before.source === 'backend')) {
       if (state.activePage === 'admin' || state.activePage === 'moderator') state.activePage = 'signin';
       renderPages();
     }
@@ -2750,6 +2770,7 @@
     await refreshSession().catch(() => null);
     await refreshSubscription().catch(() => null);
     if (isModeratorSession()) await refreshModeratorQueue().catch(() => []);
+    if (isModeratorSession() || isAdminSession()) await refreshStaffChat().catch(() => []);
     if (isAdminSession()) {
       await refreshModeratorApplications().catch(() => []);
       await refreshActiveModerators().catch(() => []);
@@ -3063,6 +3084,7 @@
             <li>3. Approvals and disapprovals need notes so admin can see exactly what you put on them.</li>
           </ol>
         </div>
+        ${buildStaffChatHtml(theme)}
         ${cards}
       </div>`;
     page.querySelectorAll('[data-stepper-moderator-id]').forEach(card => {
@@ -3077,6 +3099,10 @@
       const disapproveBtn = card.querySelector('[data-action="disapprove-moderator"]');
       if (disapproveBtn) disapproveBtn.addEventListener('click', () => moderatorReviewSubmission(submissionId, 'disapprove', getNote()));
     });
+    const staffDraft = page.querySelector('[data-staff-chat-draft="1"]');
+    if (staffDraft) staffDraft.addEventListener('input', ()=>{ state.staffChatDraft = staffDraft.value; });
+    const sendStaffBtn = page.querySelector('[data-action="send-staff-chat"]');
+    if (sendStaffBtn) sendStaffBtn.addEventListener('click', ()=> sendStaffChatMessage(state.staffChatDraft));
   }
 
   function decorateSubscriptionPage(){
@@ -3277,6 +3303,7 @@ Newest user question: ${question}`;
       jobs.push(refreshNotifications().catch(() => null));
       jobs.push(refreshGlossaryApproved().catch(() => null));
       jobs.push(refreshSiteMemories().catch(() => null));
+      if (isAdminSession() || isModeratorSession()) jobs.push(refreshStaffChat().catch(() => null));
       if (isAdminSession()) {
         jobs.push(refreshAdminDances().catch(() => null));
         jobs.push(refreshSubmissions().catch(() => null));
@@ -3320,75 +3347,5 @@ Newest user question: ${question}`;
       if (state.activePage === 'admin' || state.activePage === 'moderator' || state.activePage === 'signin' || state.activePage === 'subscription') renderPages();
     }).catch(() => {}).finally(() => { __stepperLiveQueueRefreshBusy = false; });
   }, LIVE_QUEUE_SYNC_INTERVAL_MS);
-
-
-  function __stepperAdminTypingActive(){
-    const active = document.activeElement;
-    if (!active) return false;
-    if (active.closest && active.closest('#stepper-google-admin-page, #stepper-google-signin-page, #stepper-google-subscription-page, #stepper-google-moderator-page')) return true;
-    if (active.isContentEditable) return true;
-    const tag = String(active.tagName || '').toLowerCase();
-    return tag === 'input' || tag === 'textarea' || tag === 'select';
-  }
-
-  function __stepperOverlayPagesOpen(){
-    return state.activePage === 'admin' || state.activePage === 'signin' || state.activePage === 'subscription' || state.activePage === 'moderator';
-  }
-
-  function __stepperHideFloatingHost(id){
-    const host = document.getElementById(id);
-    if (!host) return;
-    host.innerHTML = '';
-    host.style.display = 'none';
-    host.hidden = true;
-  }
-
-  function __stepperFreezeNuisanceUi(){
-    if (!__stepperOverlayPagesOpen()) return false;
-    __stepperHideFloatingHost('stepper-google-save-host');
-    __stepperHideFloatingHost('stepper-site-helper-host');
-    __stepperHideFloatingHost('stepper-community-glossary-host');
-    const quick = document.getElementById('stepper-google-quick-actions-host');
-    if (quick) {
-      quick.innerHTML = '';
-      quick.style.display = 'none';
-      quick.hidden = true;
-    }
-    return true;
-  }
-
-  const __origRenderSaveButton2 = renderSaveButton;
-  renderSaveButton = function(){
-    if (__stepperFreezeNuisanceUi()) return;
-    return __origRenderSaveButton2();
-  };
-
-  const __origRenderSiteHelper2 = renderSiteHelper;
-  renderSiteHelper = function(){
-    if (__stepperFreezeNuisanceUi()) return;
-    return __origRenderSiteHelper2();
-  };
-
-  const __origRenderCommunityGlossary2 = renderCommunityGlossary;
-  renderCommunityGlossary = function(){
-    if (__stepperFreezeNuisanceUi()) return;
-    return __origRenderCommunityGlossary2();
-  };
-
-  const __origRenderQuickActions2 = renderQuickActions;
-  renderQuickActions = function(){
-    if (__stepperFreezeNuisanceUi()) return;
-    return __origRenderQuickActions2();
-  };
-
-  const __origRenderPages2 = renderPages;
-  renderPages = function(){
-    if (__stepperAdminTypingActive()) {
-      __stepperFreezeNuisanceUi();
-      return;
-    }
-    __origRenderPages2();
-    __stepperFreezeNuisanceUi();
-  };
 
 })();
