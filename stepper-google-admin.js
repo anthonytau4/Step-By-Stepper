@@ -3321,4 +3321,74 @@ Newest user question: ${question}`;
     }).catch(() => {}).finally(() => { __stepperLiveQueueRefreshBusy = false; });
   }, LIVE_QUEUE_SYNC_INTERVAL_MS);
 
+
+  function __stepperAdminTypingActive(){
+    const active = document.activeElement;
+    if (!active) return false;
+    if (active.closest && active.closest('#stepper-google-admin-page, #stepper-google-signin-page, #stepper-google-subscription-page, #stepper-google-moderator-page')) return true;
+    if (active.isContentEditable) return true;
+    const tag = String(active.tagName || '').toLowerCase();
+    return tag === 'input' || tag === 'textarea' || tag === 'select';
+  }
+
+  function __stepperOverlayPagesOpen(){
+    return state.activePage === 'admin' || state.activePage === 'signin' || state.activePage === 'subscription' || state.activePage === 'moderator';
+  }
+
+  function __stepperHideFloatingHost(id){
+    const host = document.getElementById(id);
+    if (!host) return;
+    host.innerHTML = '';
+    host.style.display = 'none';
+    host.hidden = true;
+  }
+
+  function __stepperFreezeNuisanceUi(){
+    if (!__stepperOverlayPagesOpen()) return false;
+    __stepperHideFloatingHost('stepper-google-save-host');
+    __stepperHideFloatingHost('stepper-site-helper-host');
+    __stepperHideFloatingHost('stepper-community-glossary-host');
+    const quick = document.getElementById('stepper-google-quick-actions-host');
+    if (quick) {
+      quick.innerHTML = '';
+      quick.style.display = 'none';
+      quick.hidden = true;
+    }
+    return true;
+  }
+
+  const __origRenderSaveButton2 = renderSaveButton;
+  renderSaveButton = function(){
+    if (__stepperFreezeNuisanceUi()) return;
+    return __origRenderSaveButton2();
+  };
+
+  const __origRenderSiteHelper2 = renderSiteHelper;
+  renderSiteHelper = function(){
+    if (__stepperFreezeNuisanceUi()) return;
+    return __origRenderSiteHelper2();
+  };
+
+  const __origRenderCommunityGlossary2 = renderCommunityGlossary;
+  renderCommunityGlossary = function(){
+    if (__stepperFreezeNuisanceUi()) return;
+    return __origRenderCommunityGlossary2();
+  };
+
+  const __origRenderQuickActions2 = renderQuickActions;
+  renderQuickActions = function(){
+    if (__stepperFreezeNuisanceUi()) return;
+    return __origRenderQuickActions2();
+  };
+
+  const __origRenderPages2 = renderPages;
+  renderPages = function(){
+    if (__stepperAdminTypingActive()) {
+      __stepperFreezeNuisanceUi();
+      return;
+    }
+    __origRenderPages2();
+    __stepperFreezeNuisanceUi();
+  };
+
 })();

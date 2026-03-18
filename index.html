@@ -1231,7 +1231,6 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     'New: counts now auto-sync from the built step content, and tags are left out of that total on purpose.',
     'New: phrased dance tools now support editable Parts, a Sequence tab, and tag-aware phrased building inspired by CopperKnob-style A/B/C + Tag sheets.',
     'New: right-click a section header to add that section straight into a new Part, and the labels start at A, B, C but stay editable.',
-    'New: Settings now gives you three quick font style buttons, and each one previews its look before you press it.',
     'New: Android dark-mode buttons and black UI strips now keep white text, the B / I / U controls wrap selected text instantly, and page switches now start right when the transition animation kicks off.',
     'Fix: Thinking Music no longer restarts itself every few seconds like a broken jukebox.',
     'Fix: the title screen now fits short phone screens properly instead of dropping below the viewport.',
@@ -2521,7 +2520,6 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     'New: counts now auto-sync from the built step content, and tags are left out of that total on purpose.',
     'New: phrased dance tools now support editable Parts, a Sequence tab, and tag-aware phrased building inspired by CopperKnob-style A/B/C + Tag sheets.',
     'New: right-click a section header to add that section straight into a new Part, and the labels start at A, B, C but stay editable.',
-    'New: Settings now gives you three quick font style buttons, and each one previews its look before you press it.',
     'New: Android dark-mode buttons and black UI strips now keep white text, the B / I / U controls wrap selected text instantly, and page switches now start right when the transition animation kicks off.',
     'Fix: Thinking Music no longer restarts itself every few seconds like a broken jukebox.',
     'Fix: the title screen now fits short phone screens properly instead of dropping below the viewport.',
@@ -2579,13 +2577,15 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     return {
       sfxEnabled: saved.sfxEnabled !== false,
       thinkingMusicEnabled: saved.thinkingMusicEnabled === true,
-      fontFamily: ['system','rounded','elegant'].includes(saved.fontFamily) ? saved.fontFamily : 'system'
+      fontFamily: 'system'
     };
   }
 
   function saveSettings(settings){
     const current = getSettings();
-    writeJson(SETTINGS_KEY, Object.assign({}, current, settings));
+    const next = Object.assign({}, current, settings || {});
+    next.fontFamily = 'system';
+    writeJson(SETTINGS_KEY, next);
   }
 
   function isDarkMode(){
@@ -2955,8 +2955,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   }
 
   function applyFontSettings(){
-    const settings = getSettings();
-    document.documentElement.style.setProperty('--stepper-font-family', FONT_FAMILIES[settings.fontFamily] || FONT_FAMILIES.system);
+    document.documentElement.style.setProperty('--stepper-font-family', FONT_FAMILIES.system);
   }
 
   function ensureInlineHost(){
@@ -3188,11 +3187,6 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     if (!panel) return;
     const theme = themeClasses();
     const settings = getSettings();
-    const fontChoices = [
-      { key:'system', title:'Classic', sample:'Clean editor finish', family: FONT_FAMILIES.system },
-      { key:'rounded', title:'Rounded', sample:'Soft and friendly', family: FONT_FAMILIES.rounded },
-      { key:'elegant', title:'Elegant', sample:'Formal sheet look', family: FONT_FAMILIES.elegant }
-    ];
     panel.className = `rounded-3xl border shadow-sm overflow-hidden ${theme.shell}`;
     panel.innerHTML = `
       <div class="px-6 py-5 border-b ${theme.panel}">
@@ -3200,15 +3194,8 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       </div>
       <div class="p-6 sm:p-8 space-y-5">
         <div class="rounded-3xl border p-5 sm:p-6 ${theme.soft}">
-          <div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle} mb-3">Font Style</div>
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            ${fontChoices.map(choice => `
-              <button type="button" class="stepper-font-choice ${theme.button}" data-font-choice="${choice.key}" data-active="${settings.fontFamily === choice.key ? 'true' : 'false'}" style="font-family:${choice.family}">
-                <strong>${escapeHtml(choice.title)}</strong>
-                <span>${escapeHtml(choice.sample)}</span>
-              </button>
-            `).join('')}
-          </div>
+          <div class="text-lg font-black tracking-tight">Fonts removed</div>
+          <p class="mt-2 text-sm ${theme.subtle}">The font changer has been removed so the editor and admin pages stop shifting around while you work.</p>
         </div>
         <button type="button" data-stepper-setting="sfx" class="rounded-3xl border w-full text-left p-5 sm:p-6 flex items-center justify-between gap-4 ${theme.soft}">
           <div><div class="text-lg font-black tracking-tight">SFX Sounds</div><p class="mt-1 text-sm ${theme.subtle}">Menu clicks, tab changes and all the little app noises.</p></div>
@@ -3222,14 +3209,8 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     `;
     panel.querySelector('[data-stepper-setting="sfx"]').addEventListener('click', () => { const current = getSettings(); current.sfxEnabled = !current.sfxEnabled; saveSettings(current); renderSettingsPanel(); });
     panel.querySelector('[data-stepper-setting="thinking"]').addEventListener('click', () => { const current = getSettings(); current.thinkingMusicEnabled = !current.thinkingMusicEnabled; saveSettings(current); renderSettingsPanel(); });
-    panel.querySelectorAll('[data-font-choice]').forEach(button => {
-      button.addEventListener('click', () => {
-        saveSettings({ fontFamily: button.getAttribute('data-font-choice') || 'system' });
-        applyFontSettings();
-        renderSettingsPanel();
-      });
-    });
   }
+
 
   function renderChoreoPanel(){
     const panel = document.getElementById('stepper-inline-choreography');
