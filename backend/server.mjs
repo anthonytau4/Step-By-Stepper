@@ -23,6 +23,12 @@ const dataDir = process.env.DATA_DIR
     ? path.join(path.resolve(renderDiskRoot), 'stepper-data')
     : path.join(__dirname, "data");
 const dbPath = path.join(dataDir, "stepper-db.json");
+
+console.log('[Stepper] RENDER_DISK_MOUNT_PATH =', process.env.RENDER_DISK_MOUNT_PATH || '(not set)');
+console.log('[Stepper] DATA_DIR =', process.env.DATA_DIR || '(not set)');
+console.log('[Stepper] resolved dataDir =', dataDir);
+console.log('[Stepper] resolved dbPath =', dbPath);
+
 const openaiClient = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
@@ -43,6 +49,20 @@ const builtInAllowedOrigins = [
 
 function normalizeEmail(value) {
   return String(value || "").trim().toLowerCase();
+}
+
+function normalizeUsername(value) {
+  return String(value || '').trim();
+}
+
+function isValidUsername(value) {
+  return /^(?=.*\d)[A-Za-z0-9]{6,}$/.test(String(value || '').trim());
+}
+
+function findUserKeyByUsername(db, username) {
+  const wanted = normalizeUsername(username).toLowerCase();
+  if (!wanted) return '';
+  return Object.keys(db.users || {}).find((key) => String(db.users?.[key]?.username || '').trim().toLowerCase() === wanted) || '';
 }
 
 function safeOrigin(value) {
@@ -356,6 +376,10 @@ function isModeratorBucket(bucket) {
   return String(bucket?.role || '').trim().toLowerCase() === 'moderator';
 }
 
+function isSignupComplete(bucket) {
+  return !!(bucket && bucket.signupCompleted && normalizeUsername(bucket.username));
+}
+
 function readBearerToken(req) {
   const auth = String(req.headers.authorization || "").trim();
   if (auth.toLowerCase().startsWith("bearer ")) return auth.slice(7).trim();
@@ -409,6 +433,17 @@ async function requireGoogleUser(req, res, next) {
       suspension: error?.suspension || null
     });
   }
+}
+
+
+async function requireCompletedGoogleUser(req, res, next) {
+  requireCompletedGoogleUser(req, res, async () => {
+    if (!isSignupComplete(req.stepperUserBucket)) {
+      res.status(403).json({ ok: false, error: 'Finish signing up with a locked username before using the site.', code: 'SIGNUP_REQUIRED', signupCompleted: false });
+      return;
+    }
+    next();
+  });
 }
 
 async function requireAdmin(req, res, next) {
@@ -622,12 +657,19 @@ function touchUser(db, profile, userKey) {
   const ownBucket = db.users[key] && typeof db.users[key] === "object" ? db.users[key] : null;
   const bucket = ownBucket || existingBucket || {};
   const createdAt = String(bucket.createdAt || "").trim() || new Date().toISOString();
+  const username = normalizeUsername(bucket.username || '');
+  const signupCompleted = !!(bucket.signupCompleted && username);
+  const googleName = String(profile?.name || bucket?.profile?.googleName || bucket?.profile?.name || profile?.email || "").trim();
   const merged = {
     ...bucket,
+    username,
+    signupCompleted,
+    signupCompletedAt: signupCompleted ? (String(bucket.signupCompletedAt || '').trim() || new Date().toISOString()) : null,
     profile: {
       sub: String(profile?.sub || bucket?.profile?.sub || "").trim(),
       email: String(profile?.email || bucket?.profile?.email || "").trim(),
-      name: String(profile?.name || bucket?.profile?.name || profile?.email || "").trim(),
+      name: String(username || googleName || profile?.email || "").trim(),
+      googleName,
       picture: String(profile?.picture || bucket?.profile?.picture || "").trim()
     },
     createdAt,
@@ -985,7 +1027,7 @@ app.post("/api/auth/google", async (req, res) => {
     const bucket = touchUser(db, profile, userKey);
     assertNotSuspended(bucket, profile);
     await writeDb(db);
-    res.json({ ok: true, profile, createdUser: !hadUserBefore, isAdmin: isAdminProfile(profile), isModerator: isModeratorBucket(bucket), role: getRoleForBucket(bucket, profile), onlineCount: getOnlineUsers(db).length, membership: bucket?.membership || getUserMembership(null, profile), suspension: suspensionPayload(bucket) });
+    res.json({ ok: true, profile: bucket?.profile || profile, createdUser: !hadUserBefore, isAdmin: isAdminProfile(profile), isModerator: isModeratorBucket(bucket), role: getRoleForBucket(bucket, profile), username: String(bucket?.username || '').trim(), signupCompleted: isSignupComplete(bucket), needsSignup: !isSignupComplete(bucket), onlineCount: getOnlineUsers(db).length, membership: bucket?.membership || getUserMembership(null, profile), suspension: suspensionPayload(bucket) });
   } catch (error) {
     res.status(error.status || 401).json({ ok: false, error: error?.message || "Google sign-in failed." });
   }
@@ -996,7 +1038,30 @@ app.get("/api/auth/me", requireGoogleUser, async (req, res) => {
   const bucket = touchUser(db, req.stepperUser, userKeyFromClaims(req.stepperClaims));
   assertNotSuspended(bucket, req.stepperUser);
   await writeDb(db);
-  res.json({ ok: true, profile: req.stepperUser, isAdmin: isAdminProfile(req.stepperUser), isModerator: isModeratorBucket(bucket), role: getRoleForBucket(bucket, req.stepperUser), onlineCount: getOnlineUsers(db).length, membership: bucket?.membership || getUserMembership(null, req.stepperUser), suspension: suspensionPayload(bucket) });
+  res.json({ ok: true, profile: bucket?.profile || req.stepperUser, isAdmin: isAdminProfile(req.stepperUser), isModerator: isModeratorBucket(bucket), role: getRoleForBucket(bucket, req.stepperUser), username: String(bucket?.username || '').trim(), signupCompleted: isSignupComplete(bucket), needsSignup: !isSignupComplete(bucket), onlineCount: getOnlineUsers(db).length, membership: bucket?.membership || getUserMembership(null, req.stepperUser), suspension: suspensionPayload(bucket) });
+});
+
+
+app.post("/api/auth/signup", requireGoogleUser, async (req, res) => {
+  const username = normalizeUsername(req.body?.username);
+  const confirmUsername = normalizeUsername(req.body?.confirmUsername);
+  if (username !== confirmUsername) return res.status(400).json({ ok:false, error:'Usernames must match exactly.' });
+  if (!isValidUsername(username)) return res.status(400).json({ ok:false, error:'Username must be at least 6 characters, letters/numbers only, and include at least 1 number.' });
+  const db = await readDb();
+  const key = userKeyFromClaims(req.stepperClaims);
+  const bucket = touchUser(db, req.stepperUser, key);
+  if (isSignupComplete(bucket)) return res.status(409).json({ ok:false, error:'This username is locked and cannot be changed.' });
+  const existingKey = findUserKeyByUsername(db, username);
+  if (existingKey && existingKey !== key) return res.status(409).json({ ok:false, error:'That username is already taken.' });
+  bucket.username = username;
+  bucket.signupCompleted = true;
+  bucket.signupCompletedAt = new Date().toISOString();
+  if (!bucket.profile || typeof bucket.profile !== 'object') bucket.profile = {};
+  bucket.profile.name = username;
+  if (!String(bucket.profile.googleName || '').trim()) bucket.profile.googleName = String(req.stepperUser?.name || req.stepperUser?.email || '').trim();
+  db.users[key] = bucket;
+  await writeDb(db);
+  res.json({ ok:true, username, signupCompleted:true, profile: bucket.profile, isAdmin: isAdminProfile(req.stepperUser), isModerator: isModeratorBucket(bucket), role: getRoleForBucket(bucket, req.stepperUser), membership: bucket?.membership || getUserMembership(bucket, req.stepperUser), suspension: suspensionPayload(bucket) });
 });
 
 app.get("/api/presence", async (_req, res) => {
@@ -1005,7 +1070,7 @@ app.get("/api/presence", async (_req, res) => {
   res.json({ ok: true, onlineCount: onlineUsers.length, members: onlineUsers });
 });
 
-app.post("/api/presence/heartbeat", requireGoogleUser, async (req, res) => {
+app.post("/api/presence/heartbeat", requireCompletedGoogleUser, async (req, res) => {
   const db = await readDb();
   touchUser(db, req.stepperUser, userKeyFromClaims(req.stepperClaims));
   await writeDb(db);
@@ -1014,7 +1079,7 @@ app.post("/api/presence/heartbeat", requireGoogleUser, async (req, res) => {
   res.json({ ok: true, onlineCount: onlineUsers.length, members: onlineUsers, isAdmin: isAdminProfile(req.stepperUser), isModerator: isModeratorBucket(bucket), role: getRoleForBucket(bucket, req.stepperUser), suspension: suspensionPayload(bucket) });
 });
 
-app.get("/api/cloud-saves", requireGoogleUser, async (req, res) => {
+app.get("/api/cloud-saves", requireCompletedGoogleUser, async (req, res) => {
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);
   touchUser(db, req.stepperUser, key);
@@ -1023,7 +1088,7 @@ app.get("/api/cloud-saves", requireGoogleUser, async (req, res) => {
   res.json({ ok: true, items: bucket.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0)) });
 });
 
-app.post("/api/cloud-saves/upsert", requireGoogleUser, async (req, res) => {
+app.post("/api/cloud-saves/upsert", requireCompletedGoogleUser, async (req, res) => {
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);
   touchUser(db, req.stepperUser, key);
@@ -1041,7 +1106,7 @@ app.post("/api/cloud-saves/upsert", requireGoogleUser, async (req, res) => {
   res.json({ ok: true, item: entry, registryItem, items: db.users[key].cloudSaves });
 });
 
-app.delete("/api/cloud-saves/:id", requireGoogleUser, async (req, res) => {
+app.delete("/api/cloud-saves/:id", requireCompletedGoogleUser, async (req, res) => {
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);
   touchUser(db, req.stepperUser, key);
@@ -1051,7 +1116,7 @@ app.delete("/api/cloud-saves/:id", requireGoogleUser, async (req, res) => {
   res.json({ ok: true, deletedId: String(req.params.id || "").trim() });
 });
 
-app.post("/api/submissions/request", requireGoogleUser, async (req, res) => {
+app.post("/api/submissions/request", requireCompletedGoogleUser, async (req, res) => {
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);
   touchUser(db, req.stepperUser, key);
@@ -1080,7 +1145,7 @@ app.post("/api/submissions/request", requireGoogleUser, async (req, res) => {
   res.json({ ok: true, submission });
 });
 
-app.get("/api/notifications", requireGoogleUser, async (req, res) => {
+app.get("/api/notifications", requireCompletedGoogleUser, async (req, res) => {
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);
   touchUser(db, req.stepperUser, key);
@@ -1089,7 +1154,7 @@ app.get("/api/notifications", requireGoogleUser, async (req, res) => {
   res.json({ ok: true, items, unreadCount: items.filter(item => !item.readAt).length });
 });
 
-app.post("/api/notifications/mark-read", requireGoogleUser, async (req, res) => {
+app.post("/api/notifications/mark-read", requireCompletedGoogleUser, async (req, res) => {
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);
   touchUser(db, req.stepperUser, key);
@@ -1234,7 +1299,7 @@ app.delete("/api/admin/feature/:registryId", requireAdmin, async (req, res) => {
   res.json({ ok: true, registryId });
 });
 
-app.post('/api/moderator/apply', requireGoogleUser, async (req, res) => {
+app.post('/api/moderator/apply', requireCompletedGoogleUser, async (req, res) => {
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);
   const bucket = touchUser(db, req.stepperUser, key);
@@ -1490,7 +1555,7 @@ app.get('/api/admin/security-alerts', requireAdmin, async (_req, res) => {
   res.json({ ok: true, items });
 });
 
-app.post('/api/security-alerts/strike', requireGoogleUser, async (req, res) => {
+app.post('/api/security-alerts/strike', requireCompletedGoogleUser, async (req, res) => {
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);
   const bucket = touchUser(db, req.stepperUser, key);
@@ -1574,7 +1639,7 @@ app.post('/api/moderator/submissions/:id/approve', requireModerator, async (req,
   res.json({ ok: true, item });
 });
 
-app.get('/api/subscription/status', requireGoogleUser, async (req, res) => {
+app.get('/api/subscription/status', requireCompletedGoogleUser, async (req, res) => {
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);
   const bucket = touchUser(db, req.stepperUser, key);
@@ -1583,7 +1648,7 @@ app.get('/api/subscription/status', requireGoogleUser, async (req, res) => {
   res.json({ ok: true, ...membership, role: getRoleForBucket(bucket, req.stepperUser), isModerator: isModeratorBucket(bucket), stripeEnabled: !!stripeSecretKey, stripePublishableKey, suspension: suspensionPayload(bucket) });
 });
 
-app.post('/api/subscription/create-checkout-session', requireGoogleUser, async (req, res) => {
+app.post('/api/subscription/create-checkout-session', requireCompletedGoogleUser, async (req, res) => {
   try {
     const plan = String(req.body?.plan || 'monthly').trim().toLowerCase() === 'yearly' ? 'yearly' : 'monthly';
     const db = await readDb();
@@ -1624,7 +1689,7 @@ app.post('/api/subscription/create-checkout-session', requireGoogleUser, async (
   }
 });
 
-app.post('/api/subscription/confirm', requireGoogleUser, async (req, res) => {
+app.post('/api/subscription/confirm', requireCompletedGoogleUser, async (req, res) => {
   try {
     const sessionId = String(req.body?.sessionId || '').trim();
     if (!sessionId) return res.status(400).json({ ok:false, error:'Missing sessionId.' });
@@ -1659,7 +1724,7 @@ app.get('/api/glossary/steps', async (_req, res) => {
   res.json({ ok:true, items });
 });
 
-app.post('/api/glossary/request', requireGoogleUser, async (req, res) => {
+app.post('/api/glossary/request', requireCompletedGoogleUser, async (req, res) => {
   const raw = req.body?.step && typeof req.body.step === 'object' ? req.body.step : {};
   const name = String(raw.name || '').trim();
   const description = String(raw.description || raw.desc || '').trim();
@@ -1761,7 +1826,7 @@ app.delete('/api/admin/site-memory/:id', requireAdmin, async (req, res) => {
   res.json({ ok:true, items: db.siteMemory });
 });
 
-app.post('/api/ai/dance-tools', requireGoogleUser, async (req, res) => {
+app.post('/api/ai/dance-tools', requireCompletedGoogleUser, async (req, res) => {
   const requestedMode = String(req.body?.mode || 'judge').trim().toLowerCase();
   const mode = requestedMode === 'add' ? 'add' : (requestedMode === 'counts' ? 'counts' : 'judge');
   const prompt = String(req.body?.prompt || '').trim();
@@ -1804,7 +1869,7 @@ ${approved.map(item => `- ${item.name} [${item.foot}] ${item.counts}: ${item.des
   }
 });
 
-app.post('/api/chatbot/help', requireGoogleUser, async (req, res) => {
+app.post('/api/chatbot/help', requireCompletedGoogleUser, async (req, res) => {
   const prompt = String(req.body?.prompt || '').trim();
   const context = req.body?.context && typeof req.body.context === 'object' ? req.body.context : {};
   const history = Array.isArray(req.body?.history) ? req.body.history : [];
