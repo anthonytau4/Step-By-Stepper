@@ -46,6 +46,7 @@
     glossaryRequests: [],
     siteMemories: [],
     aiDance: { busy: false, mode: 'judge', prompt: '', result: null },
+    adminUiSignature: '',
     communityGlossaryOpen: false,
     subscription: { isPremium: false, plan: 'free', status: 'free', source: 'unknown' },
     savedDancesUiSignature: '',
@@ -832,6 +833,7 @@
       await heartbeat();
       await refreshCloudSaves();
     state.savedDancesUiSignature = '';
+    state.adminUiSignature = '';
       await restoreLatestCloudSaveIfNeeded();
       await syncCurrentDanceToBackend(true);
       await refreshNotifications();
@@ -1095,7 +1097,7 @@
     const synced = await syncCurrentDanceToBackend(force || true);
     if (synced) {
       await refreshCloudSaves();
-    state.savedDancesUiSignature = '';
+      state.savedDancesUiSignature = '';
       renderSaveButton();
       return true;
     }
@@ -1135,7 +1137,7 @@
     try {
       await authFetch(`/api/cloud-saves/${encodeURIComponent(saveId)}`, { method: 'DELETE' });
       await refreshCloudSaves();
-    state.savedDancesUiSignature = '';
+      state.savedDancesUiSignature = '';
       renderPages();
       return true;
     } catch (error) {
@@ -1454,6 +1456,7 @@
         body: JSON.stringify({ text })
       });
       await refreshSiteMemories();
+      clearAdminEditorDirty();
       renderPages();
       return true;
     } catch (error) {
@@ -1811,7 +1814,7 @@
   function shouldPatchSavedDancesPage(){
     const page = document.getElementById('stepper-saved-dances-page');
     if (!page) return false;
-    return isActuallyVisible(page) || !!page.querySelector(':scope > *:not([hidden])');
+    return isActuallyVisible(page);
   }
 
   function patchSavedDancesPage(force){
@@ -2157,7 +2160,7 @@
 
   async function sendStaffChat(text){
     const clean = String(text || '').trim();
-    if (!clean) return;
+    if (!clean) return false;
     const res = await authFetch('/api/staff-chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2165,17 +2168,97 @@
     }).catch(() => null);
     if (!res || res.ok === false) {
       flash('Staff chat could not send right now.', 'error');
-      return;
+      return false;
     }
     state.staffChat = Array.isArray(res.messages) ? res.messages : (Array.isArray(state.staffChat) ? state.staffChat : []);
+    clearAdminEditorDirty();
     renderPages();
+    return true;
+  }
+
+  function getAdminUiSignature(){
+    const pick = (items, mapFn, limit) => (Array.isArray(items) ? items : []).slice(0, limit || 60).map(mapFn).join('|');
+    return JSON.stringify({
+      activePage: state.activePage || '',
+      onlineCount: (state.presence && state.presence.onlineCount) || 0,
+      submissions: pick(state.submissions, item => [
+        item && item.id || '',
+        item && item.registryId || '',
+        item && item.updatedAt || '',
+        item && item.requestType || '',
+        item && item.status || ''
+      ].join('~'), 80),
+      dances: pick(state.adminDances, item => [
+        item && item.registryId || '',
+        item && item.updatedAt || '',
+        item && item.title || '',
+        item && item.featureTone || '',
+        item && item.isFeatured ? '1' : '0'
+      ].join('~'), 120),
+      modApps: pick(state.moderatorApplications, item => [item && item.id || '', item && item.updatedAt || '', item && item.email || ''].join('~'), 60),
+      moderators: pick(state.activeModerators, item => [item && item.userKey || '', item && item.email || '', item && item.updatedAt || ''].join('~'), 60),
+      suspensions: pick(state.suspensions, item => [item && item.userKey || '', item && item.email || '', item && item.expiresAt || ''].join('~'), 60),
+      alerts: pick(state.securityAlerts, item => [item && item.id || '', item && item.createdAt || '', item && item.type || ''].join('~'), 60),
+      glossaryApproved: pick(state.glossaryApproved, item => [item && item.id || '', item && item.updatedAt || '', item && item.name || ''].join('~'), 60),
+      glossaryRequests: pick(state.glossaryRequests, item => [item && item.id || '', item && item.updatedAt || '', item && item.name || '', item && item.status || 'pending'].join('~'), 60),
+      siteMemories: pick(state.siteMemories, item => [item && item.id || '', item && item.createdAt || '', item && item.text || ''].join('~'), 80),
+      staffChat: pick(state.chatMessages, item => [item && item.id || '', item && item.createdAt || '', item && item.text || ''].join('~'), 80)
+    });
+  }
+
+  function isAdminEditorElement(element){
+    if (!element || !element.matches) return false;
+    if (element.isContentEditable) return true;
+    if (!element.matches('input, textarea, select')) return false;
+    const type = String(element.getAttribute('type') || '').toLowerCase();
+    return !['hidden','button','submit','reset','checkbox','radio','file'].includes(type);
+  }
+
+  function markAdminEditorDirty(element){
+    if (!isAdminEditorElement(element)) return;
+    element.setAttribute('data-stepper-dirty', '1');
+  }
+
+  function clearAdminEditorDirty(scope){
+    const root = scope && scope.querySelectorAll ? scope : document.getElementById(ADMIN_PAGE_ID);
+    if (!root || !root.querySelectorAll) return;
+    root.querySelectorAll('[data-stepper-dirty="1"]').forEach(node => node.removeAttribute('data-stepper-dirty'));
+  }
+
+  function adminPageHasLiveEditor(page){
+    if (!page) return false;
+    if (page.querySelector('[data-stepper-dirty="1"]')) return true;
+    const active = document.activeElement;
+    if (!active || !active.closest || !active.closest('#' + ADMIN_PAGE_ID)) return false;
+    return isAdminEditorElement(active);
+  }
+
+  function wireAdminDraftGuards(page){
+    if (!page || page.__stepperDraftGuardWired) return;
+    page.__stepperDraftGuardWired = true;
+    const markDirtyFromEvent = (event) => {
+      const target = event && event.target;
+      if (!target || !target.closest || !target.closest('#' + ADMIN_PAGE_ID)) return;
+      markAdminEditorDirty(target);
+    };
+    page.addEventListener('input', markDirtyFromEvent, true);
+    page.addEventListener('change', markDirtyFromEvent, true);
   }
 
   function renderAdminPage(){
     const page = document.getElementById(ADMIN_PAGE_ID);
     if (!page) return;
+    wireAdminDraftGuards(page);
     const theme = themeClasses();
+    const adminSignature = getAdminUiSignature();
+    if (isAdminSession() && adminPageHasLiveEditor(page)) return;
+    if (isAdminSession() && state.adminUiSignature === adminSignature) {
+      renderPresenceOnly();
+      return;
+    }
+    state.adminUiSignature = adminSignature;
     if (!isAdminSession()) {
+      state.adminUiSignature = '';
       page.className = `rounded-3xl border shadow-sm overflow-hidden ${theme.shell}`;
       page.innerHTML = `
         <div class="px-6 py-5 border-b ${theme.panel}">
@@ -2330,30 +2413,40 @@
       const userKey = card.getAttribute('data-stepper-active-mod-key');
       const noteEl = card.querySelector('[data-remove-mod-note="1"]');
       const removeBtn = card.querySelector('[data-action="remove-moderator"]');
-      if (removeBtn) removeBtn.addEventListener('click', () => removeModeratorAccess(userKey, noteEl && noteEl.value));
+      if (removeBtn) removeBtn.addEventListener('click', async () => {
+        const ok = await removeModeratorAccess(userKey, noteEl && noteEl.value);
+        if (ok) clearAdminEditorDirty(page);
+      });
     });
     const staffSendBtn = page.querySelector('[data-action="send-staff-chat"]');
-    if (staffSendBtn) staffSendBtn.addEventListener('click', () => {
+    if (staffSendBtn) staffSendBtn.addEventListener('click', async () => {
       const input = page.querySelector('[data-stepper-staff-chat-input="1"]');
       const text = input && input.value;
-      sendStaffChat(text);
-      if (input) input.value = '';
+      const ok = await sendStaffChat(text);
+      if (ok) {
+        clearAdminEditorDirty(page);
+        if (input) input.value = '';
+      }
     });
 
     const addModeratorBtn = page.querySelector('[data-action="add-moderator-email"]');
-    if (addModeratorBtn) addModeratorBtn.addEventListener('click', () => {
+    if (addModeratorBtn) addModeratorBtn.addEventListener('click', async () => {
       const emailEl = page.querySelector('[data-add-moderator-email="1"]');
-      addModeratorByEmail(emailEl && emailEl.value);
-      if (emailEl) emailEl.value = '';
+      const ok = await addModeratorByEmail(emailEl && emailEl.value);
+      if (ok) {
+        clearAdminEditorDirty(page);
+        if (emailEl) emailEl.value = '';
+      }
     });
     const suspendBtn = page.querySelector('[data-action="suspend-person"]');
-    if (suspendBtn) suspendBtn.addEventListener('click', () => {
+    if (suspendBtn) suspendBtn.addEventListener('click', async () => {
       const emailEl = page.querySelector('[data-suspend-email="1"]');
       const durationEl = page.querySelector('[data-suspend-duration="1"]');
       const reasonEl = page.querySelector('[data-suspend-reason="1"]');
       const durationMs = Number(durationEl && durationEl.value || 300000);
       const durationLabel = durationEl && durationEl.options && durationEl.selectedIndex >= 0 ? durationEl.options[durationEl.selectedIndex].text : '5 minutes';
-      suspendMember(emailEl && emailEl.value, durationMs, durationLabel, reasonEl && reasonEl.value);
+      const ok = await suspendMember(emailEl && emailEl.value, durationMs, durationLabel, reasonEl && reasonEl.value);
+      if (ok) clearAdminEditorDirty(page);
     });
     page.querySelectorAll('[data-stepper-suspension-key]').forEach(card => {
       const userKey = card.getAttribute('data-stepper-suspension-key');
@@ -2366,7 +2459,10 @@
       const input = page.querySelector('[data-stepper-site-memory-input="1"]');
       const value = input ? input.value : '';
       const ok = await addSiteMemory(value);
-      if (ok && input) input.value = '';
+      if (ok) {
+        clearAdminEditorDirty(page);
+        if (input) input.value = '';
+      }
     });
     page.querySelectorAll('[data-stepper-site-memory-id]').forEach(card => {
       const id = card.getAttribute('data-stepper-site-memory-id') || '';
@@ -2496,7 +2592,8 @@
       await refreshSession();
       await heartbeat();
       await refreshCloudSaves();
-    state.savedDancesUiSignature = '';
+      state.savedDancesUiSignature = '';
+      state.adminUiSignature = '';
       await restoreLatestCloudSaveIfNeeded();
       await syncCurrentDanceToBackend(false);
       await refreshNotifications();
@@ -2556,6 +2653,7 @@
   window.addEventListener('storage', () => {
     if (state.session && state.session.credential) syncCurrentDanceToBackend(false);
     state.savedDancesUiSignature = '';
+    state.adminUiSignature = '';
     renderPages();
   });
 
@@ -2900,10 +2998,13 @@
         body: JSON.stringify({ email, durationMs, durationLabel, reason })
       });
       await Promise.all([refreshSuspensions(), refreshSecurityAlerts()]);
+      clearAdminEditorDirty();
       renderPages();
       alert('Bar saved.');
+      return true;
     } catch (error) {
       alert(error.message || 'Could not bar that person.');
+      return false;
     }
   }
 
@@ -2925,10 +3026,13 @@
         body: JSON.stringify({ email })
       });
       await Promise.all([refreshActiveModerators(), refreshModeratorApplications()]);
+      clearAdminEditorDirty();
       renderPages();
       alert('Moderator added.');
+      return true;
     } catch (error) {
       alert(error.message || 'Could not add moderator.');
+      return false;
     }
   }
 
@@ -2964,10 +3068,10 @@
 
   async function removeModeratorAccess(userKey, reason){
     const note = String(reason || '').trim();
-    if (!userKey) return;
+    if (!userKey) return false;
     if (!note) {
       alert('Add a reason so the removed moderator can see why on next startup.');
-      return;
+      return false;
     }
     try {
       await authFetch(`/api/admin/moderators/${encodeURIComponent(userKey)}/remove`, {
@@ -2976,9 +3080,12 @@
         body: JSON.stringify({ reason: note })
       });
       await refreshActiveModerators().catch(() => []);
+      clearAdminEditorDirty();
       renderPages();
+      return true;
     } catch (error) {
       alert(error.message || 'Could not remove moderator access.');
+      return false;
     }
   }
 
