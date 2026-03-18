@@ -168,7 +168,7 @@ async function runSiteHelperAI({ system, prompt, history = [], preferredModel = 
 
 function getUserMembership(bucket, profile = null) {
   const current = bucket && bucket.membership && typeof bucket.membership === 'object' ? bucket.membership : {};
-  const admin = normalizeEmail(profile?.email || bucket?.profile?.email) === adminEmail;
+  const admin = isAdminProfile(profile || bucket?.profile, null) || String(bucket?.role || '').trim().toLowerCase() === 'admin';
   const role = String(bucket?.role || '').trim().toLowerCase();
   if (admin) {
     return { isPremium: true, status: 'active', plan: 'admin', source: 'admin', updatedAt: new Date().toISOString() };
@@ -277,8 +277,8 @@ function assertNotSuspended(bucket, profile = null) {
   throw error;
 }
 
-function getRoleForBucket(bucket, profile = null) {
-  if (isAdminProfile(profile || bucket?.profile)) return 'admin';
+function getRoleForBucket(bucket, profile = null, db = null) {
+  if (String(bucket?.role || '').trim().toLowerCase() === 'admin' || isAdminProfile(profile || bucket?.profile, db)) return 'admin';
   return isModeratorBucket(bucket) ? 'moderator' : 'member';
 }
 
@@ -334,6 +334,7 @@ function emptyDb() {
     submissions: [],
     moderatorApplications: [],
     moderatorRegistry: [],
+    adminRegistry: [],
     pendingModeratorInvites: [],
     pendingSuspensions: [],
     glossaryRequests: [],
@@ -373,6 +374,7 @@ async function readDbFromPath(targetPath) {
   if (!Array.isArray(parsed.submissions)) parsed.submissions = [];
   if (!Array.isArray(parsed.moderatorApplications)) parsed.moderatorApplications = [];
   if (!Array.isArray(parsed.moderatorRegistry)) parsed.moderatorRegistry = [];
+  if (!Array.isArray(parsed.adminRegistry)) parsed.adminRegistry = [];
   if (!Array.isArray(parsed.pendingModeratorInvites)) parsed.pendingModeratorInvites = [];
   if (!Array.isArray(parsed.pendingSuspensions)) parsed.pendingSuspensions = [];
   if (!Array.isArray(parsed.glossaryRequests)) parsed.glossaryRequests = [];
@@ -433,9 +435,59 @@ async function readDb() {
   }
 }
 
+
+function syncAdminRegistry(db) {
+  if (!db || typeof db !== 'object') return db;
+  const byEmail = new Map();
+  const list = Array.isArray(db.adminRegistry) ? db.adminRegistry : [];
+  list.forEach((item) => {
+    const email = normalizeEmail(item?.email);
+    if (!email) return;
+    byEmail.set(email, {
+      email,
+      userKey: String(item?.userKey || '').trim(),
+      name: String(item?.name || email).trim().slice(0, 200),
+      grantedAt: String(item?.grantedAt || new Date().toISOString()).trim(),
+      grantedBy: {
+        email: String(item?.grantedBy?.email || '').trim(),
+        name: String(item?.grantedBy?.name || item?.grantedBy?.email || '').trim()
+      },
+      note: String(item?.note || '').trim().slice(0, 800)
+    });
+  });
+  if (adminEmail) {
+    const existing = byEmail.get(adminEmail) || {};
+    byEmail.set(adminEmail, {
+      email: adminEmail,
+      userKey: String(existing.userKey || '').trim(),
+      name: String(existing.name || adminEmail).trim().slice(0, 200),
+      grantedAt: String(existing.grantedAt || new Date().toISOString()).trim(),
+      grantedBy: existing.grantedBy && typeof existing.grantedBy === 'object' ? existing.grantedBy : { email: adminEmail, name: 'System' },
+      note: String(existing.note || 'Configured admin email').trim().slice(0, 800)
+    });
+  }
+  Object.entries(db.users || {}).forEach(([userKey, bucket]) => {
+    const email = normalizeEmail(bucket?.profile?.email);
+    if (!email) return;
+    const role = String(bucket?.role || '').trim().toLowerCase();
+    if (role !== 'admin' && email !== adminEmail) return;
+    const existing = byEmail.get(email) || {};
+    byEmail.set(email, {
+      email,
+      userKey: String(userKey || existing.userKey || '').trim(),
+      name: String(bucket?.profile?.name || existing.name || email).trim().slice(0, 200),
+      grantedAt: String(existing.grantedAt || bucket?.updatedAt || bucket?.createdAt || new Date().toISOString()).trim(),
+      grantedBy: existing.grantedBy && typeof existing.grantedBy === 'object' ? existing.grantedBy : { email: adminEmail, name: 'System' },
+      note: String(existing.note || (email === adminEmail ? 'Configured admin email' : 'Persisted admin account')).trim().slice(0, 800)
+    });
+  });
+  db.adminRegistry = Array.from(byEmail.values()).sort((a, b) => a.name.localeCompare(b.name));
+  return db;
+}
+
 async function writeDb(payload) {
   await ensureDb();
-  const data = JSON.stringify(syncModeratorRegistry(syncAndPruneDb(payload)), null, 2);
+  const data = JSON.stringify(syncAdminRegistry(syncModeratorRegistry(syncAndPruneDb(payload))), null, 2);
   try {
     try {
       await fs.copyFile(dbPath, dbBackupPath);
@@ -464,8 +516,19 @@ function pickProfile(claims) {
   };
 }
 
-function isAdminProfile(profile) {
-  return normalizeEmail(profile?.email) === adminEmail;
+function hasPersistentAdminAccess(db, value) {
+  const email = normalizeEmail(value?.email || value?.profile?.email || value);
+  if (!email) return false;
+  if (email === adminEmail) return true;
+  const list = Array.isArray(db?.adminRegistry) ? db.adminRegistry : [];
+  return list.some((item) => normalizeEmail(item?.email) === email);
+}
+
+function isAdminProfile(profile, db = null) {
+  const email = normalizeEmail(profile?.email);
+  if (!email) return false;
+  if (email === adminEmail) return true;
+  return !!(db && hasPersistentAdminAccess(db, email));
 }
 
 function isModeratorBucket(bucket) {
@@ -529,10 +592,15 @@ async function requireGoogleUser(req, res, next) {
 
 async function requireAdmin(req, res, next) {
   requireGoogleUser(req, res, async () => {
-    if (!isAdminProfile(req.stepperUser)) {
+    const db = await readDb();
+    const bucket = touchUser(db, req.stepperUser, userKeyFromClaims(req.stepperClaims));
+    if (!isAdminProfile(req.stepperUser, db) && String(bucket?.role || '').trim().toLowerCase() !== 'admin') {
+      await writeDb(db);
       res.status(403).json({ ok: false, error: "Admin access only." });
       return;
     }
+    await writeDb(db);
+    req.stepperUserBucket = bucket;
     next();
   });
 }
@@ -873,6 +941,43 @@ function applyPendingAccountState(db, bucket, profile) {
   return bucket;
 }
 
+function findAdminRegistryIndex(db, email) {
+  const wanted = normalizeEmail(email);
+  if (!wanted) return -1;
+  const list = Array.isArray(db?.adminRegistry) ? db.adminRegistry : [];
+  return list.findIndex(item => normalizeEmail(item?.email) === wanted);
+}
+
+function upsertAdminRegistryEntry(db, payload = {}) {
+  if (!Array.isArray(db.adminRegistry)) db.adminRegistry = [];
+  const email = normalizeEmail(payload.email);
+  if (!email) return null;
+  const item = {
+    email,
+    userKey: String(payload.userKey || '').trim(),
+    name: String(payload.name || email).trim().slice(0, 200),
+    grantedAt: String(payload.grantedAt || new Date().toISOString()).trim(),
+    grantedBy: {
+      email: String(payload.grantedBy?.email || adminEmail || '').trim(),
+      name: String(payload.grantedBy?.name || payload.grantedBy?.email || 'System').trim()
+    },
+    note: String(payload.note || '').trim().slice(0, 800)
+  };
+  const idx = findAdminRegistryIndex(db, email);
+  if (idx >= 0) db.adminRegistry[idx] = { ...db.adminRegistry[idx], ...item };
+  else db.adminRegistry.unshift(item);
+  db.adminRegistry = db.adminRegistry.slice(0, 1000);
+  return db.adminRegistry.find(entry => normalizeEmail(entry?.email) === email) || item;
+}
+
+function removeAdminRegistryEntry(db, email) {
+  const wanted = normalizeEmail(email);
+  if (!wanted || wanted === adminEmail) return false;
+  const before = Array.isArray(db.adminRegistry) ? db.adminRegistry.length : 0;
+  db.adminRegistry = (Array.isArray(db.adminRegistry) ? db.adminRegistry : []).filter(item => normalizeEmail(item?.email) !== wanted);
+  return db.adminRegistry.length !== before;
+}
+
 function touchUser(db, profile, userKey) {
   const key = String(userKey || profile?.sub || profile?.email || "").trim();
   if (!key) return null;
@@ -890,7 +995,8 @@ function touchUser(db, profile, userKey) {
     ...(Array.isArray(baseBucket.notifications) ? baseBucket.notifications : []),
     ...(Array.isArray(migratedBucket?.notifications) ? migratedBucket.notifications : [])
   ];
-  const mergedRole = (isModeratorBucket(baseBucket) || isModeratorBucket(migratedBucket) || hasPersistentModeratorAccess(db, profile) || hasPersistentModeratorAccess(db, baseBucket) || hasPersistentModeratorAccess(db, migratedBucket)) ? 'moderator' : '';
+  const hasAdmin = isAdminProfile(profile, db) || String(baseBucket?.role || '').trim().toLowerCase() === 'admin' || String(migratedBucket?.role || '').trim().toLowerCase() === 'admin' || hasPersistentAdminAccess(db, profile) || hasPersistentAdminAccess(db, baseBucket) || hasPersistentAdminAccess(db, migratedBucket);
+  const mergedRole = hasAdmin ? 'admin' : ((isModeratorBucket(baseBucket) || isModeratorBucket(migratedBucket) || hasPersistentModeratorAccess(db, profile) || hasPersistentModeratorAccess(db, baseBucket) || hasPersistentModeratorAccess(db, migratedBucket)) ? 'moderator' : '');
   const mergedSuspension = (baseBucket.suspension && typeof baseBucket.suspension === 'object')
     ? baseBucket.suspension
     : (migratedBucket?.suspension && typeof migratedBucket.suspension === 'object' ? migratedBucket.suspension : null);
@@ -914,6 +1020,10 @@ function touchUser(db, profile, userKey) {
   };
   if (emailKey && emailKey !== key) delete db.users[emailKey];
   applyPendingAccountState(db, db.users[key], profile);
+  if (email && (hasAdmin || String(db.users[key]?.role || '').trim().toLowerCase() === 'admin')) {
+    db.users[key].role = 'admin';
+    upsertAdminRegistryEntry(db, { email, userKey: key, name: String(profile?.name || db.users[key]?.profile?.name || email).trim(), note: email === adminEmail ? 'Configured admin email' : 'Persisted admin account' });
+  }
   if (isModeratorBucket(db.users[key]) && email) {
     upsertModeratorRegistryEntry(db, { email, userKey: key, name: String(profile?.name || db.users[key]?.profile?.name || email).trim() });
   }
@@ -1218,7 +1328,7 @@ app.post("/api/auth/google", async (req, res) => {
     const bucket = touchUser(db, profile, userKey);
     assertNotSuspended(bucket, profile);
     await writeDb(db);
-    res.json({ ok: true, profile, isAdmin: isAdminProfile(profile), isModerator: isModeratorBucket(bucket), role: getRoleForBucket(bucket, profile), onlineCount: getOnlineUsers(db).length, membership: bucket?.membership || getUserMembership(null, profile), suspension: suspensionPayload(bucket) });
+    res.json({ ok: true, profile, isAdmin: isAdminProfile(profile, db) || String(bucket?.role || '').trim().toLowerCase() === 'admin', isModerator: isModeratorBucket(bucket), role: getRoleForBucket(bucket, profile), onlineCount: getOnlineUsers(db).length, membership: bucket?.membership || getUserMembership(null, profile), suspension: suspensionPayload(bucket) });
   } catch (error) {
     res.status(error.status || 401).json({ ok: false, error: error?.message || "Google sign-in failed." });
   }
@@ -1229,7 +1339,7 @@ app.get("/api/auth/me", requireGoogleUser, async (req, res) => {
   const bucket = touchUser(db, req.stepperUser, userKeyFromClaims(req.stepperClaims));
   assertNotSuspended(bucket, req.stepperUser);
   await writeDb(db);
-  res.json({ ok: true, profile: req.stepperUser, isAdmin: isAdminProfile(req.stepperUser), isModerator: isModeratorBucket(bucket), role: getRoleForBucket(bucket, req.stepperUser), onlineCount: getOnlineUsers(db).length, membership: bucket?.membership || getUserMembership(null, req.stepperUser), suspension: suspensionPayload(bucket) });
+  res.json({ ok: true, profile: req.stepperUser, isAdmin: isAdminProfile(req.stepperUser, db) || String(bucket?.role || '').trim().toLowerCase() === 'admin', isModerator: isModeratorBucket(bucket), role: getRoleForBucket(bucket, req.stepperUser), onlineCount: getOnlineUsers(db).length, membership: bucket?.membership || getUserMembership(null, req.stepperUser), suspension: suspensionPayload(bucket) });
 });
 
 app.get("/api/presence", async (_req, res) => {
@@ -1244,7 +1354,7 @@ app.post("/api/presence/heartbeat", requireGoogleUser, async (req, res) => {
   await writeDb(db);
   const onlineUsers = getOnlineUsers(db);
   const bucket = db.users[userKeyFromClaims(req.stepperClaims)] || null;
-  res.json({ ok: true, onlineCount: onlineUsers.length, members: onlineUsers, isAdmin: isAdminProfile(req.stepperUser), isModerator: isModeratorBucket(bucket), role: getRoleForBucket(bucket, req.stepperUser), suspension: suspensionPayload(bucket) });
+  res.json({ ok: true, onlineCount: onlineUsers.length, members: onlineUsers, isAdmin: isAdminProfile(req.stepperUser, db) || String(bucket?.role || '').trim().toLowerCase() === 'admin', isModerator: isModeratorBucket(bucket), role: getRoleForBucket(bucket, req.stepperUser), suspension: suspensionPayload(bucket) });
 });
 
 app.get("/api/cloud-saves", requireGoogleUser, async (req, res) => {
