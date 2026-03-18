@@ -1,412 +1,607 @@
 
 (function(){
-  if (window.__stepperFaviconTransitionInstalled) return;
-  window.__stepperFaviconTransitionInstalled = true;
+  if (window.__stepperSettingsTextureInstalled) return;
+  window.__stepperSettingsTextureInstalled = true;
 
-  const GIF_PLAY_MS = 1830;
-  const HOLD_MS = 180;
-  const FADE_MS = 160;
-  const TOTAL_MS = GIF_PLAY_MS + HOLD_MS + FADE_MS;
-  const CHANGE_MS = GIF_PLAY_MS;
-  const STARTUP_AUDIO_MS = 4064;
-  const STARTUP_MS = Math.max(GIF_PLAY_MS + 220, STARTUP_AUDIO_MS + 260);
-  const overlayId = 'stepper-snake-transition-overlay';
-  const transitionGifSrc = './1000035328.gif';
-  const startupSongSrc = './startup-song.m4a';
-  let overlay = null;
-  let burstHost = null;
-  let running = false;
-  let startupShown = false;
-  let warmGif = null;
-  let startupAudio = null;
+  const SETTINGS_KEY = "stepper_audio_settings_v2";
+  const BUILDER_KEY = "linedance_builder_data_v13";
+  const THINKING_TRACK = "./thinking-music.wav";
+  const SFX_FILES = ["light-mode.mp3","dark-mode.mp3","tab-change.wav","ui-action.mp3","open-right-click.mp3","delete.mp3"];
+  const originalPlay = HTMLMediaElement.prototype.play;
+  let thinkingAudio = null;
+  let settings = Object.assign({ sfxEnabled: true, thinkingMusicEnabled: false }, safeReadJSON(SETTINGS_KEY, {}));
 
-  function ensureOverlay(){
-    if (overlay) return overlay;
-    const style = document.createElement('style');
-    style.textContent = `
-      .stepper-favicon-transition[hidden],
-      .stepper-startup-splash[hidden] { display: none !important; }
-      .stepper-favicon-transition,
-      .stepper-startup-splash {
-        position: fixed;
-        inset: 0;
-        z-index: 2147483646;
-        pointer-events: none;
-        overflow: hidden;
-        opacity: 0;
-      }
-      .stepper-favicon-transition {
-        background: #000;
-      }
-      .stepper-favicon-burst-host {
-        position: absolute;
-        inset: 0;
-      }
-      .stepper-favicon-burst {
-        position: absolute;
-        left: 50%;
-        top: 50%;
-        width: min(92vmin, 620px);
-        height: min(92vmin, 620px);
-        object-fit: contain;
-        transform: translate(-50%, -50%);
-        opacity: 0;
-        filter: drop-shadow(0 0 34px rgba(255,170,65,.22));
-        will-change: opacity, filter;
-      }
-      .stepper-favicon-transition.is-running {
-        animation: stepperSnakeOverlay ${TOTAL_MS}ms linear forwards;
-      }
-      .stepper-favicon-transition.is-running .stepper-favicon-burst {
-        animation: stepperSnakePresence ${TOTAL_MS}ms linear forwards;
-      }
-      .stepper-startup-splash {
-        z-index: 2147483647;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 100vw;
-        height: 100dvh;
-        min-height: 100vh;
-        background: #000;
-        pointer-events: auto;
-        opacity: 1;
-      }
-      .stepper-startup-splash.is-intro {
-        opacity: 1;
-      }
-      .stepper-startup-splash.is-running {
-        animation: stepperStartupOverlay ${STARTUP_MS}ms ease forwards;
-      }
-      .stepper-startup-intro {
-        position: absolute;
-        inset: 0;
-        display: flex;
-        align-items: stretch;
-        justify-content: center;
-        padding: clamp(18px, 3vw, 34px);
-        background:
-          radial-gradient(circle at 18% 14%, rgba(99,102,241,.22), transparent 30%),
-          radial-gradient(circle at 82% 22%, rgba(56,189,248,.14), transparent 24%),
-          linear-gradient(180deg, #0d0f17 0%, #050608 58%, #000 100%);
-        transition: opacity 200ms ease, transform 200ms ease;
-        overflow: hidden;
-      }
-      .stepper-startup-intro::before,
-      .stepper-startup-intro::after {
-        content: '';
-        position: absolute;
-        inset: auto;
-        border-radius: 999px;
-        pointer-events: none;
-        filter: blur(16px);
-        opacity: .45;
-      }
-      .stepper-startup-intro::before {
-        width: 38vmax;
-        height: 38vmax;
-        right: -12vmax;
-        top: -10vmax;
-        background: radial-gradient(circle, rgba(79,70,229,.35), rgba(79,70,229,0));
-      }
-      .stepper-startup-intro::after {
-        width: 30vmax;
-        height: 30vmax;
-        left: -8vmax;
-        bottom: -10vmax;
-        background: radial-gradient(circle, rgba(34,211,238,.2), rgba(34,211,238,0));
-      }
-      .stepper-startup-splash.is-running .stepper-startup-intro {
-        opacity: 0;
-        transform: scale(.985);
-        pointer-events: none;
-      }
-      .stepper-startup-shell {
-        position: relative;
-        z-index: 1;
-        width: min(1200px, 100%);
-        min-height: 100%;
-        display: grid;
-        grid-template-columns: minmax(0, 1.08fr) minmax(280px, .92fr);
-        gap: clamp(24px, 4vw, 54px);
-        align-items: center;
-      }
-      .stepper-startup-copywrap {
-        color: #fff;
-        display: flex;
-        flex-direction: column;
-        gap: 18px;
-      }
-      .stepper-startup-intro-card {
-        width: 100%;
-        border-radius: 36px;
-        padding: clamp(26px, 4vw, 42px);
-        background: linear-gradient(180deg, rgba(18,20,28,.84), rgba(10,10,14,.92));
-        border: 1px solid rgba(165,180,252,.28);
-        box-shadow: 0 30px 100px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.07);
-        text-align: left;
-        color: #fff;
-        backdrop-filter: blur(10px);
-      }
-      .stepper-startup-kicker {
-        display: inline-flex;
-        align-items: center;
-        gap: 10px;
-        margin: 0;
-        padding: 10px 14px;
-        border-radius: 999px;
-        font-size: clamp(11px, 2vw, 13px);
-        font-weight: 900;
-        letter-spacing: .22em;
-        text-transform: uppercase;
-        color: rgba(224,231,255,.96);
-        background: rgba(99,102,241,.14);
-        border: 1px solid rgba(165,180,252,.2);
-        width: fit-content;
-      }
-      .stepper-startup-headline {
-        margin: 0;
-        font-size: clamp(40px, 7vw, 74px);
-        line-height: .92;
-        font-weight: 950;
-        letter-spacing: -.05em;
-        text-wrap: balance;
-      }
-      .stepper-startup-headline span {
-        display: block;
-        color: #a5b4fc;
-      }
-      .stepper-startup-copy {
-        margin: 0;
-        max-width: 32rem;
-        font-size: clamp(15px, 2.5vw, 19px);
-        line-height: 1.5;
-        color: rgba(255,255,255,.8);
-      }
-      .stepper-startup-chip-row {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-      }
-      .stepper-startup-chip {
-        padding: 10px 14px;
-        border-radius: 999px;
-        border: 1px solid rgba(255,255,255,.12);
-        background: rgba(255,255,255,.05);
-        font-size: 13px;
-        font-weight: 800;
-        letter-spacing: .04em;
-        color: rgba(255,255,255,.9);
-      }
-      .stepper-startup-actions {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 14px;
-        align-items: center;
-        margin-top: 8px;
-      }
-      .stepper-startup-button {
-        min-width: 220px;
-        border: 0;
-        border-radius: 999px;
-        padding: 16px 26px;
-        font-size: 16px;
-        font-weight: 900;
-        letter-spacing: .08em;
-        text-transform: uppercase;
-        color: #fff;
-        background: linear-gradient(135deg, #6366f1 0%, #4f46e5 48%, #7c3aed 100%);
-        box-shadow: 0 20px 44px rgba(79,70,229,.42);
-        cursor: pointer;
-      }
-      .stepper-startup-button:active {
-        transform: translateY(1px) scale(.99);
-      }
-      .stepper-startup-subbutton {
-        font-size: 13px;
-        font-weight: 700;
-        letter-spacing: .04em;
-        color: rgba(224,231,255,.82);
-      }
-      .stepper-startup-stage {
-        position: relative;
-        min-height: min(74vh, 680px);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-      .stepper-startup-stage::before {
-        content: '';
-        position: absolute;
-        inset: auto;
-        width: min(70vw, 700px);
-        height: min(70vw, 700px);
-        border-radius: 50%;
-        background: radial-gradient(circle, rgba(99,102,241,.22) 0%, rgba(99,102,241,.08) 34%, rgba(0,0,0,0) 68%);
-        filter: blur(8px);
-        opacity: .95;
-      }
-      .stepper-startup-stage::after {
-        content: '';
-        position: absolute;
-        width: min(60vw, 560px);
-        height: min(60vw, 560px);
-        border-radius: 50%;
-        border: 1px solid rgba(165,180,252,.22);
-        box-shadow: inset 0 0 0 1px rgba(255,255,255,.03), 0 0 60px rgba(99,102,241,.16);
-      }
-      .stepper-startup-logo {
-        position: relative;
-        z-index: 1;
-        width: min(84vw, 620px);
-        height: min(84vw, 620px);
-        max-width: none;
-        max-height: none;
-        object-fit: contain;
-        filter: drop-shadow(0 28px 60px rgba(0,0,0,.42));
-        transform: scale(.98);
-        opacity: .95;
-        will-change: transform, opacity, filter;
-      }
-      .stepper-startup-splash.is-running .stepper-startup-logo {
-        animation: stepperStartupLogo ${STARTUP_MS}ms cubic-bezier(.22,.61,.36,1) forwards;
-      }
-      @media (max-width: 900px) {
-        .stepper-startup-shell {
-          grid-template-columns: 1fr;
-          gap: 16px;
-          align-content: center;
-        }
-        .stepper-startup-intro-card {
-          text-align: center;
-        }
-        .stepper-startup-kicker,
-        .stepper-startup-chip-row,
-        .stepper-startup-actions {
-          justify-content: center;
-          margin-left: auto;
-          margin-right: auto;
-        }
-        .stepper-startup-copy {
-          margin-left: auto;
-          margin-right: auto;
-        }
-        .stepper-startup-stage {
-          min-height: min(38vh, 360px);
-          order: -1;
-        }
-        .stepper-startup-stage::before { width: min(90vw, 520px); height: min(90vw, 520px); }
-        .stepper-startup-stage::after { width: min(78vw, 420px); height: min(78vw, 420px); }
-        .stepper-startup-logo { width: min(76vw, 360px); height: min(76vw, 360px); }
-      }
-      @keyframes stepperSnakeOverlay {
-        0% { opacity: 0; }
-        2% { opacity: 1; }
-        92% { opacity: 1; }
-        100% { opacity: 0; }
-      }
-      @keyframes stepperSnakePresence {
-        0% { opacity: 0; filter: drop-shadow(0 0 16px rgba(255,168,64,.16)) brightness(.98) saturate(.98); }
-        2% { opacity: 1; filter: drop-shadow(0 0 28px rgba(255,175,70,.24)) brightness(1.02) saturate(1.02); }
-        89% { opacity: 1; filter: drop-shadow(0 0 30px rgba(255,175,70,.22)) brightness(1.03) saturate(1.03); }
-        100% { opacity: 0; filter: drop-shadow(0 0 16px rgba(255,160,60,.14)) brightness(.96) saturate(.96); }
-      }
-      @keyframes stepperStartupOverlay {
-        0% { opacity: 0; }
-        10% { opacity: 1; }
-        82% { opacity: 1; }
-        100% { opacity: 0; }
-      }
-      @keyframes stepperStartupLogo {
-        0% { opacity: 0; transform: scale(.78); filter: drop-shadow(0 10px 24px rgba(0,0,0,.32)); }
-        10% { opacity: 1; transform: scale(.96); filter: drop-shadow(0 18px 42px rgba(0,0,0,.42)); }
-        24% { opacity: 1; transform: scale(1); filter: drop-shadow(0 22px 48px rgba(0,0,0,.46)); }
-        84% { opacity: 1; transform: scale(1); filter: drop-shadow(0 18px 42px rgba(0,0,0,.42)); }
-        100% { opacity: 0; transform: scale(.95); filter: drop-shadow(0 10px 20px rgba(0,0,0,.28)); }
-      }
-    `;
-    document.head.appendChild(style);
-
-    overlay = document.createElement('div');
-    overlay.id = overlayId;
-    overlay.className = 'stepper-favicon-transition';
-    overlay.hidden = true;
-
-    burstHost = document.createElement('div');
-    burstHost.className = 'stepper-favicon-burst-host';
-    overlay.appendChild(burstHost);
-
-    document.body.appendChild(overlay);
-    return overlay;
+  function safeReadJSON(key, fallback){
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return fallback;
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : fallback;
+    } catch (error) {
+      return fallback;
+    }
   }
 
-  function createBurstImage(){
-    ensureOverlay();
-    burstHost.innerHTML = '';
-    const img = document.createElement('img');
-    img.className = 'stepper-favicon-burst';
-    img.setAttribute('aria-hidden', 'true');
-    img.alt = '';
-    img.decoding = 'sync';
-    img.src = transitionGifSrc;
-    burstHost.appendChild(img);
-    return img;
+  function saveSettings(){
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (error) {}
   }
 
-  function resetTransitionAnimation(){
-    ensureOverlay();
-    overlay.classList.remove('is-running');
-    burstHost.innerHTML = '';
-    void overlay.offsetWidth;
+  function isDarkMode(){
+    const appState = safeReadJSON(BUILDER_KEY, {});
+    return !!appState.isDarkMode;
   }
 
-  function prepareTransitionAssets(){
-    if (warmGif) return warmGif;
-    warmGif = new Image();
-    warmGif.decoding = 'async';
-    warmGif.src = transitionGifSrc;
-    return warmGif;
+  function srcOf(media){
+    return String((media && (media.currentSrc || media.src)) || '');
   }
 
-  function ensureStartupAudio(){
-    if (startupAudio) return startupAudio;
-    startupAudio = new Audio(startupSongSrc);
-    startupAudio.preload = 'auto';
-    startupAudio.loop = false;
-    startupAudio.volume = 1;
-    try { startupAudio.playsInline = true; } catch {}
-    return startupAudio;
+  function isSfx(src){
+    return SFX_FILES.some(file => src.includes(file));
   }
 
-  function runStartupSplash(){ return; }
+  function isThinking(src){
+    return src.includes('thinking-music.wav');
+  }
 
-  window.__stepperRunFaviconTransition = function(changePage){
-    ensureOverlay();
-    if (running) return;
-    running = true;
-
-    prepareTransitionAssets();
-    resetTransitionAnimation();
-    createBurstImage();
-    overlay.hidden = false;
-    requestAnimationFrame(() => {
-      overlay.classList.add('is-running');
-      try { if (typeof changePage === 'function') changePage(); } catch (error) { console.error(error); }
-    });
-
-    window.setTimeout(() => {
-      overlay.hidden = true;
-      overlay.classList.remove('is-running');
-      burstHost.innerHTML = '';
-      running = false;
-    }, TOTAL_MS + 34);
+  HTMLMediaElement.prototype.play = function(){
+    const src = srcOf(this);
+    if (isThinking(src) && !settings.thinkingMusicEnabled) {
+      try { this.pause(); this.currentTime = 0; } catch (error) {}
+      return Promise.resolve();
+    }
+    if (isSfx(src) && !settings.sfxEnabled) {
+      try { this.pause(); this.currentTime = 0; } catch (error) {}
+      return Promise.resolve();
+    }
+    return originalPlay.apply(this, arguments);
   };
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-      prepareTransitionAssets();
-    }, { once: true });
-  } else {
-    prepareTransitionAssets();
+  function buildThinkingAudio(){
+    if (thinkingAudio) return thinkingAudio;
+    thinkingAudio = new Audio(THINKING_TRACK);
+    thinkingAudio.loop = true;
+    thinkingAudio.preload = 'auto';
+    thinkingAudio.volume = 0.35;
+    return thinkingAudio;
   }
+
+  function stopDomAudio(){
+    document.querySelectorAll('audio,video').forEach(media => {
+      const src = srcOf(media);
+      if (isSfx(src) || isThinking(src)) {
+        try { media.pause(); media.currentTime = 0; } catch (error) {}
+      }
+    });
+  }
+
+  function syncThinkingMusic(){
+    const audio = buildThinkingAudio();
+    if (settings.thinkingMusicEnabled && !document.hidden) {
+      const playResult = audio.play();
+      if (playResult && typeof playResult.catch === 'function') playResult.catch(() => {});
+    } else {
+      try { audio.pause(); audio.currentTime = 0; } catch (error) {}
+    }
+  }
+
+  function playFeedback(file){
+    if (!settings.sfxEnabled) return;
+    try {
+      const audio = new Audio(file);
+      audio.preload = 'auto';
+      const playResult = audio.play();
+      if (playResult && typeof playResult.catch === 'function') playResult.catch(() => {});
+    } catch (error) {}
+  }
+
+  document.addEventListener('visibilitychange', syncThinkingMusic);
+  ['pointerdown','touchstart','keydown'].forEach(eventName => {
+    document.addEventListener(eventName, function wakeAudio(){
+      if (settings.thinkingMusicEnabled) syncThinkingMusic();
+    }, { once: true, capture: true, passive: eventName !== 'keydown' });
+  });
+
+  const style = document.createElement('style');
+  style.textContent = `
+    button,
+    .stepper-settings-mark,
+    .stepper-setting-icon-box,
+    [class~="inline-flex"][class~="items-center"][class~="justify-center"][class~="rounded-xl"][class*="bg-indigo-100"] {
+      position: relative;
+      overflow: hidden;
+      isolation: isolate;
+    }
+    button::before,
+    .stepper-settings-mark::before,
+    .stepper-setting-icon-box::before,
+    [class~="inline-flex"][class~="items-center"][class~="justify-center"][class~="rounded-xl"][class*="bg-indigo-100"]::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      pointer-events: none;
+      background:
+        linear-gradient(135deg, rgba(255,255,255,.22) 0%, rgba(255,255,255,0) 28%, rgba(0,0,0,.08) 62%, rgba(255,255,255,.08) 100%),
+        repeating-linear-gradient(135deg, rgba(255,255,255,.05) 0 4px, rgba(0,0,0,.05) 4px 8px),
+        radial-gradient(circle at 18% 22%, rgba(255,255,255,.22) 0 1px, transparent 1.5px),
+        radial-gradient(circle at 72% 70%, rgba(0,0,0,.14) 0 1px, transparent 1.8px),
+        radial-gradient(circle at 38% 78%, rgba(255,255,255,.12) 0 1px, transparent 1.6px);
+      opacity: .42;
+      mix-blend-mode: soft-light;
+      z-index: 0;
+    }
+    button::after,
+    .stepper-settings-mark::after,
+    .stepper-setting-icon-box::after,
+    [class~="inline-flex"][class~="items-center"][class~="justify-center"][class~="rounded-xl"][class*="bg-indigo-100"]::after {
+      content: '';
+      position: absolute;
+      top: -120%;
+      bottom: -120%;
+      left: -52%;
+      width: 38%;
+      transform: translateX(-170%) rotate(28deg);
+      background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,.08) 18%, rgba(255,255,255,.48) 50%, rgba(255,255,255,.08) 82%, transparent 100%);
+      opacity: 0;
+      pointer-events: none;
+      transition: transform .62s ease, opacity .24s ease;
+      z-index: 0;
+      filter: blur(.4px);
+    }
+    button:hover::after,
+    .stepper-settings-mark:hover::after,
+    .stepper-setting-icon-box:hover::after,
+    [class~="inline-flex"][class~="items-center"][class~="justify-center"][class~="rounded-xl"][class*="bg-indigo-100"]:hover::after {
+      opacity: .95;
+      transform: translateX(365%) rotate(28deg);
+    }
+    button > *,
+    .stepper-settings-mark > *,
+    .stepper-setting-icon-box > *,
+    [class~="inline-flex"][class~="items-center"][class~="justify-center"][class~="rounded-xl"][class*="bg-indigo-100"] > * {
+      position: relative;
+      z-index: 1;
+    }
+    .stepper-settings-tab {
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      border-radius: 14px;
+      padding: 8px 12px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+      font-weight: 800;
+      font-size: 14px;
+      letter-spacing: .01em;
+      transition: background-color .18s ease, color .18s ease, box-shadow .18s ease, transform .18s ease;
+      box-shadow: inset 0 0 0 1px rgba(99,102,241,.10), 0 6px 18px rgba(17,24,39,.08);
+    }
+    .stepper-settings-tab:hover { transform: translateY(-1px); }
+    .stepper-settings-tab[data-dark="false"] { color: #404040; }
+    .stepper-settings-tab[data-dark="false"]:hover { background: rgba(99,102,241,.10); color: #4338ca; }
+    .stepper-settings-tab[data-dark="true"] { color: #d4d4d8; }
+    .stepper-settings-tab[data-dark="true"]:hover { background: rgba(99,102,241,.18); color: #c7d2fe; }
+    .stepper-settings-tab[data-active="true"][data-dark="false"] {
+      background: #ffffff;
+      color: #312e81;
+      box-shadow: 0 10px 28px rgba(79,70,229,.14), inset 0 0 0 1px rgba(129,140,248,.28);
+    }
+    .stepper-settings-tab[data-active="true"][data-dark="true"] {
+      background: rgba(24,24,27,.95);
+      color: #eef2ff;
+      box-shadow: 0 10px 28px rgba(0,0,0,.24), inset 0 0 0 1px rgba(129,140,248,.28);
+    }
+    .stepper-settings-icon {
+      width: 18px;
+      height: 18px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 auto;
+    }
+    .stepper-settings-overlay[hidden] { display: none !important; }
+    .stepper-settings-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 2147483647;
+      background: rgba(10,10,14,.60);
+      backdrop-filter: blur(8px);
+      display: flex;
+      align-items: stretch;
+      justify-content: center;
+      padding: 12px;
+    }
+    .stepper-settings-page {
+      width: min(100%, 960px);
+      min-height: 100%;
+      border-radius: 28px;
+      overflow: hidden;
+      box-shadow: 0 30px 80px rgba(0,0,0,.32);
+      display: flex;
+      flex-direction: column;
+      border: 1px solid rgba(255,255,255,.12);
+    }
+    .stepper-settings-page[data-dark="false"] {
+      background: #f8fafc;
+      color: #171717;
+      border-color: rgba(23,23,23,.08);
+    }
+    .stepper-settings-page[data-dark="true"] {
+      background: #0a0a0f;
+      color: #f5f5f5;
+      border-color: rgba(255,255,255,.08);
+    }
+    .stepper-settings-header {
+      padding: 20px 20px 18px;
+      border-bottom: 1px solid rgba(127,127,127,.18);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .stepper-settings-heading {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      min-width: 0;
+    }
+    .stepper-settings-mark {
+      width: 46px;
+      height: 46px;
+      border-radius: 16px;
+      background: linear-gradient(135deg, #6b7280, #e5e7eb 45%, #6b7280 100%);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      box-shadow: 0 12px 28px rgba(31,41,55,.24), inset 0 0 0 1px rgba(255,255,255,.18);
+      flex: 0 0 auto;
+    }
+    .stepper-settings-title {
+      margin: 0;
+      font-size: clamp(24px, 4vw, 32px);
+      line-height: 1;
+      font-weight: 900;
+      letter-spacing: -.04em;
+      text-transform: uppercase;
+    }
+    .stepper-settings-subtitle {
+      margin: 6px 0 0;
+      font-size: 14px;
+      line-height: 1.45;
+      opacity: .72;
+      max-width: 40rem;
+    }
+    .stepper-settings-close {
+      border: 0;
+      background: transparent;
+      color: inherit;
+      border-radius: 16px;
+      width: 46px;
+      height: 46px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: background-color .18s ease, transform .18s ease;
+      flex: 0 0 auto;
+    }
+    .stepper-settings-close:hover { transform: translateY(-1px); }
+    .stepper-settings-page[data-dark="false"] .stepper-settings-close:hover { background: rgba(23,23,23,.06); }
+    .stepper-settings-page[data-dark="true"] .stepper-settings-close:hover { background: rgba(255,255,255,.08); }
+    .stepper-settings-body {
+      padding: 20px;
+      display: grid;
+      gap: 18px;
+    }
+    .stepper-settings-card {
+      border-radius: 24px;
+      padding: 18px;
+      border: 1px solid rgba(127,127,127,.18);
+      display: grid;
+      gap: 16px;
+    }
+    .stepper-settings-page[data-dark="false"] .stepper-settings-card {
+      background: #ffffff;
+      border-color: rgba(23,23,23,.08);
+    }
+    .stepper-settings-page[data-dark="true"] .stepper-settings-card {
+      background: #111114;
+      border-color: rgba(255,255,255,.08);
+    }
+    .stepper-setting-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 14px;
+    }
+    .stepper-setting-copy {
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+    }
+    .stepper-setting-title {
+      font-size: 18px;
+      font-weight: 900;
+      letter-spacing: -.03em;
+      margin: 0;
+    }
+    .stepper-setting-desc {
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.5;
+      opacity: .72;
+    }
+    .stepper-setting-toggle {
+      border: 0;
+      color: inherit;
+      font: inherit;
+      cursor: pointer;
+      border-radius: 999px;
+      padding: 8px 10px 8px 8px;
+      min-height: 56px;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      transition: background-color .18s ease, transform .18s ease, box-shadow .18s ease;
+      white-space: nowrap;
+      justify-self: end;
+      box-shadow: inset 0 0 0 1px rgba(99,102,241,.12), 0 10px 24px rgba(17,24,39,.08);
+    }
+    .stepper-setting-toggle:hover { transform: translateY(-1px); }
+    .stepper-settings-page[data-dark="false"] .stepper-setting-toggle {
+      background: #eef2ff;
+    }
+    .stepper-settings-page[data-dark="true"] .stepper-setting-toggle {
+      background: rgba(79,70,229,.14);
+      box-shadow: inset 0 0 0 1px rgba(129,140,248,.18), 0 10px 24px rgba(0,0,0,.22);
+    }
+    .stepper-setting-toggle[data-on="false"] {
+      opacity: .9;
+    }
+    .stepper-setting-toggle[data-on="true"] {
+      box-shadow: 0 12px 28px rgba(79,70,229,.20), inset 0 0 0 1px rgba(129,140,248,.18);
+    }
+    .stepper-setting-icon-box {
+      width: 40px;
+      height: 40px;
+      border-radius: 14px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #6b7280, #f3f4f6 46%, #6b7280 100%);
+      color: #111827;
+      flex: 0 0 auto;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.24), 0 8px 18px rgba(17,24,39,.18);
+    }
+    .stepper-setting-text {
+      display: grid;
+      line-height: 1.05;
+      text-align: left;
+    }
+    .stepper-setting-state {
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      opacity: .68;
+    }
+    .stepper-setting-value {
+      font-size: 16px;
+      font-weight: 900;
+      letter-spacing: -.02em;
+    }
+    .stepper-settings-note {
+      font-size: 13px;
+      line-height: 1.6;
+      opacity: .72;
+      padding-top: 4px;
+    }
+    @media (max-width: 720px) {
+      .stepper-settings-overlay { padding: 0; }
+      .stepper-settings-page { width: 100%; min-height: 100%; border-radius: 0; }
+      .stepper-setting-row { grid-template-columns: 1fr; }
+      .stepper-setting-toggle { justify-self: stretch; }
+    }
+  `;
+  document.head.appendChild(style);
+
+  function iconSettings(){
+    return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.33 1V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-.33-1 1.65 1.65 0 0 0-1-.6 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 0-1-.33H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1-.33 1.65 1.65 0 0 0 .6-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .33-1V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 .33 1 1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.25.3.46.65.6 1 .14.35.21.72.21 1.09s-.07.74-.21 1.09c-.14.35-.35.7-.6 1.02Z"></path></svg>`;
+  }
+
+  function iconClose(){
+    return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>`;
+  }
+
+  function iconSpeaker(muted){
+    return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.5 8.5a5 5 0 0 1 0 7"></path><path d="M18.5 5.5a9 9 0 0 1 0 13"></path>${muted ? `<path d="M4 4 20 20"></path>` : ``}</svg>`;
+  }
+
+  function iconMusic(muted){
+    return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5"></rect><path d="M10 15V9l6-1v6"></path><circle cx="9" cy="16" r="1.75"></circle><circle cx="15" cy="15" r="1.75"></circle>${muted ? `<path d="M5 5 19 19"></path>` : ``}</svg>`;
+  }
+
+  function cleanText(text){
+    return String(text || '').replace(/\s+/g, ' ').trim();
+  }
+
+  const overlay = document.createElement('div');
+  overlay.className = 'stepper-settings-overlay';
+  overlay.hidden = true;
+  overlay.innerHTML = `
+    <div class="stepper-settings-page" data-dark="false" role="dialog" aria-modal="true" aria-labelledby="stepper-settings-title">
+      <div class="stepper-settings-header">
+        <div class="stepper-settings-heading">
+          <div class="stepper-settings-mark">${iconSettings()}</div>
+          <div>
+            <h2 class="stepper-settings-title" id="stepper-settings-title">Settings</h2>
+            <p class="stepper-settings-subtitle">Tidy little sound controls, because not every tap needs to shout at you.</p>
+          </div>
+        </div>
+        <button class="stepper-settings-close" type="button" aria-label="Close settings">${iconClose()}</button>
+      </div>
+      <div class="stepper-settings-body">
+        <section class="stepper-settings-card">
+          <div class="stepper-setting-row">
+            <div class="stepper-setting-copy">
+              <h3 class="stepper-setting-title">SFX Sounds</h3>
+              <p class="stepper-setting-desc">Turns button taps, tab clicks, delete sounds, and the little UI noises on or off. Starts on.</p>
+            </div>
+            <button class="stepper-setting-toggle" type="button" data-setting="sfxEnabled">
+              <span class="stepper-setting-icon-box"></span>
+              <span class="stepper-setting-text">
+                <span class="stepper-setting-state">Status</span>
+                <span class="stepper-setting-value"></span>
+              </span>
+            </button>
+          </div>
+          <div class="stepper-setting-row">
+            <div class="stepper-setting-copy">
+              <h3 class="stepper-setting-title">Thinking Music</h3>
+              <p class="stepper-setting-desc">Plays your uploaded lobby track in a loop while you work. Starts off.</p>
+            </div>
+            <button class="stepper-setting-toggle" type="button" data-setting="thinkingMusicEnabled">
+              <span class="stepper-setting-icon-box"></span>
+              <span class="stepper-setting-text">
+                <span class="stepper-setting-state">Status</span>
+                <span class="stepper-setting-value"></span>
+              </span>
+            </button>
+          </div>
+          <div class="stepper-settings-note">Thinking Music uses <strong>Polished Stone Lobby.wav</strong> in this build so the toggle actually controls a real track instead of a dead empty promise.</div>
+        </section>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const page = overlay.querySelector('.stepper-settings-page');
+  const closeButton = overlay.querySelector('.stepper-settings-close');
+  const toggleButtons = Array.from(overlay.querySelectorAll('.stepper-setting-toggle'));
+
+  function updateOverlay(){
+    const dark = isDarkMode();
+    page.dataset.dark = dark ? 'true' : 'false';
+    toggleButtons.forEach(button => {
+      const key = button.getAttribute('data-setting');
+      const enabled = !!settings[key];
+      button.dataset.on = enabled ? 'true' : 'false';
+      button.querySelector('.stepper-setting-icon-box').innerHTML = key === 'sfxEnabled' ? iconSpeaker(!enabled) : iconMusic(!enabled);
+      button.querySelector('.stepper-setting-value').textContent = enabled ? 'On' : 'Off';
+    });
+  }
+
+  function closeSettingsPage(){
+    overlay.hidden = true;
+    document.body.style.overflow = '';
+    refreshSettingsTab();
+  }
+
+  function openSettingsPage(){
+    updateOverlay();
+    overlay.hidden = false;
+    document.body.style.overflow = 'hidden';
+    refreshSettingsTab();
+  }
+
+  overlay.addEventListener('click', event => {
+    if (event.target === overlay) {
+      if (window.__stepperRunFaviconTransition) {
+        window.__stepperRunFaviconTransition(() => {
+          closeSettingsPage();
+        });
+      } else {
+        closeSettingsPage();
+      }
+    }
+  });
+  closeButton.addEventListener('click', () => {
+    playFeedback('./ui-action.mp3');
+    if (window.__stepperRunFaviconTransition) {
+      window.__stepperRunFaviconTransition(() => {
+        closeSettingsPage();
+      });
+    } else {
+      closeSettingsPage();
+    }
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !overlay.hidden) {
+      if (window.__stepperRunFaviconTransition) {
+        window.__stepperRunFaviconTransition(() => {
+          closeSettingsPage();
+        });
+      } else {
+        closeSettingsPage();
+      }
+    }
+  });
+
+  toggleButtons.forEach(button => {
+    button.addEventListener('click', () => {
+      const key = button.getAttribute('data-setting');
+      settings[key] = !settings[key];
+      saveSettings();
+      if (key === 'sfxEnabled' && !settings.sfxEnabled) stopDomAudio();
+      if (key === 'thinkingMusicEnabled') syncThinkingMusic();
+      if (settings.sfxEnabled) playFeedback('./ui-action.mp3');
+      updateOverlay();
+      refreshSettingsTab();
+    });
+  });
+
+  function findTabRail(){
+    return Array.from(document.querySelectorAll('header div')).find(element => {
+      const labels = Array.from(element.querySelectorAll(':scope > button')).map(button => cleanText(button.textContent));
+      return labels.includes('Build') && labels.includes('Sheet') && labels.includes("What's New");
+    }) || null;
+  }
+
+  function refreshSettingsTab(){
+    const rail = findTabRail();
+    if (!rail) return false;
+    let button = rail.querySelector('.stepper-settings-tab');
+    if (!button) {
+      button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'stepper-settings-tab';
+      button.innerHTML = `<span class="stepper-settings-icon">${iconSettings()}</span><span>Settings</span>`;
+      button.addEventListener('click', () => {
+        const openNow = () => {
+          playFeedback('./tab-change.wav');
+          openSettingsPage();
+        };
+        if (window.__stepperRunFaviconTransition) {
+          window.__stepperRunFaviconTransition(openNow);
+        } else {
+          openNow();
+        }
+      });
+      rail.appendChild(button);
+    }
+    button.dataset.dark = isDarkMode() ? 'true' : 'false';
+    button.dataset.active = overlay.hidden ? 'false' : 'true';
+    return true;
+  }
+
+  let attempts = 0;
+  const finder = setInterval(() => {
+    attempts += 1;
+    const found = refreshSettingsTab();
+    updateOverlay();
+    if (found || attempts > 30) clearInterval(finder);
+  }, 350);
+
+  setInterval(() => {
+    refreshSettingsTab();
+    updateOverlay();
+  }, 2000);
+
+  updateOverlay();
+  refreshSettingsTab();
+  syncThinkingMusic();
 })();
