@@ -42,6 +42,7 @@
     moderatorQueue: [],
     suspensions: [],
     securityAlerts: [],
+    adminSummary: { users: 0, moderators: 0, barred: 0, pendingBars: 0, pendingInvites: 0, pendingApplications: 0, pendingSubmissions: 0 },
     glossaryApproved: [],
     glossaryRequests: [],
     siteMemories: [],
@@ -323,11 +324,40 @@
   }
 
 
+  function formatRemainingTime(untilAt){
+    const targetMs = Date.parse(untilAt || 0);
+    const ms = targetMs - Date.now();
+    if (!Number.isFinite(targetMs) || ms <= 0) return 'expired';
+    const minute = 60 * 1000;
+    const hour = 60 * minute;
+    const day = 24 * hour;
+    if (ms >= day) {
+      const n = Math.ceil(ms / day);
+      return `${n} day${n === 1 ? '' : 's'} left`;
+    }
+    if (ms >= hour) {
+      const n = Math.ceil(ms / hour);
+      return `${n} hour${n === 1 ? '' : 's'} left`;
+    }
+    const n = Math.max(1, Math.ceil(ms / minute));
+    return `${n} minute${n === 1 ? '' : 's'} left`;
+  }
+
+  function formatSuspensionWindow(suspension){
+    if (!suspension) return '';
+    const untilAt = String(suspension.untilAt || '').trim();
+    if (!untilAt) return '';
+    const date = new Date(untilAt);
+    if (Number.isNaN(date.getTime())) return '';
+    return `Ends ${date.toLocaleString()} • ${formatRemainingTime(untilAt)}`;
+  }
+
   function suspensionMessage(suspension){
     if (!suspension) return '';
     const duration = String(suspension.durationLabel || 'a while').trim() || 'a while';
     const reason = String(suspension.reason || 'an admin decision').trim() || 'an admin decision';
-    return `You have been barred for ${duration} long because of ${reason}`;
+    const window = formatSuspensionWindow(suspension);
+    return `You have been barred for ${duration} because of ${reason}${window ? `. ${window}` : ''}`;
   }
 
   function renderSuspensionBanner(){
@@ -1892,7 +1922,7 @@
       ? 'Admin already has the full site controls.'
       : (isModeratorSession()
         ? 'This account already has moderator access and premium helper perks.'
-        : 'Apply for moderator here. A Google account is required before the request can be sent.');
+        : 'Apply for moderator here. A Google account is required first, but invites are optional and anyone can apply after signing in.');
 
     page.className = `rounded-3xl border shadow-sm overflow-hidden ${theme.shell}`;
 
@@ -1986,7 +2016,7 @@
             <div class="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <div class="text-lg font-black tracking-tight">Apply for moderator</div>
-                <p class="mt-2 text-sm ${theme.subtle}">Must have a Google account to do so. Sign in first, then send the moderator request from this same page.</p>
+                <p class="mt-2 text-sm ${theme.subtle}">Must have a Google account to do so. Sign in first, then send the moderator request from this same page. It is not invite-only anymore.</p>
               </div>
               <button type="button" data-stepper-action="apply-moderator-needs-signin" class="stepper-google-cta ${theme.button}">Apply for moderator</button>
             </div>
@@ -2258,6 +2288,7 @@
             </div>
           </div>
         </div>
+        <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-admin-power-tools="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Admin power tools</div><p class="mt-1 text-sm ${theme.subtle}">Live backend totals from the disk-backed database. Anything registered here stays saved until acted on or deleted.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.adminSummary && state.adminSummary.users) || 0))} users</span></div><div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><div class="rounded-2xl border p-4 ${theme.soft}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Pending submissions</div><div class="mt-2 text-2xl font-black">${escapeHtml(String((state.adminSummary && state.adminSummary.pendingSubmissions) || 0))}</div></div><div class="rounded-2xl border p-4 ${theme.soft}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Moderator requests</div><div class="mt-2 text-2xl font-black">${escapeHtml(String((state.adminSummary && ((state.adminSummary.pendingApplications || 0) + (state.adminSummary.pendingInvites || 0))) || 0))}</div></div><div class="rounded-2xl border p-4 ${theme.soft}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Active moderators</div><div class="mt-2 text-2xl font-black">${escapeHtml(String((state.adminSummary && state.adminSummary.moderators) || 0))}</div></div><div class="rounded-2xl border p-4 ${theme.soft}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Bars running</div><div class="mt-2 text-2xl font-black">${escapeHtml(String((state.adminSummary && ((state.adminSummary.barred || 0) + (state.adminSummary.pendingBars || 0))) || 0))}</div></div></div></div>
         <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Pending member requests</div><p class="mt-1 text-sm ${theme.subtle}">Approve uploads, reject requests, or feature dances with a badge. This queue refreshes automatically.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String(state.submissions.length))} pending</span></div></div>
         ${pendingCards}
         <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-moderator-apps="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Moderator applications</div><p class="mt-1 text-sm ${theme.subtle}">People apply from the Sign In tab. Approve or decline them here. This list refreshes automatically.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String(state.moderatorApplications.length))} pending</span></div><div class="mt-4 grid gap-3">${state.moderatorApplications.length ? state.moderatorApplications.map(item => `
@@ -2276,7 +2307,7 @@
             <div class="mt-4 ${theme.panel} rounded-2xl border p-4"><label class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Removal note</label><textarea data-remove-mod-note="1" class="stepper-google-input mt-3" rows="3" placeholder="Tell them why they were removed as moderator."></textarea></div>
             <div class="mt-4 flex flex-wrap gap-3"><button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="remove-moderator">Delete moderator</button></div>
           </article>`).join('') : `<p class="text-sm ${theme.subtle}">No active moderators yet.</p>`}</div></div>
-        <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-suspension-management="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Suspend persons</div><p class="mt-1 text-sm ${theme.subtle}">Enter a Google email to bar someone for a set time. Admins cannot be banned.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.suspensions || []).length))} barred</span></div><div class="mt-4 grid gap-3 sm:grid-cols-2"><input data-suspend-email="1" class="stepper-google-input" placeholder="person@gmail.com" /><select data-suspend-duration="1" class="stepper-google-input"><option value="300000">5 minutes</option><option value="1200000">20 minutes</option><option value="3600000">1 hour</option><option value="18000000">5 hours</option><option value="86400000">1 day</option><option value="259200000">3 days</option><option value="604800000">1 week</option><option value="1814400000">3 weeks</option><option value="2592000000">1 month</option><option value="5184000000">2 months</option><option value="31536000000">1 Year</option><option value="157680000000">5 years</option></select></div><div class="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]"><textarea data-suspend-reason="1" class="stepper-google-input" rows="3" placeholder="Reason for the bar"></textarea><button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="suspend-person">Bar account</button></div><div class="mt-4 grid gap-3">${(state.suspensions || []).length ? state.suspensions.map(item => `<article class="rounded-2xl border p-4 ${theme.soft}" data-stepper-suspension-key="${escapeHtml(item.userKey || '')}" data-stepper-suspension-email="${escapeHtml(item.email || '')}"><div class="flex flex-wrap items-center justify-between gap-3"><div><div class="text-base font-black">${escapeHtml(item.name || item.email || 'Member')}</div><p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.email || '')}</p><p class="mt-2 text-xs font-semibold ${theme.subtle}">${escapeHtml((item.suspension && item.suspension.durationLabel) || '')} • ${escapeHtml((item.suspension && item.suspension.reason) || '')}</p></div><button type="button" class="stepper-google-cta ${theme.button}" data-action="lift-suspension">${item.pending ? 'Delete pending bar' : 'Turn back on'}</button></div></article>`).join('') : `<p class="text-sm ${theme.subtle}">Nobody is currently barred.</p>`}</div></div>
+        <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-suspension-management="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Suspend persons</div><p class="mt-1 text-sm ${theme.subtle}">Enter a Google email to bar someone for a set time. Admins cannot be banned.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.suspensions || []).length))} barred</span></div><div class="mt-4 grid gap-3 sm:grid-cols-2"><input data-suspend-email="1" class="stepper-google-input" placeholder="person@gmail.com" /><select data-suspend-duration="1" class="stepper-google-input"><option value="300000">5 minutes</option><option value="1200000">20 minutes</option><option value="3600000">1 hour</option><option value="18000000">5 hours</option><option value="86400000">1 day</option><option value="259200000">3 days</option><option value="604800000">1 week</option><option value="1814400000">3 weeks</option><option value="2592000000">1 month</option><option value="5184000000">2 months</option><option value="31536000000">1 Year</option><option value="157680000000">5 years</option></select></div><div class="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]"><textarea data-suspend-reason="1" class="stepper-google-input" rows="3" placeholder="Reason for the bar"></textarea><button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="suspend-person">Bar account</button></div><div class="mt-4 grid gap-3">${(state.suspensions || []).length ? state.suspensions.map(item => `<article class="rounded-2xl border p-4 ${theme.soft}" data-stepper-suspension-key="${escapeHtml(item.userKey || '')}" data-stepper-suspension-email="${escapeHtml(item.email || '')}"><div class="flex flex-wrap items-center justify-between gap-3"><div><div class="text-base font-black">${escapeHtml(item.name || item.email || 'Member')}</div><p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.email || '')}</p><p class="mt-2 text-xs font-semibold ${theme.subtle}">${escapeHtml((item.suspension && item.suspension.durationLabel) || '')} • ${escapeHtml((item.suspension && item.suspension.reason) || '')}</p><p class="mt-1 text-xs ${theme.subtle}">${escapeHtml(formatSuspensionWindow(item.suspension))}</p></div><button type="button" class="stepper-google-cta ${theme.button}" data-action="lift-suspension">${item.pending ? 'Delete pending bar' : 'Turn back on'}</button></div></article>`).join('') : `<p class="text-sm ${theme.subtle}">Nobody is currently barred.</p>`}</div></div>
         <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-security-alerts="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Security alerts</div><p class="mt-1 text-sm ${theme.subtle}">Client-side inspection warnings show here after 3 strikes. This is only a nuisance detector, not perfect protection.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.securityAlerts || []).length))} alerts</span></div><div class="mt-4 grid gap-3">${(state.securityAlerts || []).length ? state.securityAlerts.slice(0,20).map(item => `<article class="rounded-2xl border p-4 ${theme.soft}"><div class="flex flex-wrap items-center justify-between gap-3"><div><div class="text-base font-black">${escapeHtml(item.name || item.email || 'User')}</div><p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.email || '')}</p><p class="mt-2 text-xs font-semibold ${theme.subtle}">${escapeHtml(item.reason || '')} • ${escapeHtml(String(item.strikeCount || 0))} strikes</p></div></div>${item.detail ? `<p class="mt-3 text-sm ${theme.subtle}">${escapeHtml(item.detail)}</p>` : ''}</article>`).join('') : `<p class="text-sm ${theme.subtle}">No security alerts yet.</p>`}</div></div>
         ${cards}
 
@@ -2812,9 +2843,10 @@
     if (isModeratorSession()) await refreshModeratorQueue().catch(() => []);
     if (isAdminSession()) {
       await refreshModeratorApplications().catch(() => []);
-      await refreshActiveModerators().catch(() => []);
+      await Promise.all([refreshActiveModerators().catch(() => []), refreshAdminPowerTools().catch(() => ({}))]);
       await refreshSuspensions().catch(() => []);
       await refreshSecurityAlerts().catch(() => []);
+      await refreshAdminPowerTools().catch(() => ({}));
     }
     renderPages();
   };
@@ -2883,6 +2915,17 @@
     }
   }
 
+  async function refreshAdminPowerTools(){
+    if (!isAdminSession()) { state.adminSummary = { users: 0, moderators: 0, barred: 0, pendingBars: 0, pendingInvites: 0, pendingApplications: 0, pendingSubmissions: 0 }; return state.adminSummary; }
+    try {
+      const data = await authFetch('/api/admin/power-tools');
+      state.adminSummary = data && data.summary && typeof data.summary === 'object' ? data.summary : state.adminSummary;
+      return state.adminSummary;
+    } catch {
+      return state.adminSummary;
+    }
+  }
+
   async function suspendMember(email, durationMs, durationLabel, reason){
     try {
       await authFetch('/api/admin/suspend', {
@@ -2890,7 +2933,7 @@
         headers:{ 'Content-Type':'application/json' },
         body: JSON.stringify({ email, durationMs, durationLabel, reason })
       });
-      await Promise.all([refreshSuspensions(), refreshSecurityAlerts()]);
+      await Promise.all([refreshSuspensions(), refreshSecurityAlerts(), refreshAdminPowerTools()]);
       renderPages();
       alert('Bar saved.');
     } catch (error) {
@@ -2905,7 +2948,7 @@
       } else {
         await authFetch('/api/admin/suspensions/remove-by-email', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ email }) });
       }
-      await refreshSuspensions();
+      await Promise.all([refreshSuspensions(), refreshAdminPowerTools()]);
       renderPages();
     } catch (error) {
       alert(error.message || 'Could not lift that bar.');
@@ -2919,7 +2962,7 @@
         headers:{ 'Content-Type':'application/json' },
         body: JSON.stringify({ email })
       });
-      await Promise.all([refreshActiveModerators(), refreshModeratorApplications()]);
+      await Promise.all([refreshActiveModerators(), refreshModeratorApplications(), refreshAdminPowerTools()]);
       renderPages();
       alert('Moderator saved to the backend. If they have not signed in yet, the invite stays pending on disk until they do.');
     } catch (error) {
@@ -3004,7 +3047,7 @@
     try {
       const path = decision === 'decline' ? `/api/admin/moderator-applications/${encodeURIComponent(applicationId)}/decline` : `/api/admin/moderator-applications/${encodeURIComponent(applicationId)}/approve`;
       await authFetch(path, { method: 'POST' });
-      await refreshModeratorApplications();
+      await Promise.all([refreshModeratorApplications(), refreshAdminPowerTools()]);
       renderPages();
     } catch (error) {
       alert(error.message || 'Could not update moderator application.');
@@ -3162,7 +3205,7 @@
     if (page.querySelector('[data-stepper-moderator-apply="1"]')) return;
     const wrap = document.createElement('div');
     wrap.className = `rounded-3xl border p-5 sm:p-6 ${theme.soft}`;
-    wrap.innerHTML = `<div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Apply for moderator</div><p class="mt-2 text-sm ${theme.subtle}">Moderators get the premium helper perks without the Admin tab. Admin can approve or decline your request.</p></div><button type="button" data-stepper-moderator-apply="1" class="stepper-google-cta ${theme.button}">Apply for moderator</button></div>`;
+    wrap.innerHTML = `<div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Apply for moderator</div><p class="mt-2 text-sm ${theme.subtle}">Moderators get the premium helper perks without the Admin tab. Admin can approve or decline your request, and if they decline you can apply again later.</p></div><button type="button" data-stepper-moderator-apply="1" class="stepper-google-cta ${theme.button}">Apply for moderator</button></div>`;
     page.querySelector('.p-6, .p-6.sm\:p-8')?.appendChild(wrap);
     const btn = wrap.querySelector('[data-stepper-moderator-apply="1"]');
     if (btn) btn.addEventListener('click', () => applyForModerator());

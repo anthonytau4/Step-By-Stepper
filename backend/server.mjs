@@ -210,6 +210,39 @@ function clearExpiredSuspension(bucket) {
   return null;
 }
 
+function isFutureIso(value) {
+  const ms = Date.parse(value || 0);
+  return Number.isFinite(ms) && ms > Date.now();
+}
+
+function pruneExpiredPendingSuspensions(db) {
+  if (!db || !Array.isArray(db.pendingSuspensions)) return 0;
+  const before = db.pendingSuspensions.length;
+  db.pendingSuspensions = db.pendingSuspensions.filter(item => isFutureIso(item?.untilAt));
+  return before - db.pendingSuspensions.length;
+}
+
+function pruneExpiredUserSuspensions(db) {
+  if (!db || !db.users || typeof db.users !== 'object') return 0;
+  let cleared = 0;
+  Object.keys(db.users).forEach((userKey) => {
+    const bucket = db.users[userKey];
+    if (!bucket || typeof bucket !== 'object' || !bucket.suspension) return;
+    if (!clearExpiredSuspension(bucket)) {
+      db.users[userKey] = bucket;
+      cleared += 1;
+    }
+  });
+  return cleared;
+}
+
+function pruneDbState(db) {
+  if (!db || typeof db !== 'object') return db;
+  pruneExpiredPendingSuspensions(db);
+  pruneExpiredUserSuspensions(db);
+  return db;
+}
+
 function getActiveSuspension(bucket, profile = null) {
   if (isAdminProfile(profile || bucket?.profile)) return null;
   return clearExpiredSuspension(bucket);
@@ -1310,7 +1343,7 @@ app.get('/api/moderator/application-status', requireGoogleUser, async (req, res)
   const bucket = touchUser(db, req.stepperUser, key);
   const pending = (Array.isArray(db.moderatorApplications) ? db.moderatorApplications : []).find(item => String(item?.ownerKey || '').trim() === key && String(item?.status || '').trim() === 'pending');
   await writeDb(db);
-  res.json({ ok: true, status: isAdminProfile(req.stepperUser) ? 'admin' : isModeratorBucket(bucket) ? 'approved' : pending ? 'pending' : 'none', pending: !!pending, isModerator: isModeratorBucket(bucket), isAdmin: isAdminProfile(req.stepperUser) });
+  res.json({ ok: true, status: isAdminProfile(req.stepperUser) ? 'admin' : isModeratorBucket(bucket) ? 'approved' : pending ? 'pending' : 'none', pending: !!pending, isModerator: isModeratorBucket(bucket), isAdmin: isAdminProfile(req.stepperUser), canApply: !isAdminProfile(req.stepperUser) && !isModeratorBucket(bucket) && !pending });
 });
 
 app.post('/api/moderator/apply', requireGoogleUser, async (req, res) => {
@@ -1344,7 +1377,7 @@ app.post('/api/moderator/apply', requireGoogleUser, async (req, res) => {
 });
 
 app.get('/api/admin/moderator-applications', requireAdmin, async (_req, res) => {
-  const db = await readDb();
+  const db = pruneDbState(await readDb());
   const items = (Array.isArray(db.moderatorApplications) ? db.moderatorApplications : [])
     .filter(item => String(item?.status || 'pending') === 'pending')
     .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
@@ -1387,6 +1420,19 @@ app.post('/api/admin/moderator-applications/:id/decline', requireAdmin, async (r
   res.json({ ok: true });
 });
 
+
+app.get('/api/admin/power-tools', requireAdmin, async (_req, res) => {
+  const db = pruneDbState(await readDb());
+  const users = db.users && typeof db.users === 'object' ? Object.values(db.users).filter(Boolean) : [];
+  const moderators = users.filter(bucket => isModeratorBucket(bucket)).length;
+  const barred = users.filter(bucket => !!getActiveSuspension(bucket, bucket?.profile)).length;
+  const pendingBars = Array.isArray(db.pendingSuspensions) ? db.pendingSuspensions.length : 0;
+  const pendingInvites = Array.isArray(db.pendingModeratorInvites) ? db.pendingModeratorInvites.length : 0;
+  const pendingApplications = Array.isArray(db.moderatorApplications) ? db.moderatorApplications.filter(item => String(item?.status || 'pending') === 'pending').length : 0;
+  const pendingSubmissions = Array.isArray(db.submissions) ? db.submissions.filter(item => String(item?.status || 'pending') === 'pending').length : 0;
+  await writeDb(db);
+  res.json({ ok: true, summary: { users: users.length, moderators, barred, pendingBars, pendingInvites, pendingApplications, pendingSubmissions } });
+});
 
 app.get('/api/admin/moderators', requireAdmin, async (_req, res) => {
   const db = await readDb();
@@ -1466,7 +1512,7 @@ app.post('/api/admin/moderators/remove-by-email', requireAdmin, async (req, res)
 });
 
 app.get('/api/admin/suspensions', requireAdmin, async (_req, res) => {
-  const db = await readDb();
+  const db = pruneDbState(await readDb());
   const items = Object.entries(db.users || {}).map(([userKey, bucket]) => {
     const profile = bucket?.profile || {};
     const suspension = getActiveSuspension(bucket, profile);

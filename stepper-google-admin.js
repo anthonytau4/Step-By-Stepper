@@ -49,7 +49,6 @@
     communityGlossaryOpen: false,
     subscription: { isPremium: false, plan: 'free', status: 'free', source: 'unknown' },
     savedDancesUiSignature: '',
-    adminUiSignature: '',
     suspension: null,
     chatOpen: false,
     chatBusy: false,
@@ -850,10 +849,6 @@
     const container = document.getElementById('stepper-google-button-slot');
     if (!container) return;
     const theme = themeClasses();
-    const uiSignature = getAdminUiSignature();
-    if (!force && adminPageHasLiveTyping(page)) return;
-    if (!force && state.adminUiSignature === uiSignature) return;
-    state.adminUiSignature = uiSignature;
     container.innerHTML = '';
     const effectiveClientId = (state.config && state.config.googleClientId) || FALLBACK_GOOGLE_CLIENT_ID;
     if (!effectiveClientId) {
@@ -1166,9 +1161,11 @@
     state.busy.admin = true;
     try {
       const data = await authFetch('/api/admin/dances');
-      return updateAdminDataState('adminDances', Array.isArray(data.items) ? data.items : []);
+      state.adminDances = Array.isArray(data.items) ? data.items : [];
+      return state.adminDances;
     } catch {
-      return updateAdminDataState('adminDances', []);
+      state.adminDances = [];
+      return [];
     } finally {
       state.busy.admin = false;
     }
@@ -1331,9 +1328,11 @@
     if (!isAdminSession()) { state.submissions = []; return []; }
     try {
       const data = await authFetch('/api/admin/submissions');
-      return updateAdminDataState('submissions', Array.isArray(data.items) ? data.items : []);
+      state.submissions = Array.isArray(data.items) ? data.items : [];
+      return state.submissions;
     } catch {
-      return updateAdminDataState('submissions', []);
+      state.submissions = [];
+      return [];
     }
   }
 
@@ -1437,9 +1436,11 @@
   async function refreshSiteMemories(){
     try {
       const data = await fetchJson('/api/site-memory');
-      return updateAdminDataState('siteMemories', Array.isArray(data.items) ? data.items : []);
+      state.siteMemories = Array.isArray(data.items) ? data.items : [];
+      return state.siteMemories;
     } catch (_error) {
-      return updateAdminDataState('siteMemories', []);
+      state.siteMemories = [];
+      return [];
     }
   }
 
@@ -1480,9 +1481,11 @@
     }
     try {
       const data = await authFetch('/api/admin/glossary-requests');
-      return updateAdminDataState('glossaryRequests', Array.isArray(data.items) ? data.items : []);
+      state.glossaryRequests = Array.isArray(data.items) ? data.items : [];
+      return state.glossaryRequests;
     } catch {
-      return updateAdminDataState('glossaryRequests', []);
+      state.glossaryRequests = [];
+      return [];
     }
   }
 
@@ -2134,7 +2137,8 @@
     if (!isModeratorSession() && !isAdminSession()) return [];
     if (!force && Array.isArray(state.staffChat)) return state.staffChat;
     const res = await authFetch('/api/staff-chat', {}).catch(() => null);
-    return updateAdminDataState('staffChat', res && Array.isArray(res.messages) ? res.messages : []);
+    state.staffChat = res && Array.isArray(res.messages) ? res.messages : [];
+    return state.staffChat;
   }
 
   async function sendStaffChat(text){
@@ -2149,74 +2153,14 @@
       flash('Staff chat could not send right now.', 'error');
       return;
     }
-    updateAdminDataState('staffChat', Array.isArray(res.messages) ? res.messages : (Array.isArray(state.staffChat) ? state.staffChat : []));
-    markAdminUiDirty();
+    state.staffChat = Array.isArray(res.messages) ? res.messages : (Array.isArray(state.staffChat) ? state.staffChat : []);
     renderPages();
   }
 
-  function adminPageHasLiveTyping(page){
-    const active = document.activeElement;
-    if (!page || !active || !document.body.contains(active)) return false;
-    if (!page.contains(active)) return false;
-    return !!(active.matches && active.matches('input, textarea, [contenteditable="true"], [contenteditable=""]'));
-  }
-
-  function adminDataSignature(value){
-    try {
-      return JSON.stringify(value == null ? null : value);
-    } catch (_error) {
-      return String(value == null ? '' : value);
-    }
-  }
-
-  function markAdminUiDirty(){
-    state.adminUiDirty = true;
-    state.adminUiSignature = '';
-  }
-
-  function updateAdminDataState(key, nextValue){
-    const nextList = Array.isArray(nextValue) ? nextValue : [];
-    const nextSignature = adminDataSignature(nextList);
-    const signatureKey = `${key}Signature`;
-    const changed = state[signatureKey] !== nextSignature;
-    state[key] = nextList;
-    state[signatureKey] = nextSignature;
-    if (changed) markAdminUiDirty();
-    return nextList;
-  }
-
-  function getAdminUiSignature(){
-    return JSON.stringify({
-      activePage: state.activePage || '',
-      isAdmin: isAdminSession(),
-      dark: !!(readAppData() && readAppData().isDarkMode),
-      adminDances: (state.adminDances || []).map(item => [item && item.registryId || '', item && item.updatedAt || '', item && item.featureTone || '', item && item.featuredAt || ''].join('~')).join('|'),
-      submissions: (state.submissions || []).map(item => [item && item.id || '', item && item.updatedAt || '', item && item.status || '', item && item.requestType || ''].join('~')).join('|'),
-      moderatorApplications: (state.moderatorApplications || []).map(item => [item && item.id || '', item && item.status || '', item && item.createdAt || ''].join('~')).join('|'),
-      activeModerators: (state.activeModerators || []).map(item => [item && item.userKey || '', item && item.email || '', item && item.updatedAt || ''].join('~')).join('|'),
-      suspensions: (state.suspensions || []).map(item => [item && item.userKey || '', item && item.untilAt || '', item && item.updatedAt || ''].join('~')).join('|'),
-      glossaryRequests: (state.glossaryRequests || []).map(item => [item && item.id || '', item && item.updatedAt || '', item && item.status || ''].join('~')).join('|'),
-      glossaryApproved: (state.glossaryApproved || []).map(item => [item && item.id || '', item && item.updatedAt || '', item && item.name || ''].join('~')).join('|'),
-      siteMemories: (state.siteMemories || []).map(item => [item && item.id || '', item && item.updatedAt || '', item && item.text || ''].join('~')).join('|'),
-      securityAlerts: (state.securityAlerts || []).map(item => [item && item.id || '', item && item.createdAt || '', item && item.kind || ''].join('~')).join('|'),
-      staffChat: (state.staffChat || []).map(item => [item && item.id || '', item && item.createdAt || '', item && item.text || ''].join('~')).join('|')
-    });
-  }
-
-  function renderAdminPage(force){
+  function renderAdminPage(){
     const page = document.getElementById(ADMIN_PAGE_ID);
     if (!page) return;
-    if (!force && state.activePage !== 'admin') return;
-    if (!force && !state.adminUiDirty) return;
     const theme = themeClasses();
-    const uiSignature = getAdminUiSignature();
-    if (!force && adminPageHasLiveTyping(page)) return;
-    if (!force && state.adminUiSignature === uiSignature) {
-      state.adminUiDirty = false;
-      return;
-    }
-    state.adminUiSignature = uiSignature;
-    state.adminUiDirty = false;
     if (!isAdminSession()) {
       page.className = `rounded-3xl border shadow-sm overflow-hidden ${theme.shell}`;
       page.innerHTML = `
@@ -2505,7 +2449,7 @@
     ensureHost();
     renderSignInPage();
     renderSubscriptionPage();
-    if (state.activePage === 'admin' || state.adminUiDirty) renderAdminPage();
+    renderAdminPage();
     syncPageVisibility();
     renderPresenceOnly();
     renderSuspensionBanner();
@@ -2599,7 +2543,6 @@
   window.addEventListener('storage', () => {
     if (state.session && state.session.credential) syncCurrentDanceToBackend(false);
     state.savedDancesUiSignature = '';
-    markAdminUiDirty();
     renderPages();
   });
 
@@ -2892,9 +2835,11 @@
     if (!isAdminSession()) { state.moderatorApplications = []; return []; }
     try {
       const data = await authFetch('/api/admin/moderator-applications');
-      return updateAdminDataState('moderatorApplications', Array.isArray(data.items) ? data.items : []);
+      state.moderatorApplications = Array.isArray(data.items) ? data.items : [];
+      return state.moderatorApplications;
     } catch {
-      return updateAdminDataState('moderatorApplications', []);
+      state.moderatorApplications = [];
+      return [];
     }
   }
 
@@ -2902,9 +2847,11 @@
     if (!isAdminSession()) { state.activeModerators = []; return []; }
     try {
       const data = await authFetch('/api/admin/moderators');
-      return updateAdminDataState('activeModerators', Array.isArray(data.items) ? data.items : []);
+      state.activeModerators = Array.isArray(data.items) ? data.items : [];
+      return state.activeModerators;
     } catch {
-      return updateAdminDataState('activeModerators', []);
+      state.activeModerators = [];
+      return [];
     }
   }
 
@@ -2912,9 +2859,11 @@
     if (!isAdminSession()) { state.suspensions = []; return []; }
     try {
       const data = await authFetch('/api/admin/suspensions');
-      return updateAdminDataState('suspensions', Array.isArray(data.items) ? data.items : []);
+      state.suspensions = Array.isArray(data.items) ? data.items : [];
+      return state.suspensions;
     } catch {
-      return updateAdminDataState('suspensions', []);
+      state.suspensions = [];
+      return [];
     }
   }
 
@@ -2922,9 +2871,11 @@
     if (!isAdminSession()) { state.securityAlerts = []; return []; }
     try {
       const data = await authFetch('/api/admin/security-alerts');
-      return updateAdminDataState('securityAlerts', Array.isArray(data.items) ? data.items : []);
+      state.securityAlerts = Array.isArray(data.items) ? data.items : [];
+      return state.securityAlerts;
     } catch {
-      return updateAdminDataState('securityAlerts', []);
+      state.securityAlerts = [];
+      return [];
     }
   }
 
@@ -3205,14 +3156,6 @@
   function decorateAdminPage(){
     const page = document.getElementById(ADMIN_PAGE_ID);
     if (!page || !isAdminSession()) return;
-    if (!page.dataset.stepperAdminButtonRenderHook) {
-      page.addEventListener('click', (event) => {
-        const button = event.target && event.target.closest ? event.target.closest('button, [role="button"], [data-action]') : null;
-        if (!button || !page.contains(button)) return;
-        markAdminUiDirty();
-      }, true);
-      page.dataset.stepperAdminButtonRenderHook = 'true';
-    }
     const theme = themeClasses();
     page.querySelectorAll('[data-stepper-submission-id]').forEach(card => {
       const submissionId = card.getAttribute('data-stepper-submission-id');
