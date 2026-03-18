@@ -24,6 +24,8 @@ const dataDir = process.env.DATA_DIR
     ? path.resolve(renderDiskRoot)
     : path.join(__dirname, "data");
 const dbPath = path.join(dataDir, "stepper-db.json");
+const dbBackupPath = `${dbPath}.bak`;
+const dbTempPath = `${dbPath}.tmp`;
 console.log('[Stepper] RENDER_DISK_MOUNT_PATH =', process.env.RENDER_DISK_MOUNT_PATH || '(not set)');
 console.log('[Stepper] DATA_DIR =', process.env.DATA_DIR || '(not set)');
 console.log('[Stepper] resolved dataDir =', dataDir);
@@ -327,6 +329,7 @@ function emptyDb() {
     danceRegistry: [],
     submissions: [],
     moderatorApplications: [],
+    moderatorRegistry: [],
     pendingModeratorInvites: [],
     pendingSuspensions: [],
     glossaryRequests: [],
@@ -356,34 +359,93 @@ async function ensureDb() {
   }
 }
 
+async function readDbFromPath(targetPath) {
+  const raw = await fs.readFile(targetPath, "utf8");
+  const parsed = JSON.parse(raw);
+  if (!parsed || typeof parsed !== "object") throw new Error("Database file did not contain an object.");
+  if (!parsed.users || typeof parsed.users !== "object") parsed.users = {};
+  if (!Array.isArray(parsed.featuredChoreo)) parsed.featuredChoreo = [];
+  if (!Array.isArray(parsed.danceRegistry)) parsed.danceRegistry = [];
+  if (!Array.isArray(parsed.submissions)) parsed.submissions = [];
+  if (!Array.isArray(parsed.moderatorApplications)) parsed.moderatorApplications = [];
+  if (!Array.isArray(parsed.moderatorRegistry)) parsed.moderatorRegistry = [];
+  if (!Array.isArray(parsed.pendingModeratorInvites)) parsed.pendingModeratorInvites = [];
+  if (!Array.isArray(parsed.pendingSuspensions)) parsed.pendingSuspensions = [];
+  if (!Array.isArray(parsed.glossaryRequests)) parsed.glossaryRequests = [];
+  if (!Array.isArray(parsed.approvedGlossarySteps)) parsed.approvedGlossarySteps = [];
+  if (!Array.isArray(parsed.siteMemory)) parsed.siteMemory = [];
+  if (!Array.isArray(parsed.securityAlerts)) parsed.securityAlerts = [];
+  if (!Array.isArray(parsed.staffChat)) parsed.staffChat = [];
+  return parsed;
+}
+
+function syncModeratorRegistry(db) {
+  if (!db || typeof db !== 'object') return db;
+  const list = Array.isArray(db.moderatorRegistry) ? db.moderatorRegistry : [];
+  const byEmail = new Map();
+  list.forEach((item) => {
+    const email = normalizeEmail(item?.email);
+    if (!email) return;
+    byEmail.set(email, {
+      email,
+      userKey: String(item?.userKey || '').trim(),
+      name: String(item?.name || item?.email || '').trim(),
+      addedAt: String(item?.addedAt || new Date().toISOString()).trim(),
+      addedByEmail: String(item?.addedByEmail || '').trim(),
+      addedByName: String(item?.addedByName || '').trim()
+    });
+  });
+  Object.entries(db.users || {}).forEach(([userKey, bucket]) => {
+    if (!isModeratorBucket(bucket)) return;
+    const email = normalizeEmail(bucket?.profile?.email);
+    if (!email) return;
+    byEmail.set(email, {
+      email,
+      userKey: String(userKey || '').trim(),
+      name: String(bucket?.profile?.name || bucket?.profile?.email || '').trim(),
+      addedAt: String(bucket?.updatedAt || bucket?.lastSeenAt || bucket?.createdAt || new Date().toISOString()).trim(),
+      addedByEmail: String(byEmail.get(email)?.addedByEmail || '').trim(),
+      addedByName: String(byEmail.get(email)?.addedByName || '').trim()
+    });
+  });
+  db.moderatorRegistry = Array.from(byEmail.values()).sort((a, b) => a.name.localeCompare(b.name));
+  return db;
+}
+
 async function readDb() {
   await ensureDb();
-  const raw = await fs.readFile(dbPath, "utf8");
   try {
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return emptyDb();
-    if (!parsed.users || typeof parsed.users !== "object") parsed.users = {};
-    if (!Array.isArray(parsed.featuredChoreo)) parsed.featuredChoreo = [];
-    if (!Array.isArray(parsed.danceRegistry)) parsed.danceRegistry = [];
-    if (!Array.isArray(parsed.submissions)) parsed.submissions = [];
-    if (!Array.isArray(parsed.moderatorApplications)) parsed.moderatorApplications = [];
-    if (!Array.isArray(parsed.pendingModeratorInvites)) parsed.pendingModeratorInvites = [];
-    if (!Array.isArray(parsed.pendingSuspensions)) parsed.pendingSuspensions = [];
-    if (!Array.isArray(parsed.glossaryRequests)) parsed.glossaryRequests = [];
-    if (!Array.isArray(parsed.approvedGlossarySteps)) parsed.approvedGlossarySteps = [];
-    if (!Array.isArray(parsed.siteMemory)) parsed.siteMemory = [];
-    if (!Array.isArray(parsed.securityAlerts)) parsed.securityAlerts = [];
-    if (!Array.isArray(parsed.staffChat)) parsed.staffChat = [];
-    return parsed;
-  } catch {
-    return emptyDb();
+    const parsed = await readDbFromPath(dbPath);
+    return syncAndPruneDb(parsed);
+  } catch (error) {
+    try {
+      const fallback = await readDbFromPath(dbBackupPath);
+      console.warn('[Stepper] Main database file could not be read, using backup copy instead.', error?.message || error);
+      return syncAndPruneDb(fallback);
+    } catch {
+      console.error('[Stepper] Database files were unreadable. Refusing to silently reset persistent data.', error?.message || error);
+      throw error;
+    }
   }
 }
 
 async function writeDb(payload) {
   await ensureDb();
-  await fs.writeFile(dbPath, JSON.stringify(payload, null, 2), "utf8");
+  const data = JSON.stringify(syncModeratorRegistry(syncAndPruneDb(payload)), null, 2);
+  try {
+    try {
+      await fs.copyFile(dbPath, dbBackupPath);
+    } catch {}
+    await fs.writeFile(dbTempPath, data, 'utf8');
+    await fs.rename(dbTempPath, dbPath);
+    try {
+      await fs.copyFile(dbPath, dbBackupPath);
+    } catch {}
+  } finally {
+    try { await fs.unlink(dbTempPath); } catch {}
+  }
 }
+
 
 function userKeyFromClaims(claims) {
   return String(claims?.sub || claims?.email || "").trim();
@@ -701,6 +763,47 @@ function removePendingModeratorInvite(db, email) {
   return db.pendingModeratorInvites.length !== before;
 }
 
+
+function findModeratorRegistryIndex(db, email) {
+  const wanted = normalizeEmail(email);
+  if (!wanted) return -1;
+  const list = Array.isArray(db?.moderatorRegistry) ? db.moderatorRegistry : [];
+  return list.findIndex(item => normalizeEmail(item?.email) === wanted);
+}
+
+function upsertModeratorRegistryEntry(db, payload = {}) {
+  if (!Array.isArray(db.moderatorRegistry)) db.moderatorRegistry = [];
+  const email = normalizeEmail(payload.email);
+  if (!email) return null;
+  const item = {
+    email,
+    userKey: String(payload.userKey || '').trim(),
+    name: String(payload.name || payload.email || '').trim(),
+    addedAt: String(payload.addedAt || new Date().toISOString()).trim(),
+    addedByEmail: String(payload.addedByEmail || '').trim(),
+    addedByName: String(payload.addedByName || payload.addedByEmail || '').trim()
+  };
+  const idx = findModeratorRegistryIndex(db, email);
+  if (idx >= 0) db.moderatorRegistry[idx] = { ...db.moderatorRegistry[idx], ...item };
+  else db.moderatorRegistry.unshift(item);
+  db.moderatorRegistry = db.moderatorRegistry.slice(0, 5000);
+  return db.moderatorRegistry.find(entry => normalizeEmail(entry?.email) === email) || item;
+}
+
+function removeModeratorRegistryEntry(db, email) {
+  const wanted = normalizeEmail(email);
+  if (!wanted) return false;
+  const before = Array.isArray(db.moderatorRegistry) ? db.moderatorRegistry.length : 0;
+  db.moderatorRegistry = (Array.isArray(db.moderatorRegistry) ? db.moderatorRegistry : []).filter(item => normalizeEmail(item?.email) !== wanted);
+  return db.moderatorRegistry.length !== before;
+}
+
+function hasPersistentModeratorAccess(db, profileOrBucket) {
+  const email = normalizeEmail(profileOrBucket?.email || profileOrBucket?.profile?.email);
+  if (!email) return false;
+  return findModeratorRegistryIndex(db, email) >= 0;
+}
+
 function findPendingSuspensionIndex(db, email) {
   const wanted = normalizeEmail(email);
   if (!wanted) return -1;
@@ -745,6 +848,7 @@ function applyPendingAccountState(db, bucket, profile) {
   if (inviteIndex >= 0 && !isAdminProfile(profile)) {
     bucket.role = 'moderator';
     bucket.membership = getUserMembership({ ...bucket, role: 'moderator' }, profile);
+    upsertModeratorRegistryEntry(db, { email, userKey: String(profile?.sub || bucket?.profile?.sub || '').trim(), name: String(profile?.name || bucket?.profile?.name || email).trim() });
     removePendingModeratorInvite(db, email);
   }
   const suspensionIndex = findPendingSuspensionIndex(db, email);
@@ -782,7 +886,7 @@ function touchUser(db, profile, userKey) {
     ...(Array.isArray(baseBucket.notifications) ? baseBucket.notifications : []),
     ...(Array.isArray(migratedBucket?.notifications) ? migratedBucket.notifications : [])
   ];
-  const mergedRole = isModeratorBucket(baseBucket) || isModeratorBucket(migratedBucket) ? 'moderator' : '';
+  const mergedRole = (isModeratorBucket(baseBucket) || isModeratorBucket(migratedBucket) || hasPersistentModeratorAccess(db, profile) || hasPersistentModeratorAccess(db, baseBucket) || hasPersistentModeratorAccess(db, migratedBucket)) ? 'moderator' : '';
   const mergedSuspension = (baseBucket.suspension && typeof baseBucket.suspension === 'object')
     ? baseBucket.suspension
     : (migratedBucket?.suspension && typeof migratedBucket.suspension === 'object' ? migratedBucket.suspension : null);
@@ -796,6 +900,7 @@ function touchUser(db, profile, userKey) {
       picture: String(profile?.picture || baseBucket?.profile?.picture || migratedBucket?.profile?.picture || "").trim()
     },
     lastSeenAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
     cloudSaves: mergedCloudSaves,
     notifications: mergedNotifications,
     role: mergedRole,
@@ -805,6 +910,9 @@ function touchUser(db, profile, userKey) {
   };
   if (emailKey && emailKey !== key) delete db.users[emailKey];
   applyPendingAccountState(db, db.users[key], profile);
+  if (isModeratorBucket(db.users[key]) && email) {
+    upsertModeratorRegistryEntry(db, { email, userKey: key, name: String(profile?.name || db.users[key]?.profile?.name || email).trim() });
+  }
   db.users[key].membership = getUserMembership(db.users[key], profile);
   return db.users[key];
 }
@@ -1292,8 +1400,9 @@ app.post("/api/admin/submissions/:id/reject", requireAdmin, async (req, res) => 
     title: 'Feature request declined',
     message: `${item.title || 'Your dance'} was not approved this time.`
   });
+  db.submissions = (Array.isArray(db.submissions) ? db.submissions : []).filter(row => row && row.id !== id);
   await writeDb(db);
-  res.json({ ok: true, item });
+  res.json({ ok: true, removedId: id, item });
 });
 
 app.post("/api/admin/submissions/:id/approve-site", requireAdmin, async (req, res) => {
@@ -1308,8 +1417,9 @@ app.post("/api/admin/submissions/:id/approve-site", requireAdmin, async (req, re
     title: 'Upload approved',
     message: `${item.title || 'Your dance'} was approved for the site.`
   });
+  db.submissions = (Array.isArray(db.submissions) ? db.submissions : []).filter(row => row && row.id !== id);
   await writeDb(db);
-  res.json({ ok: true, item });
+  res.json({ ok: true, removedId: id, item });
 });
 
 app.post("/api/admin/feature", requireAdmin, async (req, res) => {
@@ -1338,11 +1448,13 @@ app.post("/api/admin/feature", requireAdmin, async (req, res) => {
     .slice(0, 300);
 
   const touched = markMatchingSubmissions(db, registryId, 'approved');
+  const resolvedIds = new Set(touched.map(item => String(item?.id || '').trim()).filter(Boolean));
   pushNotification(db, { userKey: source.ownerKey, email: source.ownerEmail }, {
     kind: 'Featured',
     title: 'Your dance was featured',
     message: buildFeatureSummary(source, badgeLabel)
   });
+  db.submissions = (Array.isArray(db.submissions) ? db.submissions : []).filter(item => !resolvedIds.has(String(item?.id || '').trim()));
   await writeDb(db);
   res.json({ ok: true, item: featuredItem, items: db.featuredChoreo, resolvedSubmissions: touched.map(item => item.id) });
 });
@@ -1413,6 +1525,7 @@ app.post('/api/admin/moderator-applications/:id/approve', requireAdmin, async (r
   bucket.role = 'moderator';
   bucket.membership = getUserMembership({ ...bucket, role: 'moderator' }, bucket.profile);
   db.users[item.ownerKey] = { ...bucket, membership: getUserMembership({ ...bucket, role: 'moderator' }, bucket.profile), role: 'moderator' };
+  upsertModeratorRegistryEntry(db, { email: bucket?.profile?.email, userKey: item.ownerKey, name: String(bucket?.profile?.name || bucket?.profile?.email || '').trim(), addedByEmail: String(req.stepperUser?.email || '').trim(), addedByName: String(req.stepperUser?.name || req.stepperUser?.email || '').trim() });
   db.moderatorApplications = (Array.isArray(db.moderatorApplications) ? db.moderatorApplications : []).filter(row => row && row.id !== id);
   removePendingModeratorInvite(db, bucket.profile?.email);
   pushNotification(db, { userKey: item.ownerKey, email: item.ownerEmail }, {
@@ -1443,7 +1556,7 @@ app.post('/api/admin/moderator-applications/:id/decline', requireAdmin, async (r
 app.get('/api/admin/power-tools', requireAdmin, async (_req, res) => {
   const db = pruneDbState(await readDb());
   const users = db.users && typeof db.users === 'object' ? Object.values(db.users).filter(Boolean) : [];
-  const moderators = users.filter(bucket => isModeratorBucket(bucket)).length;
+  const moderators = Array.isArray(db.moderatorRegistry) ? db.moderatorRegistry.length : users.filter(bucket => isModeratorBucket(bucket)).length;
   const barred = users.filter(bucket => !!getActiveSuspension(bucket, bucket?.profile)).length;
   const pendingBars = Array.isArray(db.pendingSuspensions) ? db.pendingSuspensions.length : 0;
   const pendingInvites = Array.isArray(db.pendingModeratorInvites) ? db.pendingModeratorInvites.length : 0;
@@ -1455,18 +1568,20 @@ app.get('/api/admin/power-tools', requireAdmin, async (_req, res) => {
 
 app.get('/api/admin/moderators', requireAdmin, async (_req, res) => {
   const db = await readDb();
-  const items = Object.entries(db.users || {}).map(([userKey, bucket]) => {
-    const profile = bucket?.profile || {};
-    const activeSuspension = getActiveSuspension(bucket, profile);
+  const list = Array.isArray(db.moderatorRegistry) ? db.moderatorRegistry : [];
+  const items = list.map((entry) => {
+    const email = normalizeEmail(entry?.email);
+    const userKey = String(entry?.userKey || findUserKeyByEmail(db, email) || '').trim();
+    const bucket = userKey ? db.users?.[userKey] : null;
     return {
       userKey,
-      email: String(profile.email || '').trim(),
-      name: String(profile.name || profile.email || '').trim(),
-      role: getRoleForBucket(bucket, profile),
-      suspension: activeSuspension ? suspensionPayload({ suspension: activeSuspension }) : null
+      email,
+      name: String(bucket?.profile?.name || entry?.name || email).trim(),
+      role: 'moderator',
+      addedAt: String(entry?.addedAt || '').trim() || null,
+      lastSeenAt: bucket?.lastSeenAt || null
     };
-  }).filter(item => item.role === 'moderator').sort((a, b) => a.name.localeCompare(b.name));
-  await writeDb(db);
+  }).sort((a, b) => a.name.localeCompare(b.name));
   res.json({ ok: true, items });
 });
 
@@ -1490,6 +1605,7 @@ app.post('/api/admin/moderators/add', requireAdmin, async (req, res) => {
   bucket.role = 'moderator';
   bucket.membership = getUserMembership({ ...bucket, role: 'moderator' }, bucket.profile);
   db.users[userKey] = { ...bucket, role: 'moderator', membership: bucket.membership };
+  upsertModeratorRegistryEntry(db, { email, userKey, name: String(bucket.profile?.name || email).trim(), addedByEmail: String(req.stepperUser?.email || '').trim(), addedByName: String(req.stepperUser?.name || req.stepperUser?.email || '').trim() });
   removePendingModeratorInvite(db, email);
   pushNotification(db, { userKey, email }, {
     kind: 'Moderator',
@@ -1510,6 +1626,7 @@ app.post('/api/admin/moderators/:userKey/remove', requireAdmin, async (req, res)
   bucket.role = '';
   bucket.membership = getUserMembership({ ...bucket, role: '' }, bucket.profile);
   db.users[userKey] = { ...bucket, role: '', membership: bucket.membership };
+  removeModeratorRegistryEntry(db, bucket?.profile?.email);
   pushNotification(db, { userKey, email: bucket.profile?.email }, {
     kind: 'Moderator',
     title: 'Moderator access removed',
@@ -1525,6 +1642,7 @@ app.post('/api/admin/moderators/remove-by-email', requireAdmin, async (req, res)
   if (!email) return res.status(400).json({ ok: false, error: 'Enter a Google email address.' });
   const db = await readDb();
   const removed = removePendingModeratorInvite(db, email);
+  removeModeratorRegistryEntry(db, email);
   if (!removed) return res.status(404).json({ ok: false, error: 'Pending moderator invite not found.' });
   await writeDb(db);
   res.json({ ok: true, email });
