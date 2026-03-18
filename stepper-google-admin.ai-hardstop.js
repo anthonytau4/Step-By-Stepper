@@ -173,6 +173,66 @@
     localStorage.setItem(key, JSON.stringify(value));
   }
 
+
+  function createLocalId(prefix){
+    return `${String(prefix || 'id').trim() || 'id'}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`;
+  }
+
+  function createBlankAppData(){
+    return {
+      meta: { title:'', choreographer:'', country:'', level:'Beginner', counts:'32', walls:'4', music:'', type:'4-Wall' },
+      sections: [{ id:createLocalId('section'), name:'Section 1', steps:[] }],
+      tags: [],
+      isDarkMode: isDarkMode()
+    };
+  }
+
+  function writeAppData(data){
+    writeJson(DATA_KEY, data);
+    window.dispatchEvent(new Event('storage'));
+  }
+
+  function ensureAppData(){
+    const existing = readAppData();
+    if (existing && typeof existing === 'object') return existing;
+    const created = createBlankAppData();
+    writeAppData(created);
+    return created;
+  }
+
+  function buildGlossaryApplyStep(step){
+    return {
+      id: createLocalId('step'),
+      type: 'step',
+      count: String(step && (step.count || step.counts) || '1').trim() || '1',
+      name: String(step && step.name || 'Custom Step').trim() || 'Custom Step',
+      description: String(step && (step.description || step.desc) || '').trim(),
+      foot: String(step && step.foot || '').trim(),
+      weight: true,
+      showNote: !!(step && step.note),
+      note: String(step && step.note || '').trim()
+    };
+  }
+
+  function applyStepToCurrentWorksheet(step){
+    const data = ensureAppData();
+    if (!data.meta || typeof data.meta !== 'object') data.meta = createBlankAppData().meta;
+    if (!Array.isArray(data.sections)) data.sections = [];
+    if (!data.sections.length) data.sections.push({ id:createLocalId('section'), name:'Section 1', steps:[] });
+    const target = data.sections[data.sections.length - 1];
+    if (!Array.isArray(target.steps)) target.steps = [];
+    target.steps.push(buildGlossaryApplyStep(step));
+    writeAppData(data);
+    updateSavedSignature('');
+    renderPages();
+    openBuildWorksheet();
+    return true;
+  }
+
+  function approvedGlossaryPromptList(limit){
+    return (state.glossaryApproved || []).slice(0, limit || 80).map(item => `${item.name} [${item.foot || 'Either'}] - ${item.description || item.desc || ''}`).join('\n');
+  }
+
   function saveSession(session){
     state.session = session && typeof session === 'object' ? session : null;
     if (state.session) writeJson(SESSION_KEY, state.session);
@@ -574,6 +634,8 @@
         credential: state.session.credential,
         profile: data.profile,
         isAdmin: !!data.isAdmin,
+        isModerator: !!data.isModerator,
+        role: data.role || (data.isAdmin ? 'admin' : (data.isModerator ? 'moderator' : 'member')),
         updatedAt: new Date().toISOString()
       });
       return data;
@@ -590,7 +652,12 @@
       const data = await authFetch('/api/presence/heartbeat', { method:'POST' });
       state.presence = data;
       if (state.session) {
-        saveSession(Object.assign({}, state.session, { isAdmin: !!data.isAdmin, updatedAt: new Date().toISOString() }));
+        saveSession(Object.assign({}, state.session, {
+          isAdmin: !!data.isAdmin,
+          isModerator: !!data.isModerator,
+          role: data.role || (data.isAdmin ? 'admin' : (data.isModerator ? 'moderator' : 'member')),
+          updatedAt: new Date().toISOString()
+        }));
       }
       renderPresenceOnly();
       return data;
@@ -1230,6 +1297,156 @@
     });
   }
 
+
+  async function refreshGlossaryApproved(){
+    try {
+      const data = await fetchJson('/api/glossary/steps');
+      state.glossaryApproved = Array.isArray(data.items) ? data.items : [];
+      return state.glossaryApproved;
+    } catch {
+      state.glossaryApproved = [];
+      return [];
+    }
+  }
+
+  async function refreshGlossaryRequests(){
+    if (!isAdminSession()) {
+      state.glossaryRequests = [];
+      return [];
+    }
+    try {
+      const data = await authFetch('/api/admin/glossary-requests');
+      state.glossaryRequests = Array.isArray(data.items) ? data.items : [];
+      return state.glossaryRequests;
+    } catch {
+      state.glossaryRequests = [];
+      return [];
+    }
+  }
+
+  async function requestGlossaryStep(payload){
+    if (!(state.session && state.session.credential)) {
+      alert('Sign in with Google first so the glossary request can be attached to your account.');
+      return false;
+    }
+    try {
+      const data = await authFetch('/api/glossary/request', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ step: payload })
+      });
+      alert(data && data.message ? data.message : 'Glossary step request sent to Admin.');
+      return true;
+    } catch (error) {
+      alert(error.message || 'Could not send that glossary step request.');
+      return false;
+    }
+  }
+
+  async function decideGlossaryRequest(id, decision){
+    const note = window.prompt(decision === 'approve' ? 'Optional approval note for this glossary step:' : 'Why are you declining this glossary step?', '');
+    try {
+      await authFetch(`/api/admin/glossary-requests/${encodeURIComponent(id)}/${decision}`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ note: note || '' })
+      });
+      await refreshGlossaryRequests();
+      await refreshGlossaryApproved();
+      renderPages();
+      return true;
+    } catch (error) {
+      alert(error.message || 'Could not update that glossary request.');
+      return false;
+    }
+  }
+
+  function normalizeAiSuggestion(item){
+    if (!item || typeof item !== 'object') return null;
+    const name = String(item.name || '').trim();
+    const description = String(item.description || item.desc || '').trim();
+    if (!name && !description) return null;
+    return {
+      name: name || 'Suggested Step',
+      description,
+      count: String(item.count || item.counts || '1').trim() || '1',
+      foot: String(item.foot || '').trim(),
+      note: String(item.reason || item.note || '').trim()
+    };
+  }
+
+  async function runAiDanceTool(mode){
+    if (!(state.session && state.session.credential)) {
+      alert('Sign in with Google first so the AI can judge or add to this dance.');
+      return;
+    }
+    const dance = buildCurrentDanceEntry();
+    if (!dance) {
+      alert('Build or load a dance first so the AI has something to work with.');
+      return;
+    }
+    state.aiDance.busy = true;
+    renderPages();
+    try {
+      const data = await authFetch('/api/ai/dance-tools', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          mode,
+          prompt: String(state.aiDance.prompt || '').trim(),
+          dance,
+          approvedGlossary: (state.glossaryApproved || []).slice(0, 120)
+        })
+      });
+      state.aiDance.result = {
+        mode,
+        text: String(data.text || '').trim(),
+        score: data.flowScore,
+        suggestions: Array.isArray(data.suggestions) ? data.suggestions.map(normalizeAiSuggestion).filter(Boolean) : []
+      };
+    } catch (error) {
+      state.aiDance.result = { mode, text: error.message || 'AI dance tool failed.', score: null, suggestions: [] };
+    } finally {
+      state.aiDance.busy = false;
+      renderPages();
+    }
+  }
+
+  function renderCommunityGlossary(){
+    let host = document.getElementById('stepper-community-glossary-host');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'stepper-community-glossary-host';
+      host.style.position = 'fixed';
+      host.style.left = '14px';
+      host.style.bottom = '18px';
+      host.style.zIndex = '8600';
+      document.body.appendChild(host);
+    }
+    if (state.activePage || state.chatOpen || window.innerWidth < 900) {
+      host.style.display = 'none';
+      host.innerHTML = '';
+      return;
+    }
+    host.style.display = '';
+    if (!state.communityGlossaryOpen) {
+      host.innerHTML = `<button type="button" data-open-community-glossary="1" style="border:1px solid rgba(99,102,241,.18);background:#fff;color:#111827;padding:.8rem 1rem;border-radius:999px;font-weight:900;box-shadow:0 12px 30px rgba(0,0,0,.14);">Glossary+</button>`;
+      const btn = host.querySelector('[data-open-community-glossary="1"]');
+      if (btn) btn.addEventListener('click', ()=>{ state.communityGlossaryOpen = true; renderCommunityGlossary(); });
+      return;
+    }
+    const items = (state.glossaryApproved || []).slice(0, 18);
+    host.innerHTML = `<div style="width:min(420px, calc(100vw - 28px));background:#f8fafc;border:1px solid rgba(99,102,241,.16);border-radius:24px;box-shadow:0 18px 40px rgba(0,0,0,.18);overflow:hidden;"><div style="padding:.9rem 1rem;background:#4f46e5;color:#fff;display:flex;align-items:center;gap:.6rem;"><div style="font-weight:900;">Community glossary</div><button type="button" data-close-community-glossary="1" style="margin-left:auto;border:none;background:rgba(255,255,255,.18);color:#fff;border-radius:999px;padding:.35rem .65rem;font-weight:900;">Close</button></div><div style="padding:1rem;max-height:min(55vh,420px);overflow:auto;display:grid;gap:.75rem;">${items.length ? items.map(item => `<div style="background:#fff;border:1px solid rgba(99,102,241,.14);border-radius:18px;padding:.9rem;"><div style="display:flex;justify-content:space-between;gap:.75rem;align-items:start;"><div><div style="font-weight:900;">${escapeHtml(item.name || 'Step')}</div><div style="font-size:12px;color:#6b7280;margin-top:.2rem;">${escapeHtml(item.foot || 'Either')} • ${escapeHtml(item.counts || '1')}</div></div><button type="button" data-apply-community-step="${escapeHtml(item.id || item.name || '')}" style="border:none;background:#4f46e5;color:#fff;border-radius:999px;padding:.55rem .9rem;font-weight:900;white-space:nowrap;">Apply</button></div><p style="margin-top:.55rem;font-size:13px;line-height:1.45;color:#374151;">${escapeHtml(item.description || item.desc || '')}</p></div>`).join('') : '<div style="font-size:13px;color:#6b7280;">No admin-approved custom steps yet.</div>'}</div></div>`;
+    const closeBtn = host.querySelector('[data-close-community-glossary="1"]');
+    if (closeBtn) closeBtn.addEventListener('click', ()=>{ state.communityGlossaryOpen = false; renderCommunityGlossary(); });
+    host.querySelectorAll('[data-apply-community-step]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const item = (state.glossaryApproved || []).find(entry => String(entry.id || entry.name || '') === String(btn.getAttribute('data-apply-community-step') || ''));
+        if (item) applyStepToCurrentWorksheet(item);
+      });
+    });
+  }
+
   function localSiteHelp(prompt){
     const text = String(prompt || '').toLowerCase();
     if (!text) return 'Ask about saving, featuring, premium, moderators, or which tab to use.';
@@ -1239,6 +1456,8 @@
     if (text.includes('upload') || text.includes('site')) return 'Use Upload to site to send your dance into the admin moderation queue. The admin can approve it for the site or delete it.';
     if (text.includes('signin') || text.includes('google') || text.includes('sign in')) return 'Open the Sign In tab and use Sign in with Google. Once signed in, your dances can sync to the backend and the admin tab appears only for the admin email.';
     if (text.includes('moderator')) return 'Open Sign In and use Apply for moderator. You need a Google account first. Approved moderators get moderator tools but not the Admin tab.';
+    if (text.includes('glossary') || text.includes('step request')) return 'Use the Community Glossary button while building to apply admin-approved custom steps. Signed-in members can request new glossary steps from the Sign In tab, and Admin reviews them under Requested dance steps.';
+    if (text.includes('judge') || text.includes('flow')) return 'Open Sign In and use AI Dance Judge. It can score flowability, suggest tidy-ups, and propose glossary-style step additions for the current worksheet.';
     if (text.includes('tab') || text.includes('where') || text.includes('go')) return 'Use Build to make or edit a dance, Sheet for the clean sheet view, My Saved Dances for your cloud saves, Featured Choreo for public featured dances, and Sign In for Google saving and moderation actions.';
     return 'Tell me what you are trying to do and I will point you to the exact tab or button.';
   }
@@ -1513,6 +1732,33 @@
               </div>
             </div>
           </div>
+          <div class="mx-auto max-w-3xl rounded-3xl border p-5 sm:p-6 ${theme.soft}">
+            <div class="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <div class="text-lg font-black tracking-tight">AI dance judge & flowability</div>
+                <p class="mt-2 text-sm ${theme.subtle}">Judge the current worksheet, or ask AI to add some extra flavour through glossary-style steps. Suggestions can be applied straight into the current worksheet.</p>
+              </div>
+              <span class="stepper-google-pill ${theme.orange}">${escapeHtml((state.glossaryApproved || []).length)} community steps</span>
+            </div>
+            <div class="mt-4 ${theme.panel} rounded-3xl border p-4"><textarea data-stepper-ai-prompt="1" class="stepper-google-input" rows="3" placeholder="Optional: e.g. make the chorus flow better, add a smoother travelling step, or judge whether this dance is clunky.">${escapeHtml(state.aiDance.prompt || '')}</textarea><div class="mt-4 flex flex-wrap gap-3"><button type="button" data-stepper-action="ai-judge" class="stepper-google-cta ${theme.button}">${state.aiDance.busy && state.aiDance.mode === 'judge' ? 'Judging…' : 'Judge dance'}</button><button type="button" data-stepper-action="ai-add" class="stepper-google-cta ${theme.button}">${state.aiDance.busy && state.aiDance.mode === 'add' ? 'Thinking…' : 'Add with glossary AI'}</button></div></div>
+            ${state.aiDance.result ? `<div class="mt-4 rounded-3xl border p-5 ${theme.panel}"><div class="flex flex-wrap items-center gap-3"><div class="text-lg font-black tracking-tight">${state.aiDance.result.mode === 'add' ? 'AI add-on result' : 'AI judging result'}</div>${state.aiDance.result.score ? `<span class="stepper-google-pill ${theme.orange}">Flow ${escapeHtml(String(state.aiDance.result.score))}/10</span>` : ''}</div><p class="mt-3 text-sm leading-relaxed ${theme.subtle}">${escapeHtml(state.aiDance.result.text || '')}</p>${state.aiDance.result.suggestions && state.aiDance.result.suggestions.length ? `<div class="mt-4 grid gap-3">${state.aiDance.result.suggestions.map((item, index) => `<article class="rounded-2xl border p-4 ${theme.soft}" data-stepper-ai-suggestion="${index}"><div class="flex flex-wrap items-start justify-between gap-3"><div><div class="text-base font-black">${escapeHtml(item.name || 'Suggested Step')}</div><p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.count || '1')} • ${escapeHtml(item.foot || 'Either')}</p></div><button type="button" class="stepper-google-cta ${theme.button}" data-action="apply-ai-suggestion">Apply to worksheet</button></div><p class="mt-3 text-sm leading-relaxed ${theme.subtle}">${escapeHtml(item.description || '')}</p>${item.note ? `<p class="mt-2 text-xs font-semibold ${theme.subtle}">${escapeHtml(item.note)}</p>` : ''}</article>`).join('')}</div>` : ''}</div>` : ''}
+          </div>
+          <div class="mx-auto max-w-3xl rounded-3xl border p-5 sm:p-6 ${theme.soft}">
+            <div class="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <div class="text-lg font-black tracking-tight">Request dance step for the glossary</div>
+                <p class="mt-2 text-sm ${theme.subtle}">Send a custom step to Admin. If it is approved, it becomes a community glossary step for everyone else. Right-foot requests automatically preview a left-foot twin and vice versa.</p>
+              </div>
+            </div>
+            <div class="mt-4 grid gap-4 sm:grid-cols-2">
+              <input data-stepper-glossary-name="1" class="stepper-google-input" placeholder="Step name" />
+              <input data-stepper-glossary-counts="1" class="stepper-google-input" placeholder="Counts, e.g. 1&2" />
+              <input data-stepper-glossary-foot="1" class="stepper-google-input" placeholder="Foot: Right, Left, or Either" />
+              <input data-stepper-glossary-tags="1" class="stepper-google-input" placeholder="Tags or aliases (optional)" />
+            </div>
+            <div class="mt-4 ${theme.panel} rounded-3xl border p-4"><textarea data-stepper-glossary-description="1" class="stepper-google-input" rows="4" placeholder="Describe the step clearly so Admin can preview it."></textarea></div>
+            <div class="mt-4 flex flex-wrap gap-3"><button type="button" data-stepper-action="request-glossary-step" class="stepper-google-cta ${theme.button}">Send glossary step request</button></div>
+          </div>
         </div>
       `;
     } else {
@@ -1558,6 +1804,38 @@
     if (applyModBtn) applyModBtn.addEventListener('click', () => applyForModerator());
     const applyNeedsSignInBtn = page.querySelector('[data-stepper-action="apply-moderator-needs-signin"]');
     if (applyNeedsSignInBtn) applyNeedsSignInBtn.addEventListener('click', () => { alert('Sign in with Google first, then press Apply for moderator.'); });
+    const aiPrompt = page.querySelector('[data-stepper-ai-prompt="1"]');
+    if (aiPrompt) aiPrompt.addEventListener('input', () => { state.aiDance.prompt = aiPrompt.value; });
+    const aiJudgeBtn = page.querySelector('[data-stepper-action="ai-judge"]');
+    if (aiJudgeBtn) aiJudgeBtn.addEventListener('click', () => { state.aiDance.mode = 'judge'; runAiDanceTool('judge'); });
+    const aiAddBtn = page.querySelector('[data-stepper-action="ai-add"]');
+    if (aiAddBtn) aiAddBtn.addEventListener('click', () => { state.aiDance.mode = 'add'; runAiDanceTool('add'); });
+    page.querySelectorAll('[data-stepper-ai-suggestion]').forEach(card => {
+      const idx = Number(card.getAttribute('data-stepper-ai-suggestion'));
+      const btn = card.querySelector('[data-action="apply-ai-suggestion"]');
+      if (btn) btn.addEventListener('click', () => {
+        const item = state.aiDance && state.aiDance.result && Array.isArray(state.aiDance.result.suggestions) ? state.aiDance.result.suggestions[idx] : null;
+        if (item) applyStepToCurrentWorksheet(item);
+      });
+    });
+    const glossaryBtn = page.querySelector('[data-stepper-action="request-glossary-step"]');
+    if (glossaryBtn) glossaryBtn.addEventListener('click', () => {
+      const payload = {
+        name: page.querySelector('[data-stepper-glossary-name="1"]')?.value || '',
+        counts: page.querySelector('[data-stepper-glossary-counts="1"]')?.value || '',
+        foot: page.querySelector('[data-stepper-glossary-foot="1"]')?.value || '',
+        tags: page.querySelector('[data-stepper-glossary-tags="1"]')?.value || '',
+        description: page.querySelector('[data-stepper-glossary-description="1"]')?.value || ''
+      };
+      requestGlossaryStep(payload).then((ok)=>{
+        if (ok) {
+          ['[data-stepper-glossary-name="1"]','[data-stepper-glossary-counts="1"]','[data-stepper-glossary-foot="1"]','[data-stepper-glossary-tags="1"]','[data-stepper-glossary-description="1"]'].forEach(sel => {
+            const el = page.querySelector(sel);
+            if (el) el.value = '';
+          });
+        }
+      });
+    });
 
     renderGoogleButton();
     renderPresenceOnly();
@@ -1728,6 +2006,10 @@
             <div class="mt-4 flex flex-wrap gap-3"><button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="remove-moderator">Delete moderator</button></div>
           </article>`).join('') : `<p class="text-sm ${theme.subtle}">No active moderators yet.</p>`}</div></div>
         ${cards}
+
+        <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-glossary-requests="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Requested dance steps</div><p class="mt-1 text-sm ${theme.subtle}">Admin approves custom glossary steps here. If a request is clearly right-footed or left-footed, the mirrored version is created automatically too.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.glossaryRequests || []).length))} pending</span></div><div class="mt-4 grid gap-4">${(state.glossaryRequests || []).length ? state.glossaryRequests.map(item => `<article class="rounded-2xl border p-4 ${theme.soft}" data-stepper-glossary-request-id="${escapeHtml(item.id)}"><div class="flex flex-wrap items-start justify-between gap-3"><div><div class="text-base font-black">${escapeHtml(item.name || 'Requested Step')}</div><p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.ownerName || item.ownerEmail || 'Member')} • ${escapeHtml(item.counts || '1')} • ${escapeHtml(item.foot || 'Either')}</p></div><div class="flex flex-wrap gap-3"><button type="button" class="stepper-google-cta ${theme.button}" data-action="approve-glossary-request">Approve</button><button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="reject-glossary-request">Decline</button></div></div><div class="mt-4 grid gap-3 sm:grid-cols-2"><div class="rounded-2xl border p-4 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Requested step</div><p class="mt-3 text-sm font-bold">${escapeHtml(item.name || '')}</p><p class="mt-2 text-sm ${theme.subtle}">${escapeHtml(item.description || '')}</p>${item.tags ? `<p class="mt-2 text-xs font-semibold ${theme.subtle}">Tags: ${escapeHtml(item.tags)}</p>` : ''}</div><div class="rounded-2xl border p-4 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Auto twin preview</div>${item.autoMirror ? `<p class="mt-3 text-sm font-bold">${escapeHtml(item.autoMirror.name || '')}</p><p class="mt-2 text-sm ${theme.subtle}">${escapeHtml(item.autoMirror.description || '')}</p><p class="mt-2 text-xs font-semibold ${theme.subtle}">${escapeHtml(item.autoMirror.foot || '')} • ${escapeHtml(item.autoMirror.counts || '')}</p>` : `<p class="mt-3 text-sm ${theme.subtle}">No forced opposite-foot twin for this request.</p>`}</div></div></article>`).join('') : `<p class="text-sm ${theme.subtle}">No pending dance step requests.</p>`}</div></div>
+        <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-approved-glossary="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Approved community glossary</div><p class="mt-1 text-sm ${theme.subtle}">These are the admin-approved custom steps everyone can apply from Glossary+ while building.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.glossaryApproved || []).length))} live</span></div><div class="mt-4 grid gap-3">${(state.glossaryApproved || []).length ? state.glossaryApproved.slice(0, 20).map(item => `<div class="rounded-2xl border p-4 ${theme.soft}"><div class="flex flex-wrap items-start justify-between gap-3"><div><div class="text-base font-black">${escapeHtml(item.name || 'Step')}</div><p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.foot || 'Either')} • ${escapeHtml(item.counts || '1')}</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(item.status || 'approved')}</span></div><p class="mt-3 text-sm ${theme.subtle}">${escapeHtml(item.description || '')}</p></div>`).join('') : `<p class="text-sm ${theme.subtle}">No approved custom glossary steps yet.</p>`}</div></div>
+        ${cards}
       </div>
     `;
 
@@ -1761,6 +2043,14 @@
       const noteEl = card.querySelector('[data-remove-mod-note="1"]');
       const removeBtn = card.querySelector('[data-action="remove-moderator"]');
       if (removeBtn) removeBtn.addEventListener('click', () => removeModeratorAccess(userKey, noteEl && noteEl.value));
+    });
+
+    page.querySelectorAll('[data-stepper-glossary-request-id]').forEach(card => {
+      const id = card.getAttribute('data-stepper-glossary-request-id');
+      const approve = card.querySelector('[data-action="approve-glossary-request"]');
+      const reject = card.querySelector('[data-action="reject-glossary-request"]');
+      if (approve) approve.addEventListener('click', () => decideGlossaryRequest(id, 'approve'));
+      if (reject) reject.addEventListener('click', () => decideGlossaryRequest(id, 'reject'));
     });
 
     page.querySelectorAll('[data-stepper-registry-id]').forEach(card => {
@@ -1849,8 +2139,9 @@
       await refreshNotifications();
       await refreshSubscription();
       await confirmCheckoutIfPresent();
-      if (isAdminSession()) { await refreshAdminDances(); await refreshSubmissions(); }
+      if (isAdminSession()) { await refreshAdminDances(); await refreshSubmissions(); await refreshGlossaryRequests(); }
     }
+    await refreshGlossaryApproved();
     await syncFeaturedFromBackend();
     renderPages();
   }
@@ -1887,7 +2178,8 @@
     syncFeaturedFromBackend();
     patchFeaturedPageCopy();
     if (state.session && state.session.credential) { refreshNotifications(); refreshSubscription(); }
-    if (isAdminSession()) { refreshAdminDances(); refreshSubmissions(); }
+    refreshGlossaryApproved();
+    if (isAdminSession()) { refreshAdminDances(); refreshSubmissions(); refreshGlossaryRequests(); }
   }, FEATURED_SYNC_INTERVAL_MS);
 
   window.addEventListener('beforeunload', (event) => {
@@ -1911,7 +2203,17 @@
       state.subscription = Object.assign({ isPremium: false, plan: 'free', status: 'free', source: 'backend' }, data || {});
       return state.subscription;
     } catch (error) {
-      state.subscription = { isPremium: isAdminSession(), plan: isAdminSession() ? 'admin' : 'free', status: isAdminSession() ? 'active' : 'free', source: 'fallback' };
+      const existing = state.subscription && typeof state.subscription === 'object' ? state.subscription : {};
+      const keepModerator = !!((state.session && state.session.isModerator) || existing.isModerator || existing.role === 'moderator');
+      const keepAdmin = isAdminSession() || existing.role === 'admin';
+      state.subscription = Object.assign({}, existing, {
+        isPremium: keepAdmin || keepModerator || !!existing.isPremium,
+        plan: keepAdmin ? 'admin' : (keepModerator ? 'moderator' : (existing.plan || 'free')),
+        status: keepAdmin || keepModerator ? 'active' : (existing.status || 'free'),
+        source: 'fallback',
+        isModerator: keepModerator,
+        role: keepAdmin ? 'admin' : (keepModerator ? 'moderator' : (existing.role || 'member'))
+      });
       return state.subscription;
     }
   }
@@ -2490,20 +2792,55 @@ Newest user question: ${question}`;
       } else if (!(payload.context.isPremium || payload.context.isModerator || payload.context.isAdmin)) {
         text = 'Premium or moderator access is needed for the AI helper. Open Subscription to upgrade, or apply for moderator from the top of the Sign In tab.';
       } else {
-        try {
-          const data = await authFetch('/api/chatbot/help', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-          });
-          text = sanitizeHelperReply((data && data.text) || '', prompt);
-          if (!text) {
-            const error = new Error('AI helper returned a blank or generic response.');
-            error.status = 502;
-            throw error;
+        const loweredPrompt = prompt.toLowerCase();
+        const wantsDanceJudge = /\b(judge|score|rate|flow|flowability|clunky|smooth)\b/.test(loweredPrompt) && /\b(dance|sheet|worksheet|routine|choreo|choreography)\b/.test(loweredPrompt);
+        const wantsDanceAdd = /\b(add|generate|suggest|improve|fix|tidy)\b/.test(loweredPrompt) && /\b(step|steps|dance|sheet|worksheet|routine|choreo|choreography|glossary)\b/.test(loweredPrompt);
+        const danceToolMode = wantsDanceAdd ? 'add' : (wantsDanceJudge ? 'judge' : '');
+        if (danceToolMode) {
+          const dance = buildCurrentDanceEntry();
+          if (!dance) {
+            text = 'Build or load a dance first, then ask me to judge it or add glossary-style ideas.';
+          } else {
+            try {
+              const danceData = await authFetch('/api/ai/dance-tools', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  mode: danceToolMode,
+                  prompt,
+                  dance,
+                  approvedGlossary: (state.glossaryApproved || []).slice(0, 120)
+                })
+              });
+              const score = Number(danceData && danceData.flowScore || 0) || null;
+              const suggestions = Array.isArray(danceData && danceData.suggestions) ? danceData.suggestions.map(normalizeAiSuggestion).filter(Boolean) : [];
+              const suggestionText = suggestions.length
+                ? '\n\nSuggestions:\n' + suggestions.slice(0, 3).map((item, index) => `${index + 1}. ${item.name || 'Suggestion'}${item.count ? ` (${item.count})` : ''}${item.foot ? ` [${item.foot}]` : ''} — ${item.description || item.reason || 'No extra description.'}`).join('\n')
+                : '';
+              text = `${String(danceData && danceData.text || '').trim() || (danceToolMode === 'add' ? 'I added some glossary-style improvement ideas for this worksheet.' : 'I judged the worksheet for flowability.')}${score ? `\n\nFlowability score: ${score}/10` : ''}${suggestionText}`.trim();
+            } catch (error) {
+              helperError = error;
+            }
           }
-        } catch (error) {
-          helperError = error;
+        }
+        if (!text && !helperError) {
+          try {
+            const data = await authFetch('/api/chatbot/help', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+            text = sanitizeHelperReply((data && data.text) || '', prompt);
+            if (!text) {
+              const error = new Error('AI helper returned a blank or generic response.');
+              error.status = 502;
+              throw error;
+            }
+          } catch (error) {
+            helperError = error;
+          }
+        }
+        if (!text && helperError) {
           try {
             const backup = await authFetch('/api/openai/respond', {
               method: 'POST',
@@ -2549,11 +2886,13 @@ Newest user question: ${question}`;
     if (state.session && state.session.credential) {
       jobs.push(refreshSubscription().catch(() => null));
       jobs.push(refreshNotifications().catch(() => null));
+      jobs.push(refreshGlossaryApproved().catch(() => null));
       if (isAdminSession()) {
         jobs.push(refreshAdminDances().catch(() => null));
         jobs.push(refreshSubmissions().catch(() => null));
         jobs.push(refreshModeratorApplications().catch(() => null));
         jobs.push(refreshActiveModerators().catch(() => null));
+        jobs.push(refreshGlossaryRequests().catch(() => null));
       }
       if (isModeratorSession()) jobs.push(refreshModeratorQueue().catch(() => null));
     }
@@ -2567,6 +2906,7 @@ Newest user question: ${question}`;
     renderModeratorPage();
     decorateSubscriptionPage();
     decorateAdminPage();
+    renderCommunityGlossary();
     setVisibility(document.getElementById(MODERATOR_PAGE_ID), state.activePage === 'moderator');
     window.StepByStepperGlobals = {
       buildCurrentDanceEntry,
@@ -2576,7 +2916,8 @@ Newest user question: ${question}`;
       buildPreviewSectionsFromEntry,
       paymentStatusLabel,
       isModeratorSession,
-      isAdminSession
+      isAdminSession,
+      applyStepToCurrentWorksheet
     };
   };
 

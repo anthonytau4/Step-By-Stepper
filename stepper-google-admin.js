@@ -634,6 +634,8 @@
         credential: state.session.credential,
         profile: data.profile,
         isAdmin: !!data.isAdmin,
+        isModerator: !!data.isModerator,
+        role: data.role || (data.isAdmin ? 'admin' : (data.isModerator ? 'moderator' : 'member')),
         updatedAt: new Date().toISOString()
       });
       return data;
@@ -650,7 +652,12 @@
       const data = await authFetch('/api/presence/heartbeat', { method:'POST' });
       state.presence = data;
       if (state.session) {
-        saveSession(Object.assign({}, state.session, { isAdmin: !!data.isAdmin, updatedAt: new Date().toISOString() }));
+        saveSession(Object.assign({}, state.session, {
+          isAdmin: !!data.isAdmin,
+          isModerator: !!data.isModerator,
+          role: data.role || (data.isAdmin ? 'admin' : (data.isModerator ? 'moderator' : 'member')),
+          updatedAt: new Date().toISOString()
+        }));
       }
       renderPresenceOnly();
       return data;
@@ -2196,7 +2203,17 @@
       state.subscription = Object.assign({ isPremium: false, plan: 'free', status: 'free', source: 'backend' }, data || {});
       return state.subscription;
     } catch (error) {
-      state.subscription = { isPremium: isAdminSession(), plan: isAdminSession() ? 'admin' : 'free', status: isAdminSession() ? 'active' : 'free', source: 'fallback' };
+      const existing = state.subscription && typeof state.subscription === 'object' ? state.subscription : {};
+      const keepModerator = !!((state.session && state.session.isModerator) || existing.isModerator || existing.role === 'moderator');
+      const keepAdmin = isAdminSession() || existing.role === 'admin';
+      state.subscription = Object.assign({}, existing, {
+        isPremium: keepAdmin || keepModerator || !!existing.isPremium,
+        plan: keepAdmin ? 'admin' : (keepModerator ? 'moderator' : (existing.plan || 'free')),
+        status: keepAdmin || keepModerator ? 'active' : (existing.status || 'free'),
+        source: 'fallback',
+        isModerator: keepModerator,
+        role: keepAdmin ? 'admin' : (keepModerator ? 'moderator' : (existing.role || 'member'))
+      });
       return state.subscription;
     }
   }
@@ -2775,20 +2792,55 @@ Newest user question: ${question}`;
       } else if (!(payload.context.isPremium || payload.context.isModerator || payload.context.isAdmin)) {
         text = 'Premium or moderator access is needed for the AI helper. Open Subscription to upgrade, or apply for moderator from the top of the Sign In tab.';
       } else {
-        try {
-          const data = await authFetch('/api/chatbot/help', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-          });
-          text = sanitizeHelperReply((data && data.text) || '', prompt);
-          if (!text) {
-            const error = new Error('AI helper returned a blank or generic response.');
-            error.status = 502;
-            throw error;
+        const loweredPrompt = prompt.toLowerCase();
+        const wantsDanceJudge = /\b(judge|score|rate|flow|flowability|clunky|smooth)\b/.test(loweredPrompt) && /\b(dance|sheet|worksheet|routine|choreo|choreography)\b/.test(loweredPrompt);
+        const wantsDanceAdd = /\b(add|generate|suggest|improve|fix|tidy)\b/.test(loweredPrompt) && /\b(step|steps|dance|sheet|worksheet|routine|choreo|choreography|glossary)\b/.test(loweredPrompt);
+        const danceToolMode = wantsDanceAdd ? 'add' : (wantsDanceJudge ? 'judge' : '');
+        if (danceToolMode) {
+          const dance = buildCurrentDanceEntry();
+          if (!dance) {
+            text = 'Build or load a dance first, then ask me to judge it or add glossary-style ideas.';
+          } else {
+            try {
+              const danceData = await authFetch('/api/ai/dance-tools', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  mode: danceToolMode,
+                  prompt,
+                  dance,
+                  approvedGlossary: (state.glossaryApproved || []).slice(0, 120)
+                })
+              });
+              const score = Number(danceData && danceData.flowScore || 0) || null;
+              const suggestions = Array.isArray(danceData && danceData.suggestions) ? danceData.suggestions.map(normalizeAiSuggestion).filter(Boolean) : [];
+              const suggestionText = suggestions.length
+                ? '\n\nSuggestions:\n' + suggestions.slice(0, 3).map((item, index) => `${index + 1}. ${item.name || 'Suggestion'}${item.count ? ` (${item.count})` : ''}${item.foot ? ` [${item.foot}]` : ''} — ${item.description || item.reason || 'No extra description.'}`).join('\n')
+                : '';
+              text = `${String(danceData && danceData.text || '').trim() || (danceToolMode === 'add' ? 'I added some glossary-style improvement ideas for this worksheet.' : 'I judged the worksheet for flowability.')}${score ? `\n\nFlowability score: ${score}/10` : ''}${suggestionText}`.trim();
+            } catch (error) {
+              helperError = error;
+            }
           }
-        } catch (error) {
-          helperError = error;
+        }
+        if (!text && !helperError) {
+          try {
+            const data = await authFetch('/api/chatbot/help', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+            text = sanitizeHelperReply((data && data.text) || '', prompt);
+            if (!text) {
+              const error = new Error('AI helper returned a blank or generic response.');
+              error.status = 502;
+              throw error;
+            }
+          } catch (error) {
+            helperError = error;
+          }
+        }
+        if (!text && helperError) {
           try {
             const backup = await authFetch('/api/openai/respond', {
               method: 'POST',
