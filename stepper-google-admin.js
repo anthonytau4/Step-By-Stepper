@@ -1166,11 +1166,9 @@
     state.busy.admin = true;
     try {
       const data = await authFetch('/api/admin/dances');
-      state.adminDances = Array.isArray(data.items) ? data.items : [];
-      return state.adminDances;
+      return updateAdminDataState('adminDances', Array.isArray(data.items) ? data.items : []);
     } catch {
-      state.adminDances = [];
-      return [];
+      return updateAdminDataState('adminDances', []);
     } finally {
       state.busy.admin = false;
     }
@@ -1333,11 +1331,9 @@
     if (!isAdminSession()) { state.submissions = []; return []; }
     try {
       const data = await authFetch('/api/admin/submissions');
-      state.submissions = Array.isArray(data.items) ? data.items : [];
-      return state.submissions;
+      return updateAdminDataState('submissions', Array.isArray(data.items) ? data.items : []);
     } catch {
-      state.submissions = [];
-      return [];
+      return updateAdminDataState('submissions', []);
     }
   }
 
@@ -1441,11 +1437,9 @@
   async function refreshSiteMemories(){
     try {
       const data = await fetchJson('/api/site-memory');
-      state.siteMemories = Array.isArray(data.items) ? data.items : [];
-      return state.siteMemories;
+      return updateAdminDataState('siteMemories', Array.isArray(data.items) ? data.items : []);
     } catch (_error) {
-      state.siteMemories = [];
-      return [];
+      return updateAdminDataState('siteMemories', []);
     }
   }
 
@@ -1486,11 +1480,9 @@
     }
     try {
       const data = await authFetch('/api/admin/glossary-requests');
-      state.glossaryRequests = Array.isArray(data.items) ? data.items : [];
-      return state.glossaryRequests;
+      return updateAdminDataState('glossaryRequests', Array.isArray(data.items) ? data.items : []);
     } catch {
-      state.glossaryRequests = [];
-      return [];
+      return updateAdminDataState('glossaryRequests', []);
     }
   }
 
@@ -2142,8 +2134,7 @@
     if (!isModeratorSession() && !isAdminSession()) return [];
     if (!force && Array.isArray(state.staffChat)) return state.staffChat;
     const res = await authFetch('/api/staff-chat', {}).catch(() => null);
-    state.staffChat = res && Array.isArray(res.messages) ? res.messages : [];
-    return state.staffChat;
+    return updateAdminDataState('staffChat', res && Array.isArray(res.messages) ? res.messages : []);
   }
 
   async function sendStaffChat(text){
@@ -2158,7 +2149,8 @@
       flash('Staff chat could not send right now.', 'error');
       return;
     }
-    state.staffChat = Array.isArray(res.messages) ? res.messages : (Array.isArray(state.staffChat) ? state.staffChat : []);
+    updateAdminDataState('staffChat', Array.isArray(res.messages) ? res.messages : (Array.isArray(state.staffChat) ? state.staffChat : []));
+    markAdminUiDirty();
     renderPages();
   }
 
@@ -2167,6 +2159,30 @@
     if (!page || !active || !document.body.contains(active)) return false;
     if (!page.contains(active)) return false;
     return !!(active.matches && active.matches('input, textarea, [contenteditable="true"], [contenteditable=""]'));
+  }
+
+  function adminDataSignature(value){
+    try {
+      return JSON.stringify(value == null ? null : value);
+    } catch (_error) {
+      return String(value == null ? '' : value);
+    }
+  }
+
+  function markAdminUiDirty(){
+    state.adminUiDirty = true;
+    state.adminUiSignature = '';
+  }
+
+  function updateAdminDataState(key, nextValue){
+    const nextList = Array.isArray(nextValue) ? nextValue : [];
+    const nextSignature = adminDataSignature(nextList);
+    const signatureKey = `${key}Signature`;
+    const changed = state[signatureKey] !== nextSignature;
+    state[key] = nextList;
+    state[signatureKey] = nextSignature;
+    if (changed) markAdminUiDirty();
+    return nextList;
   }
 
   function getAdminUiSignature(){
@@ -2190,11 +2206,17 @@
   function renderAdminPage(force){
     const page = document.getElementById(ADMIN_PAGE_ID);
     if (!page) return;
+    if (!force && state.activePage !== 'admin') return;
+    if (!force && !state.adminUiDirty) return;
     const theme = themeClasses();
     const uiSignature = getAdminUiSignature();
     if (!force && adminPageHasLiveTyping(page)) return;
-    if (!force && state.adminUiSignature === uiSignature) return;
+    if (!force && state.adminUiSignature === uiSignature) {
+      state.adminUiDirty = false;
+      return;
+    }
     state.adminUiSignature = uiSignature;
+    state.adminUiDirty = false;
     if (!isAdminSession()) {
       page.className = `rounded-3xl border shadow-sm overflow-hidden ${theme.shell}`;
       page.innerHTML = `
@@ -2483,7 +2505,7 @@
     ensureHost();
     renderSignInPage();
     renderSubscriptionPage();
-    renderAdminPage();
+    if (state.activePage === 'admin' || state.adminUiDirty) renderAdminPage();
     syncPageVisibility();
     renderPresenceOnly();
     renderSuspensionBanner();
@@ -2577,7 +2599,7 @@
   window.addEventListener('storage', () => {
     if (state.session && state.session.credential) syncCurrentDanceToBackend(false);
     state.savedDancesUiSignature = '';
-    state.adminUiSignature = '';
+    markAdminUiDirty();
     renderPages();
   });
 
@@ -2870,11 +2892,9 @@
     if (!isAdminSession()) { state.moderatorApplications = []; return []; }
     try {
       const data = await authFetch('/api/admin/moderator-applications');
-      state.moderatorApplications = Array.isArray(data.items) ? data.items : [];
-      return state.moderatorApplications;
+      return updateAdminDataState('moderatorApplications', Array.isArray(data.items) ? data.items : []);
     } catch {
-      state.moderatorApplications = [];
-      return [];
+      return updateAdminDataState('moderatorApplications', []);
     }
   }
 
@@ -2882,11 +2902,9 @@
     if (!isAdminSession()) { state.activeModerators = []; return []; }
     try {
       const data = await authFetch('/api/admin/moderators');
-      state.activeModerators = Array.isArray(data.items) ? data.items : [];
-      return state.activeModerators;
+      return updateAdminDataState('activeModerators', Array.isArray(data.items) ? data.items : []);
     } catch {
-      state.activeModerators = [];
-      return [];
+      return updateAdminDataState('activeModerators', []);
     }
   }
 
@@ -2894,11 +2912,9 @@
     if (!isAdminSession()) { state.suspensions = []; return []; }
     try {
       const data = await authFetch('/api/admin/suspensions');
-      state.suspensions = Array.isArray(data.items) ? data.items : [];
-      return state.suspensions;
+      return updateAdminDataState('suspensions', Array.isArray(data.items) ? data.items : []);
     } catch {
-      state.suspensions = [];
-      return [];
+      return updateAdminDataState('suspensions', []);
     }
   }
 
@@ -2906,11 +2922,9 @@
     if (!isAdminSession()) { state.securityAlerts = []; return []; }
     try {
       const data = await authFetch('/api/admin/security-alerts');
-      state.securityAlerts = Array.isArray(data.items) ? data.items : [];
-      return state.securityAlerts;
+      return updateAdminDataState('securityAlerts', Array.isArray(data.items) ? data.items : []);
     } catch {
-      state.securityAlerts = [];
-      return [];
+      return updateAdminDataState('securityAlerts', []);
     }
   }
 
@@ -3191,6 +3205,14 @@
   function decorateAdminPage(){
     const page = document.getElementById(ADMIN_PAGE_ID);
     if (!page || !isAdminSession()) return;
+    if (!page.dataset.stepperAdminButtonRenderHook) {
+      page.addEventListener('click', (event) => {
+        const button = event.target && event.target.closest ? event.target.closest('button, [role="button"], [data-action]') : null;
+        if (!button || !page.contains(button)) return;
+        markAdminUiDirty();
+      }, true);
+      page.dataset.stepperAdminButtonRenderHook = 'true';
+    }
     const theme = themeClasses();
     page.querySelectorAll('[data-stepper-submission-id]').forEach(card => {
       const submissionId = card.getAttribute('data-stepper-submission-id');
