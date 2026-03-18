@@ -837,6 +837,7 @@
       await refreshNotifications();
       await refreshSubscription();
       await syncFeaturedFromBackend();
+    await ensureStaffChatLoaded(true);
       if (isAdminSession()) { await refreshAdminDances(); await refreshSubmissions(); }
     } catch (error) {
       alert(error.message || 'Google sign in failed.');
@@ -2113,6 +2114,45 @@
     });
   }
 
+  function buildStaffChatHtml(theme, roleLabel){
+    const messages = Array.isArray(state.staffChat) ? state.staffChat : [];
+    const bannerClass = roleLabel === 'Admin'
+      ? (theme.dark ? 'bg-amber-500/20 text-amber-100 border-amber-400/40' : 'bg-amber-100 text-amber-800 border-amber-300')
+      : (theme.dark ? 'bg-emerald-500/20 text-emerald-100 border-emerald-400/40' : 'bg-emerald-100 text-emerald-800 border-emerald-300');
+    const items = messages.length ? messages.slice(-40).map(item => {
+      const isAdmin = String(item && item.role || '').toLowerCase() === 'admin';
+      const pill = isAdmin
+        ? `<span class="inline-flex items-center rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-widest ${theme.dark ? 'bg-amber-500/20 text-amber-100 border-amber-400/40' : 'bg-amber-100 text-amber-800 border-amber-300'}">Admin</span>`
+        : `<span class="inline-flex items-center rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-widest ${theme.dark ? 'bg-emerald-500/20 text-emerald-100 border-emerald-400/40' : 'bg-emerald-100 text-emerald-800 border-emerald-300'}">Moderator</span>`;
+      return `<article class="rounded-2xl border p-4 ${theme.soft}"><div class="flex flex-wrap items-center justify-between gap-3"><div class="flex flex-wrap items-center gap-2"><span class="text-sm font-black">${escapeHtml(item && (item.name || item.email) || 'Staff')}</span>${pill}</div><span class="text-xs ${theme.subtle}">${escapeHtml(formatDate(item && item.createdAt || Date.now()))}</span></div><p class="mt-3 text-sm whitespace-pre-wrap">${escapeHtml(item && item.text || '')}</p></article>`;
+    }).join('') : `<p class="text-sm ${theme.subtle}">No staff chat messages yet.</p>`;
+    return `<div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-staff-chat="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Staff chat</div><p class="mt-1 text-sm ${theme.subtle}">Admins and moderators can talk here about approvals, notes, and moderation decisions.</p></div><span class="inline-flex items-center rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-widest ${bannerClass}">${escapeHtml(roleLabel || 'Staff')}</span></div><div class="mt-4 grid gap-3">${items}</div><div class="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]"><textarea data-stepper-staff-chat-input="1" class="stepper-google-input" rows="3" placeholder="Leave a staff note..."></textarea><button type="button" class="stepper-google-cta ${theme.button}" data-action="send-staff-chat">Send</button></div></div>`;
+  }
+
+  async function ensureStaffChatLoaded(force){
+    if (!isModeratorSession() && !isAdminSession()) return [];
+    if (!force && Array.isArray(state.staffChat)) return state.staffChat;
+    const res = await authFetch('/api/staff-chat', {}).catch(() => null);
+    state.staffChat = res && Array.isArray(res.messages) ? res.messages : [];
+    return state.staffChat;
+  }
+
+  async function sendStaffChat(text){
+    const clean = String(text || '').trim();
+    if (!clean) return;
+    const res = await authFetch('/api/staff-chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: clean })
+    }).catch(() => null);
+    if (!res || res.ok === false) {
+      flash('Staff chat could not send right now.', 'error');
+      return;
+    }
+    state.staffChat = Array.isArray(res.messages) ? res.messages : (Array.isArray(state.staffChat) ? state.staffChat : []);
+    renderPages();
+  }
+
   function renderAdminPage(){
     const page = document.getElementById(ADMIN_PAGE_ID);
     if (!page) return;
@@ -2274,6 +2314,14 @@
       const removeBtn = card.querySelector('[data-action="remove-moderator"]');
       if (removeBtn) removeBtn.addEventListener('click', () => removeModeratorAccess(userKey, noteEl && noteEl.value));
     });
+    const staffSendBtn = page.querySelector('[data-action="send-staff-chat"]');
+    if (staffSendBtn) staffSendBtn.addEventListener('click', () => {
+      const input = page.querySelector('[data-stepper-staff-chat-input="1"]');
+      const text = input && input.value;
+      sendStaffChat(text);
+      if (input) input.value = '';
+    });
+
     const addModeratorBtn = page.querySelector('[data-action="add-moderator-email"]');
     if (addModeratorBtn) addModeratorBtn.addEventListener('click', () => {
       const emailEl = page.querySelector('[data-add-moderator-email="1"]');

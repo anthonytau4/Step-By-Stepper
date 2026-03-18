@@ -614,21 +614,7 @@ function buildFeaturedItemFromRegistry(entry, featuredBy, badgeTone, badgeLabel)
 function touchUser(db, profile, userKey) {
   const key = String(userKey || profile?.sub || profile?.email || "").trim();
   if (!key) return null;
-  const email = normalizeEmail(profile?.email);
-  let bucket = db.users[key] && typeof db.users[key] === "object" ? db.users[key] : null;
-  if (!bucket && email) {
-    const emailKey = Object.keys(db.users || {}).find((candidate) => normalizeEmail(db.users?.[candidate]?.profile?.email) === email);
-    if (emailKey && emailKey !== key) {
-      const prior = db.users[emailKey] && typeof db.users[emailKey] === 'object' ? db.users[emailKey] : null;
-      if (prior) {
-        bucket = { ...prior, ...bucket, profile: { ...(prior.profile || {}), ...(bucket && bucket.profile || {}) } };
-        delete db.users[emailKey];
-      }
-    }
-  }
-  if (!bucket) bucket = {};
-  const priorRole = String(bucket.role || '').trim().toLowerCase();
-  const nextRole = priorRole === 'moderator' ? 'moderator' : '';
+  const bucket = db.users[key] && typeof db.users[key] === "object" ? db.users[key] : {};
   db.users[key] = {
     ...bucket,
     profile: {
@@ -640,8 +626,8 @@ function touchUser(db, profile, userKey) {
     lastSeenAt: new Date().toISOString(),
     cloudSaves: Array.isArray(bucket.cloudSaves) ? bucket.cloudSaves : [],
     notifications: Array.isArray(bucket.notifications) ? bucket.notifications : [],
-    role: nextRole,
-    membership: getUserMembership({ ...bucket, role: nextRole }, profile),
+    role: isModeratorBucket(bucket) ? 'moderator' : '',
+    membership: getUserMembership(bucket, profile),
     suspension: bucket.suspension && typeof bucket.suspension === 'object' ? bucket.suspension : null,
     securityStrikes: Math.max(0, Number(bucket.securityStrikes || 0))
   };
@@ -687,23 +673,6 @@ function pushNotification(db, target, payload) {
   bucket.notifications.unshift(item);
   bucket.notifications = bucket.notifications.slice(0, 100);
   return item;
-}
-
-
-function sanitizeStaffChatItem(item) {
-  const entry = item && typeof item === 'object' ? item : {};
-  return {
-    id: String(entry.id || createId('staffchat')).trim(),
-    role: String(entry.role || 'moderator').trim().toLowerCase() === 'admin' ? 'admin' : 'moderator',
-    email: String(entry.email || '').trim(),
-    name: String(entry.name || entry.email || 'Staff').trim(),
-    text: String(entry.text || '').trim().slice(0, 4000),
-    createdAt: entry.createdAt || new Date().toISOString()
-  };
-}
-
-function getStaffChatItems(db) {
-  return (Array.isArray(db.staffChat) ? db.staffChat : []).map(sanitizeStaffChatItem).filter(item => item.text).sort((a,b)=> new Date(a.createdAt||0)-new Date(b.createdAt||0)).slice(-200);
 }
 
 function sanitizeRequestType(value) {
@@ -1405,6 +1374,35 @@ app.post('/api/admin/suspensions/:userKey/lift', requireAdmin, async (req, res) 
   res.json({ ok: true });
 });
 
+
+app.get('/api/staff-chat', requireModerator, async (_req, res) => {
+  const db = await readDb();
+  const messages = (Array.isArray(db.staffChat) ? db.staffChat : []).slice().sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+  res.json({ ok: true, messages });
+});
+
+app.post('/api/staff-chat', requireModerator, async (req, res) => {
+  const text = String(req.body?.text || '').trim();
+  if (!text) {
+    res.status(400).json({ ok: false, error: 'Message text is required.' });
+    return;
+  }
+  const db = await readDb();
+  if (!Array.isArray(db.staffChat)) db.staffChat = [];
+  const item = {
+    id: randomUUID(),
+    text: text.slice(0, 4000),
+    createdAt: new Date().toISOString(),
+    role: isAdminProfile(req.stepperUser) ? 'admin' : 'moderator',
+    email: req.stepperUser?.email || '',
+    name: req.stepperUser?.name || req.stepperUser?.email || 'Staff'
+  };
+  db.staffChat.push(item);
+  db.staffChat = db.staffChat.slice(-200);
+  await writeDb(db);
+  res.json({ ok: true, messages: db.staffChat.slice().sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0)) });
+});
+
 app.get('/api/admin/security-alerts', requireAdmin, async (_req, res) => {
   const db = await readDb();
   const items = (Array.isArray(db.securityAlerts) ? db.securityAlerts : []).slice().sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
@@ -1723,30 +1721,6 @@ ${approved.map(item => `- ${item.name} [${item.foot}] ${item.counts}: ${item.des
     const fallback = fallbackDanceTool(mode, dance, prompt);
     res.json({ ok:true, provider:'fallback', ...fallback, fallback:true, error: error.message || 'AI dance tool failed.' });
   }
-});
-
-
-app.get('/api/staff-chat', requireModerator, async (_req, res) => {
-  const db = await readDb();
-  res.json({ ok: true, items: getStaffChatItems(db) });
-});
-
-app.post('/api/staff-chat', requireModerator, async (req, res) => {
-  const db = await readDb();
-  const text = String(req.body?.text || '').trim().slice(0, 4000);
-  if (!text) return res.status(400).json({ ok: false, error: 'Message required.' });
-  const item = sanitizeStaffChatItem({
-    role: isAdminProfile(req.stepperUser) ? 'admin' : 'moderator',
-    email: req.stepperUser.email,
-    name: req.stepperUser.name || req.stepperUser.email,
-    text,
-    createdAt: new Date().toISOString()
-  });
-  if (!Array.isArray(db.staffChat)) db.staffChat = [];
-  db.staffChat.push(item);
-  db.staffChat = getStaffChatItems(db);
-  await writeDb(db);
-  res.json({ ok: true, item, items: db.staffChat });
 });
 
 app.post('/api/chatbot/help', requireGoogleUser, async (req, res) => {
