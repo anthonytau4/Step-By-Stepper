@@ -1987,7 +1987,7 @@
             <div class="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <div class="text-lg font-black tracking-tight">Apply for moderator</div>
-                <p class="mt-2 text-sm ${theme.subtle}">Must have a Google account to do so. Sign in first, then send the moderator request from this same page.</p>
+                <p class="mt-2 text-sm ${theme.subtle}">Sign in with Google first. Your Gmail is added to the site database on first sign-in, then you can send the moderator request from this same page.</p>
               </div>
               <button type="button" data-stepper-action="apply-moderator-needs-signin" class="stepper-google-cta ${theme.button}">Apply for moderator</button>
             </div>
@@ -1995,7 +1995,7 @@
           <div class="mx-auto max-w-2xl rounded-3xl border p-6 sm:p-8 ${theme.soft}">
             <div class="text-center">
               <div class="text-2xl font-black tracking-tight">Sign in with Google</div>
-              <p class="mt-3 text-sm leading-relaxed ${theme.subtle}">Use your Google account to sign in. The admin tab appears only for <strong>${escapeHtml(ADMIN_EMAIL)}</strong>.</p>
+              <p class="mt-3 text-sm leading-relaxed ${theme.subtle}">Use your Google account to sign in. Your Gmail is added to the site database on first sign-in so cloud saves, moderator requests, and staff actions have a real account bucket to attach to. The admin tab appears only for <strong>${escapeHtml(ADMIN_EMAIL)}</strong>.</p>
             </div>
             <div id="stepper-google-button-slot" class="stepper-google-google-btn mt-6 flex justify-center"></div>
           </div>

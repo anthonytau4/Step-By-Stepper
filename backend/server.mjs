@@ -293,7 +293,8 @@ function emptyDb() {
     approvedGlossarySteps: [],
     siteMemory: [],
     securityAlerts: [],
-    staffChat: []
+    staffChat: [],
+    pendingModeratorInvites: []
   };
 }
 
@@ -322,6 +323,7 @@ async function readDb() {
     if (!Array.isArray(parsed.siteMemory)) parsed.siteMemory = [];
     if (!Array.isArray(parsed.securityAlerts)) parsed.securityAlerts = [];
     if (!Array.isArray(parsed.staffChat)) parsed.staffChat = [];
+    if (!Array.isArray(parsed.pendingModeratorInvites)) parsed.pendingModeratorInvites = [];
     return parsed;
   } catch {
     return emptyDb();
@@ -614,8 +616,13 @@ function buildFeaturedItemFromRegistry(entry, featuredBy, badgeTone, badgeLabel)
 function touchUser(db, profile, userKey) {
   const key = String(userKey || profile?.sub || profile?.email || "").trim();
   if (!key) return null;
-  const bucket = db.users[key] && typeof db.users[key] === "object" ? db.users[key] : {};
-  db.users[key] = {
+  const email = normalizeEmail(profile?.email);
+  const existingKey = email ? findUserKeyByEmail(db, email) : "";
+  const existingBucket = existingKey && db.users[existingKey] && typeof db.users[existingKey] === "object" ? db.users[existingKey] : null;
+  const ownBucket = db.users[key] && typeof db.users[key] === "object" ? db.users[key] : null;
+  const bucket = ownBucket || existingBucket || {};
+  const createdAt = String(bucket.createdAt || "").trim() || new Date().toISOString();
+  const merged = {
     ...bucket,
     profile: {
       sub: String(profile?.sub || bucket?.profile?.sub || "").trim(),
@@ -623,6 +630,9 @@ function touchUser(db, profile, userKey) {
       name: String(profile?.name || bucket?.profile?.name || profile?.email || "").trim(),
       picture: String(profile?.picture || bucket?.profile?.picture || "").trim()
     },
+    createdAt,
+    updatedAt: new Date().toISOString(),
+    authProvider: 'google',
     lastSeenAt: new Date().toISOString(),
     cloudSaves: Array.isArray(bucket.cloudSaves) ? bucket.cloudSaves : [],
     notifications: Array.isArray(bucket.notifications) ? bucket.notifications : [],
@@ -631,6 +641,10 @@ function touchUser(db, profile, userKey) {
     suspension: bucket.suspension && typeof bucket.suspension === 'object' ? bucket.suspension : null,
     securityStrikes: Math.max(0, Number(bucket.securityStrikes || 0))
   };
+  db.users[key] = merged;
+  if (existingKey && existingKey !== key) delete db.users[existingKey];
+  applyPendingModeratorInvite(db, profile, db.users[key]);
+  db.users[key].membership = getUserMembership(db.users[key], profile);
   return db.users[key];
 }
 
@@ -654,6 +668,45 @@ function findUserKeyByEmail(db, email) {
   const wanted = normalizeEmail(email);
   if (!wanted) return "";
   return Object.keys(db.users || {}).find((key) => normalizeEmail(db.users?.[key]?.profile?.email) === wanted) || "";
+}
+
+function getPendingModeratorInvite(db, email) {
+  const wanted = normalizeEmail(email);
+  if (!wanted) return null;
+  if (!Array.isArray(db.pendingModeratorInvites)) db.pendingModeratorInvites = [];
+  return db.pendingModeratorInvites.find(item => normalizeEmail(item?.email) === wanted) || null;
+}
+
+function listPendingModeratorInvites(db) {
+  if (!Array.isArray(db.pendingModeratorInvites)) db.pendingModeratorInvites = [];
+  return db.pendingModeratorInvites
+    .map(item => ({
+      email: String(item?.email || '').trim(),
+      createdAt: String(item?.createdAt || '').trim() || null,
+      updatedAt: String(item?.updatedAt || '').trim() || null,
+      invitedByEmail: String(item?.invitedByEmail || '').trim() || null,
+      invitedByName: String(item?.invitedByName || '').trim() || null,
+      status: String(item?.status || 'pending-signin').trim() || 'pending-signin'
+    }))
+    .filter(item => item.email)
+    .sort((a,b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
+}
+
+function applyPendingModeratorInvite(db, profile, bucket) {
+  const email = normalizeEmail(profile?.email || bucket?.profile?.email);
+  if (!email) return false;
+  const invite = getPendingModeratorInvite(db, email);
+  if (!invite) return false;
+  bucket.role = 'moderator';
+  bucket.membership = getUserMembership({ ...bucket, role: 'moderator' }, bucket.profile || profile);
+  bucket.suspension = null;
+  db.pendingModeratorInvites = (Array.isArray(db.pendingModeratorInvites) ? db.pendingModeratorInvites : []).filter(item => normalizeEmail(item?.email) !== email);
+  pushNotification(db, { email }, {
+    kind: 'Moderator',
+    title: 'Moderator access granted',
+    message: 'Your approved Gmail now has moderator access on sign-in.'
+  });
+  return true;
 }
 
 function pushNotification(db, target, payload) {
@@ -928,10 +981,11 @@ app.post("/api/auth/google", async (req, res) => {
     const profile = pickProfile(claims);
     const db = await readDb();
     const userKey = userKeyFromClaims(claims);
+    const hadUserBefore = !!findUserKeyByEmail(db, profile?.email);
     const bucket = touchUser(db, profile, userKey);
     assertNotSuspended(bucket, profile);
     await writeDb(db);
-    res.json({ ok: true, profile, isAdmin: isAdminProfile(profile), isModerator: isModeratorBucket(bucket), role: getRoleForBucket(bucket, profile), onlineCount: getOnlineUsers(db).length, membership: bucket?.membership || getUserMembership(null, profile), suspension: suspensionPayload(bucket) });
+    res.json({ ok: true, profile, createdUser: !hadUserBefore, isAdmin: isAdminProfile(profile), isModerator: isModeratorBucket(bucket), role: getRoleForBucket(bucket, profile), onlineCount: getOnlineUsers(db).length, membership: bucket?.membership || getUserMembership(null, profile), suspension: suspensionPayload(bucket) });
   } catch (error) {
     res.status(error.status || 401).json({ ok: false, error: error?.message || "Google sign-in failed." });
   }
@@ -1269,7 +1323,7 @@ app.get('/api/admin/moderators', requireAdmin, async (_req, res) => {
     };
   }).filter(item => item.role === 'moderator').sort((a, b) => a.name.localeCompare(b.name));
   await writeDb(db);
-  res.json({ ok: true, items });
+  res.json({ ok: true, items, pendingInvites: listPendingModeratorInvites(db) });
 });
 
 app.post('/api/admin/moderators/add', requireAdmin, async (req, res) => {
@@ -1279,18 +1333,35 @@ app.post('/api/admin/moderators/add', requireAdmin, async (req, res) => {
   const db = await readDb();
   const userKey = findUserKeyByEmail(db, email);
   const bucket = userKey && db.users[userKey] && typeof db.users[userKey] === 'object' ? db.users[userKey] : null;
-  if (!bucket) return res.status(404).json({ ok: false, error: 'That Google account has not signed into the site yet.' });
+  if (!Array.isArray(db.pendingModeratorInvites)) db.pendingModeratorInvites = [];
+  const existingInvite = getPendingModeratorInvite(db, email);
+  if (!bucket) {
+    const now = new Date().toISOString();
+    const invite = existingInvite || {
+      email,
+      createdAt: now,
+      invitedByEmail: String(req.stepperUser?.email || '').trim(),
+      invitedByName: String(req.stepperUser?.name || req.stepperUser?.email || 'Admin').trim(),
+      status: 'pending-signin'
+    };
+    invite.updatedAt = now;
+    invite.status = 'pending-signin';
+    if (!existingInvite) db.pendingModeratorInvites.unshift(invite);
+    await writeDb(db);
+    return res.json({ ok: true, invited: true, pending: true, item: invite, pendingInvites: listPendingModeratorInvites(db) });
+  }
   bucket.role = 'moderator';
   bucket.membership = getUserMembership({ ...bucket, role: 'moderator' }, bucket.profile);
   bucket.suspension = null;
   db.users[userKey] = { ...bucket, role: 'moderator', membership: bucket.membership };
+  db.pendingModeratorInvites = db.pendingModeratorInvites.filter(item => normalizeEmail(item?.email) !== email);
   pushNotification(db, { userKey, email }, {
     kind: 'Moderator',
     title: 'Moderator access granted',
     message: 'Admin added moderator access to your account.'
   });
   await writeDb(db);
-  res.json({ ok: true, item: { userKey, email, name: String(bucket.profile?.name || email).trim(), role: 'moderator' } });
+  res.json({ ok: true, item: { userKey, email, name: String(bucket.profile?.name || email).trim(), role: 'moderator' }, pendingInvites: listPendingModeratorInvites(db) });
 });
 
 app.post('/api/admin/moderators/:userKey/remove', requireAdmin, async (req, res) => {
@@ -1309,7 +1380,17 @@ app.post('/api/admin/moderators/:userKey/remove', requireAdmin, async (req, res)
     message: `You were removed as moderator because: ${note || 'No admin reason was supplied.'}`
   });
   await writeDb(db);
-  res.json({ ok: true });
+  res.json({ ok: true, pendingInvites: listPendingModeratorInvites(db) });
+});
+
+app.post('/api/admin/moderators/invites/remove', requireAdmin, async (req, res) => {
+  const email = normalizeEmail(req.body?.email);
+  if (!email) return res.status(400).json({ ok: false, error: 'Enter a Google email address.' });
+  const db = await readDb();
+  const before = Array.isArray(db.pendingModeratorInvites) ? db.pendingModeratorInvites.length : 0;
+  db.pendingModeratorInvites = (Array.isArray(db.pendingModeratorInvites) ? db.pendingModeratorInvites : []).filter(item => normalizeEmail(item?.email) !== email);
+  await writeDb(db);
+  res.json({ ok: true, removed: before !== db.pendingModeratorInvites.length, pendingInvites: listPendingModeratorInvites(db) });
 });
 
 app.get('/api/admin/suspensions', requireAdmin, async (_req, res) => {
