@@ -225,7 +225,9 @@ function emptyDb() {
     featuredChoreo: [],
     danceRegistry: [],
     submissions: [],
-    moderatorApplications: []
+    moderatorApplications: [],
+    glossaryRequests: [],
+    approvedGlossarySteps: []
   };
 }
 
@@ -249,6 +251,8 @@ async function readDb() {
     if (!Array.isArray(parsed.danceRegistry)) parsed.danceRegistry = [];
     if (!Array.isArray(parsed.submissions)) parsed.submissions = [];
     if (!Array.isArray(parsed.moderatorApplications)) parsed.moderatorApplications = [];
+    if (!Array.isArray(parsed.glossaryRequests)) parsed.glossaryRequests = [];
+    if (!Array.isArray(parsed.approvedGlossarySteps)) parsed.approvedGlossarySteps = [];
     return parsed;
   } catch {
     return emptyDb();
@@ -651,9 +655,101 @@ function buildFeatureSummary(source, badgeLabel) {
 }
 
 
+
+function createId(prefix = 'id') {
+  return `${String(prefix || 'id').trim() || 'id'}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function swapLeftRight(text) {
+  return String(text || '').replace(/right/gi, '__TMP_RIGHT__').replace(/left/gi, 'right').replace(/__TMP_RIGHT__/g, 'left');
+}
+
+function buildGlossaryTwin(step) {
+  const foot = String(step?.foot || '').trim().toLowerCase();
+  if (!foot) return null;
+  if (!(foot === 'right' || foot === 'left' || foot === 'r' || foot === 'l')) return null;
+  const nextFoot = foot.startsWith('r') ? 'Left' : 'Right';
+  return {
+    name: swapLeftRight(String(step?.name || '')),
+    description: swapLeftRight(String(step?.description || '')),
+    counts: String(step?.counts || '').trim(),
+    foot: nextFoot,
+    tags: swapLeftRight(String(step?.tags || ''))
+  };
+}
+
+function normalizeGlossaryStepPayload(step, owner = {}) {
+  return {
+    id: createId('gstep'),
+    name: String(step?.name || '').trim().slice(0, 120),
+    description: String(step?.description || step?.desc || '').trim().slice(0, 1200),
+    counts: String(step?.counts || step?.count || '').trim().slice(0, 40) || '1',
+    foot: String(step?.foot || 'Either').trim().slice(0, 24) || 'Either',
+    tags: String(step?.tags || '').trim().slice(0, 240),
+    ownerEmail: String(owner?.email || '').trim(),
+    ownerName: String(owner?.name || owner?.email || '').trim(),
+    status: 'approved',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+}
+
+function serializeDanceForAi(dance = {}) {
+  const title = String(dance?.title || '').trim() || 'Untitled Dance';
+  const choreographer = String(dance?.choreographer || '').trim() || 'Uncredited';
+  const meta = `Title: ${title}
+Choreographer: ${choreographer}
+Level: ${String(dance?.level || '').trim()}
+Counts: ${String(dance?.counts || '').trim()}
+Walls: ${String(dance?.walls || '').trim()}`;
+  const sections = Array.isArray(dance?.snapshot?.data?.sections) ? dance.snapshot.data.sections : [];
+  const sectionText = sections.slice(0, 10).map((section, index) => {
+    const lines = (Array.isArray(section?.steps) ? section.steps : []).slice(0, 16).map((step) => {
+      return [String(step?.count || step?.counts || '').trim(), String(step?.name || '').trim(), String(step?.description || step?.desc || '').trim()].filter(Boolean).join(' - ');
+    }).filter(Boolean).join('\n');
+    return `Section ${index + 1}: ${String(section?.name || '').trim() || `Section ${index + 1}`}
+${lines}`;
+  }).join('\n\n');
+  return `${meta}
+
+${sectionText}`.trim();
+}
+
+function parseJsonFromAiText(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+  const fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const source = fence ? fence[1].trim() : raw;
+  try { return JSON.parse(source); } catch {}
+  const start = source.indexOf('{');
+  const end = source.lastIndexOf('}');
+  if (start >= 0 && end > start) {
+    try { return JSON.parse(source.slice(start, end + 1)); } catch {}
+  }
+  return null;
+}
+
+function fallbackDanceTool(mode, dance, prompt) {
+  const sections = Array.isArray(dance?.snapshot?.data?.sections) ? dance.snapshot.data.sections : [];
+  const stepCount = sections.reduce((sum, section) => sum + (Array.isArray(section?.steps) ? section.steps.length : 0), 0);
+  if (mode === 'add') {
+    return {
+      text: `I could not get a clean AI tool reply, so here is a safe fallback. Add one smoother travelling step near the end of the current worksheet and keep the count simple so the flow stays readable. ${prompt ? `You asked for: ${prompt}` : ''}`.trim(),
+      flowScore: null,
+      suggestions: [{ name: 'Travelling Brush Step', description: 'Step forward with control, brush the free foot through, then settle into the next travelling action so the phrase breathes more cleanly.', count: '7&8', foot: 'Right', reason: 'Fallback glossary-style add-on while the AI response was messy.' }]
+    };
+  }
+  const score = Math.max(5, Math.min(9, stepCount ? Math.round(Math.min(10, 5 + stepCount / 12)) : 5));
+  return {
+    text: 'Fallback judging result: the worksheet structure is readable, but tighten any overcrowded phrases and keep repeated travelling patterns balanced so the dance feels smoother to teach and dance.',
+    flowScore: score,
+    suggestions: []
+  };
+}
+
 const SITE_HELP_CONTEXT = `You are the Step By Stepper site helper. Keep answers short, practical, and human. Only answer about using this site.
 Tabs and actions available: Build, Sheet, What's New, My Saved Dances, Featured Choreo, Sign In, and Admin for anthonytau4@gmail.com only.
-Important behaviours: users sign in with Google, Save Changes pushes the current dance to cloud save, Send to host for featuring creates a feature request, Upload to site creates a site-upload request, Featured Choreo shows public featured dances, removing a feature removes it from Featured Choreo, and signed-in users can get notifications when admin approves or rejects requests.
+Important behaviours: users sign in with Google, Save Changes pushes the current dance to cloud save, Send to host for featuring creates a feature request, Upload to site creates a site-upload request, Featured Choreo shows public featured dances, removing a feature removes it from Featured Choreo, signed-in users can get notifications when admin approves or rejects requests, and Admin reviews custom glossary step requests under Requested dance steps.
 If someone asks where to go, tell them the exact tab or button to use.
 Do not open with generic greetings like "Hi there! What can I help you with today on Step By Stepper?" and do not tell people to ask about any tab or feature. Just answer the actual question.`;
 
@@ -689,7 +785,8 @@ app.get("/api/health", async (_req, res) => {
     geminiEnabled: !!geminiApiKey,
     cloudStorage: "json-file",
     onlineCount: getOnlineUsers(db).length,
-    danceCount: Array.isArray(db.danceRegistry) ? db.danceRegistry.length : 0
+    danceCount: Array.isArray(db.danceRegistry) ? db.danceRegistry.length : 0,
+    glossaryCount: Array.isArray(db.approvedGlossarySteps) ? db.approvedGlossarySteps.length : 0
   });
 });
 
@@ -705,7 +802,8 @@ app.get("/api/auth/config", (_req, res) => {
     adminEmail,
     onlineWindowMs,
     stripeEnabled: !!stripeSecretKey,
-    stripePublishableKey
+    stripePublishableKey,
+    glossaryCount: 0
   });
 });
 
@@ -1172,6 +1270,125 @@ app.post('/api/subscription/confirm', requireGoogleUser, async (req, res) => {
   }
 });
 
+
+app.get('/api/glossary/steps', async (_req, res) => {
+  const db = await readDb();
+  const items = (Array.isArray(db.approvedGlossarySteps) ? db.approvedGlossarySteps : []).slice().sort((a,b)=> String(a?.name || '').localeCompare(String(b?.name || '')));
+  res.json({ ok:true, items });
+});
+
+app.post('/api/glossary/request', requireGoogleUser, async (req, res) => {
+  const raw = req.body?.step && typeof req.body.step === 'object' ? req.body.step : {};
+  const name = String(raw.name || '').trim();
+  const description = String(raw.description || raw.desc || '').trim();
+  if (!name || !description) return res.status(400).json({ ok:false, error:'Step name and description are required.' });
+  const db = await readDb();
+  const key = userKeyFromClaims(req.stepperClaims);
+  touchUser(db, req.stepperUser, key);
+  const item = {
+    id: createId('glossary_request'),
+    ownerKey: key,
+    ownerEmail: req.stepperUser.email,
+    ownerName: req.stepperUser.name,
+    name: name.slice(0, 120),
+    description: description.slice(0, 1200),
+    counts: String(raw.counts || raw.count || '1').trim().slice(0, 40) || '1',
+    foot: String(raw.foot || 'Either').trim().slice(0, 24) || 'Either',
+    tags: String(raw.tags || '').trim().slice(0, 240),
+    autoMirror: buildGlossaryTwin(raw),
+    status: 'pending',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  db.glossaryRequests = [item, ...(Array.isArray(db.glossaryRequests) ? db.glossaryRequests : [])].slice(0, 1000);
+  await writeDb(db);
+  res.json({ ok:true, item, message:'Glossary step request sent to Admin.' });
+});
+
+app.get('/api/admin/glossary-requests', requireAdmin, async (_req, res) => {
+  const db = await readDb();
+  const items = (Array.isArray(db.glossaryRequests) ? db.glossaryRequests : []).filter(item => String(item?.status || '') === 'pending').sort((a,b)=> new Date(b.updatedAt||0)-new Date(a.updatedAt||0));
+  res.json({ ok:true, items });
+});
+
+app.post('/api/admin/glossary-requests/:id/approve', requireAdmin, async (req, res) => {
+  const db = await readDb();
+  const id = String(req.params.id || '').trim();
+  const item = (Array.isArray(db.glossaryRequests) ? db.glossaryRequests : []).find(row => row && row.id === id);
+  if (!item) return res.status(404).json({ ok:false, error:'Glossary request not found.' });
+  item.status = 'approved';
+  item.updatedAt = new Date().toISOString();
+  item.adminNote = String(req.body?.note || '').trim().slice(0, 600);
+  const approved = normalizeGlossaryStepPayload(item, { email:item.ownerEmail, name:item.ownerName });
+  approved.status = 'approved';
+  approved.sourceRequestId = item.id;
+  const additions = [approved];
+  if (item.autoMirror) {
+    const twin = normalizeGlossaryStepPayload({ ...item.autoMirror, counts:item.autoMirror.counts || item.counts, tags:item.autoMirror.tags || item.tags }, { email:item.ownerEmail, name:item.ownerName });
+    twin.status = 'approved';
+    twin.sourceRequestId = item.id;
+    twin.isAutoMirror = true;
+    additions.push(twin);
+  }
+  db.approvedGlossarySteps = [...additions, ...(Array.isArray(db.approvedGlossarySteps) ? db.approvedGlossarySteps : [])].slice(0, 4000);
+  notifyUser(db, item.ownerKey, { kind:'glossary-approved', title:'Glossary step approved', message: item.autoMirror ? 'Admin approved your glossary step and created the opposite-foot twin too.' : 'Admin approved your glossary step.' });
+  await writeDb(db);
+  res.json({ ok:true, item, added:additions });
+});
+
+app.post('/api/admin/glossary-requests/:id/reject', requireAdmin, async (req, res) => {
+  const db = await readDb();
+  const id = String(req.params.id || '').trim();
+  const item = (Array.isArray(db.glossaryRequests) ? db.glossaryRequests : []).find(row => row && row.id === id);
+  if (!item) return res.status(404).json({ ok:false, error:'Glossary request not found.' });
+  item.status = 'rejected';
+  item.updatedAt = new Date().toISOString();
+  item.adminNote = String(req.body?.note || '').trim().slice(0, 600);
+  notifyUser(db, item.ownerKey, { kind:'glossary-rejected', title:'Glossary step declined', message: item.adminNote ? `Admin declined your glossary step request: ${item.adminNote}` : 'Admin declined your glossary step request this time.' });
+  await writeDb(db);
+  res.json({ ok:true, item });
+});
+
+app.post('/api/ai/dance-tools', requireGoogleUser, async (req, res) => {
+  const mode = String(req.body?.mode || 'judge').trim().toLowerCase() === 'add' ? 'add' : 'judge';
+  const prompt = String(req.body?.prompt || '').trim();
+  const dance = req.body?.dance && typeof req.body.dance === 'object' ? req.body.dance : null;
+  if (!dance || typeof dance !== 'object') return res.status(400).json({ ok:false, error:'Missing dance payload.' });
+  const db = await readDb();
+  const approved = (Array.isArray(db.approvedGlossarySteps) ? db.approvedGlossarySteps : []).slice(0, 120).map(item => ({ name:item.name, description:item.description, counts:item.counts, foot:item.foot, tags:item.tags }));
+  const danceText = serializeDanceForAi(dance);
+  const system = mode === 'add'
+    ? 'You are an expert line-dance editor. Use the provided dance sheet and community glossary to propose 1 to 3 additions that improve flow. Return strict JSON with keys text, flowScore, suggestions. Each suggestion must have name, description, count, foot, reason. Avoid markdown.'
+    : 'You are an expert line-dance judge. Score the dance for flowability and teaching clarity. Return strict JSON with keys text, flowScore, suggestions. flowScore is 1-10. suggestions can be empty or contain tidy-up suggestions with name, description, count, foot, reason. Avoid markdown.';
+  const userPrompt = `Mode: ${mode}
+User request: ${prompt || '(none)'}
+
+Current dance:
+${danceText}
+
+Community glossary steps:
+${approved.map(item => `- ${item.name} [${item.foot}] ${item.counts}: ${item.description}`).join('\n') || '(none)'}`;
+  try {
+    const ai = await runSiteHelperAI({ system, prompt: userPrompt, history: [], preferredModel: 'gemini' });
+    const parsed = parseJsonFromAiText(ai.text);
+    if (!parsed || (!parsed.text && !Array.isArray(parsed.suggestions))) {
+      const fallback = fallbackDanceTool(mode, dance, prompt);
+      return res.json({ ok:true, provider: ai.provider, ...fallback, fallback:true });
+    }
+    const suggestions = Array.isArray(parsed.suggestions) ? parsed.suggestions.map(item => ({
+      name: String(item?.name || '').trim(),
+      description: String(item?.description || item?.desc || '').trim(),
+      count: String(item?.count || item?.counts || '1').trim(),
+      foot: String(item?.foot || '').trim(),
+      reason: String(item?.reason || item?.note || '').trim()
+    })).filter(item => item.name || item.description) : [];
+    res.json({ ok:true, provider: ai.provider, text: String(parsed.text || '').trim() || fallbackDanceTool(mode, dance, prompt).text, flowScore: Number(parsed.flowScore || 0) || null, suggestions });
+  } catch (error) {
+    const fallback = fallbackDanceTool(mode, dance, prompt);
+    res.json({ ok:true, provider:'fallback', ...fallback, fallback:true, error: error.message || 'AI dance tool failed.' });
+  }
+});
+
 app.post('/api/chatbot/help', requireGoogleUser, async (req, res) => {
   const prompt = String(req.body?.prompt || '').trim();
   const context = req.body?.context && typeof req.body.context === 'object' ? req.body.context : {};
@@ -1201,6 +1418,7 @@ Moderator: ${context.isModerator ? 'yes' : 'no'}
 Premium: ${context.isPremium ? 'yes' : 'no'}
 Online count: ${context.onlineCount || 0}
 Current dance title: ${context.currentDanceTitle || 'none'}
+Community glossary count: ${Array.isArray(db.approvedGlossarySteps) ? db.approvedGlossarySteps.length : 0}
 Conversation so far:
 ${trimmedHistory.map(item => `${item.role}: ${item.text}`).join('\n') || '(none)'}
 Newest user question: ${prompt}`;
