@@ -2,8 +2,8 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import OpenAI from "openai";
-import { OAuth2Client } from "google-auth-library";
 import pdfParse from "pdf-parse";
+import { OAuth2Client } from "google-auth-library";
 import { promises as fs } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -1173,86 +1173,79 @@ function normalizeGlossaryStepPayload(step, owner = {}) {
 }
 
 
-function cleanImportString(value, fallback = '') {
-  const normalized = String(value || '').replace(/\s+/g, ' ').trim();
-  return normalized || fallback;
-}
-
-function inferFootFromText(text) {
-  const value = String(text || '').toLowerCase();
-  if (/\bboth\b/.test(value)) return 'Both';
-  if (/\bleft\b/.test(value) && !/\bright\b/.test(value)) return 'L';
-  if (/\bright\b/.test(value) && !/\bleft\b/.test(value)) return 'R';
-  return 'None';
-}
-
-function guessStepName(description, fallback = 'Imported Step') {
-  const clean = cleanImportString(description, fallback);
-  const first = clean.split(/[,.;:]/)[0].trim();
-  const short = first.split(/\s+/).slice(0, 6).join(' ').trim();
-  if (!short) return fallback;
-  return short.replace(/\b([a-z])/g, (match) => match.toUpperCase());
-}
-
-function fallbackParseStepsheetText(rawText = '') {
-  const text = String(rawText || '').replace(/\r/g, '');
-  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
-  const meta = { title:'', choreographer:'', country:'', level:'', counts:'', walls:'', music:'', type:'4-count' };
-  for (const line of lines.slice(0, 30)) {
-    if (!meta.title && !/:/.test(line) && line.length > 2 && line.length < 120) { meta.title = line; continue; }
-    let match = line.match(/^count\s*:?\s*(.+)$/i); if (match && !meta.counts) { meta.counts = match[1].trim(); continue; }
-    match = line.match(/^wall\s*:?\s*(.+)$/i); if (match && !meta.walls) { meta.walls = match[1].trim(); continue; }
-    match = line.match(/^level\s*:?\s*(.+)$/i); if (match && !meta.level) { meta.level = match[1].trim(); continue; }
-    match = line.match(/^choreographer\s*:?\s*(.+)$/i); if (match && !meta.choreographer) { meta.choreographer = match[1].trim(); continue; }
-    match = line.match(/^music\s*:?\s*(.+)$/i); if (match && !meta.music) { meta.music = match[1].trim(); continue; }
-  }
+function fallbackImportStepsheet(text = '') {
+  const clean = String(text || '').replace(/\r/g, '');
+  const lines = clean.split('\n').map(line => line.trim()).filter(Boolean);
+  const joined = lines.join('\n');
+  const title = lines[0] || 'Imported Dance';
+  const countsMatch = joined.match(/\bCount\s*:?\s*(\d{1,3})/i);
+  const wallsMatch = joined.match(/\bWall\s*:?\s*([0-9A-Za-z\-]+)/i);
+  const levelMatch = joined.match(/\bLevel\s*:?\s*([^\n]+)/i);
+  const musicMatch = joined.match(/\bMusic\s*:?\s*([^\n]+)/i);
+  const choreographerMatch = joined.match(/\bChoreographer\s*:?\s*([^\n]+)/i);
+  const countryMatch = joined.match(/\((NZ|AU|UK|US|CA|IE)\)/i);
   const sections = [];
   let current = null;
-  const pushSection = () => { if (current && current.steps.length) sections.push(current); };
-  for (const line of lines) {
-    const sectionMatch = line.match(/^(section\s+\d+|part\s+[A-Z0-9]+|tag\s+\d+|bridge)\s*:?\s*(.*)$/i);
-    if (sectionMatch) {
-      pushSection();
-      current = { title: cleanImportString(sectionMatch[1] + (sectionMatch[2] ? ': ' + sectionMatch[2] : ''), 'Section'), steps: [] };
+  const sectionHeader = /^(Section\s+\d+|Tag\s*\d*|Bridge\s*\d*|Restart\s*\d*|Intro|Ending)\b[:\-]?\s*(.*)$/i;
+  const stepLine = /^(\d+(?:\s*[&a]?\s*(?:[-–]\s*\d+(?:\s*[&a]?)?)?)?)\s*[:.)-]\s*(.+)$/i;
+  for (const line of lines.slice(1)) {
+    const header = line.match(sectionHeader);
+    if (header) {
+      current = { name: `${header[1]}${header[2] ? ': ' + header[2].trim() : ''}`.trim(), steps: [] };
+      sections.push(current);
       continue;
     }
-    const stepMatch = line.match(/^([0-9&.,\-– ]{1,20})\s*[:.)-]\s*(.+)$/);
-    if (stepMatch) {
-      if (!current) current = { title: 'Section 1', steps: [] };
-      const count = cleanImportString(stepMatch[1], '1').replace(/–/g, '-');
-      const description = cleanImportString(stepMatch[2]);
-      current.steps.push({ count, name: guessStepName(description), description, foot: inferFootFromText(description), weight: true });
+    const step = line.match(stepLine);
+    if (step) {
+      if (!current) {
+        current = { name: 'Section 1', steps: [] };
+        sections.push(current);
+      }
+      current.steps.push({ count: step[1].replace(/\s+/g, ' ').trim(), description: step[2].trim(), name: step[2].split(',')[0].trim().slice(0, 80), foot: 'Either' });
     }
   }
-  pushSection();
-  return { meta, sections, tags: [] };
+  if (!sections.length) {
+    sections.push({ name: 'Section 1', steps: lines.slice(1, 33).map((line, index) => ({ count: String(index + 1), description: line, name: line.split(',')[0].trim().slice(0, 80), foot: 'Either' })) });
+  }
+  return {
+    title,
+    choreographer: choreographerMatch ? choreographerMatch[1].trim() : '',
+    country: countryMatch ? countryMatch[1].toUpperCase() : '',
+    level: levelMatch ? levelMatch[1].trim() : 'Beginner',
+    counts: countsMatch ? countsMatch[1].trim() : '32',
+    walls: wallsMatch ? wallsMatch[1].trim() : '4',
+    music: musicMatch ? musicMatch[1].trim() : '',
+    sections,
+    tags: []
+  };
 }
 
-function sanitizeImportedStepsheet(data = {}, fallbackText = '') {
-  const fallback = fallbackParseStepsheetText(fallbackText);
-  const metaIn = data && typeof data.meta === 'object' ? data.meta : {};
-  const meta = {
-    title: cleanImportString(metaIn.title, fallback.meta.title || 'Imported Dance'),
-    choreographer: cleanImportString(metaIn.choreographer, fallback.meta.choreographer),
-    country: cleanImportString(metaIn.country, fallback.meta.country),
-    level: cleanImportString(metaIn.level, fallback.meta.level || 'Improver'),
-    counts: cleanImportString(metaIn.counts, fallback.meta.counts || '32'),
-    walls: cleanImportString(metaIn.walls, fallback.meta.walls || '4'),
-    music: cleanImportString(metaIn.music, fallback.meta.music),
-    type: cleanImportString(metaIn.type, fallback.meta.type || '4-count')
-  };
-  const sectionsRaw = Array.isArray(data.sections) && data.sections.length ? data.sections : fallback.sections;
-  const sections = sectionsRaw.map((section, sectionIndex) => ({
-    title: cleanImportString(section?.title || section?.name, `Section ${sectionIndex + 1}`),
-    steps: (Array.isArray(section?.steps) ? section.steps : []).map((step, stepIndex) => ({
-      count: cleanImportString(step?.count || step?.counts, String(stepIndex + 1)),
-      name: cleanImportString(step?.name, guessStepName(step?.description || step?.desc || '', `Imported Step ${stepIndex + 1}`)),
-      description: cleanImportString(step?.description || step?.desc, ''),
-      foot: ['L','R','Both','None'].includes(String(step?.foot || '').trim()) ? String(step.foot).trim() : inferFootFromText(step?.description || step?.desc || step?.name || ''),
-      weight: step?.weight !== false
-    })).filter((step) => step.name || step.description)
-  })).filter((section) => section.steps.length);
-  return { meta, sections, tags: [] };
+async function structureImportedStepsheetText(text = '', fileName = '') {
+  const fallback = fallbackImportStepsheet(text);
+  const system = 'You are an expert line-dance stepsheet importer. Return strict JSON only. Keys: title, choreographer, country, level, counts, walls, music, sections, tags. sections must be an array of { name, steps }. Each step must have count, name, description, foot. Keep descriptions clear and tidy. Do not include markdown.';
+  const prompt = `File: ${fileName || 'stepsheet.pdf'}\n\nStepsheet text:\n${String(text || '').slice(0, 24000)}`;
+  try {
+    const ai = await runSiteHelperAI({ system, prompt, history: [], preferredModel: 'gemini' });
+    const parsed = parseJsonFromAiText(ai.text);
+    if (!parsed || !Array.isArray(parsed.sections) || !parsed.sections.length) return { dance: fallback, provider: 'fallback', fallback: true };
+    return {
+      dance: {
+        title: String(parsed.title || fallback.title || 'Imported Dance').trim() || 'Imported Dance',
+        choreographer: String(parsed.choreographer || fallback.choreographer || '').trim(),
+        country: String(parsed.country || fallback.country || '').trim(),
+        level: String(parsed.level || fallback.level || 'Beginner').trim() || 'Beginner',
+        counts: String(parsed.counts || fallback.counts || '32').trim() || '32',
+        walls: String(parsed.walls || fallback.walls || '4').trim() || '4',
+        music: String(parsed.music || fallback.music || '').trim(),
+        sections: Array.isArray(parsed.sections) ? parsed.sections : fallback.sections,
+        tags: Array.isArray(parsed.tags) ? parsed.tags : []
+      },
+      provider: ai.provider,
+      fallback: false
+    };
+  } catch (error) {
+    return { dance: fallback, provider: 'fallback', fallback: true, error: String(error && error.message || 'Import AI failed.') };
+  }
 }
 
 function serializeDanceForAi(dance = {}) {
@@ -2240,27 +2233,18 @@ app.delete('/api/admin/site-memory/:id', requireAdmin, async (req, res) => {
 
 
 app.post('/api/ai/import-stepsheet', async (req, res) => {
-  const fileName = cleanImportString(req.body?.fileName || 'stepsheet.pdf', 'stepsheet.pdf');
-  const fileBase64 = String(req.body?.fileBase64 || '').trim();
-  if (!fileBase64) return res.status(400).json({ ok:false, error:'Missing PDF file.' });
+  const pdfBase64 = String(req.body?.pdfBase64 || '').trim();
+  const fileName = String(req.body?.fileName || 'stepsheet.pdf').trim();
+  if (!pdfBase64) return res.status(400).json({ ok:false, error:'Missing PDF file.' });
   try {
-    const pdfBuffer = Buffer.from(fileBase64, 'base64');
-    const parsedPdf = await pdfParse(pdfBuffer);
-    const extractedText = cleanImportString(parsedPdf?.text || '');
-    if (!extractedText) return res.status(400).json({ ok:false, error:'Could not read any text from that PDF.' });
-    const system = 'You are a line-dance stepsheet importer. Return strict JSON only with keys meta, sections, tags. meta must include title, choreographer, country, level, counts, walls, music, type. sections must be an array of objects with title and steps. each step must include count, name, description, foot, weight. Keep the dance structure faithful. Avoid markdown.';
-    const prompt = `File: ${fileName}\n\nStepsheet PDF text:\n${extractedText.slice(0, 32000)}`;
-    try {
-      const ai = await runSiteHelperAI({ system, prompt, history: [], preferredModel: 'gemini' });
-      const parsed = parseJsonFromAiText(ai.text);
-      const cleaned = sanitizeImportedStepsheet(parsed || {}, extractedText);
-      return res.json({ ok:true, provider: ai.provider, parsed: cleaned, extractedText });
-    } catch (error) {
-      const cleaned = sanitizeImportedStepsheet({}, extractedText);
-      return res.json({ ok:true, provider:'fallback', parsed: cleaned, extractedText, fallback:true, error: error.message || 'AI import failed.' });
-    }
+    const buffer = Buffer.from(pdfBase64, 'base64');
+    const parsedPdf = await pdfParse(buffer);
+    const text = String(parsedPdf && parsedPdf.text || '').trim();
+    if (!text) return res.status(400).json({ ok:false, error:'That PDF did not give back readable text.' });
+    const structured = await structureImportedStepsheetText(text, fileName);
+    res.json({ ok:true, text, ...structured });
   } catch (error) {
-    return res.status(500).json({ ok:false, error: error.message || 'PDF import failed.' });
+    res.status(500).json({ ok:false, error: String(error && error.message || 'Could not import that PDF.') });
   }
 });
 
