@@ -1301,6 +1301,34 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     localStorage.setItem(key, JSON.stringify(value));
   }
 
+  function cloneJson(value){
+    return JSON.parse(JSON.stringify(value == null ? null : value));
+  }
+
+  function buildRestorableDancePayload(data, suppliedTools){
+    const phrasedTools = suppliedTools || readJson(PHR_TOOLS_KEY, {});
+    return {
+      version: 1,
+      data: cloneJson(data || {}),
+      phrasedTools: cloneJson(phrasedTools || {})
+    };
+  }
+
+  function restoreRestorableDancePayload(payload, fallbackSnapshot){
+    let parsed = payload;
+    if (typeof parsed === 'string') {
+      try { parsed = JSON.parse(parsed); } catch { parsed = null; }
+    }
+    const source = parsed && typeof parsed === 'object' ? parsed : null;
+    const snapshot = fallbackSnapshot && typeof fallbackSnapshot === 'object' ? fallbackSnapshot : null;
+    const nextData = source && source.data ? source.data : (snapshot && snapshot.data ? snapshot.data : snapshot);
+    const nextTools = source && source.phrasedTools ? source.phrasedTools : (snapshot && snapshot.phrasedTools ? snapshot.phrasedTools : {});
+    if (!nextData || typeof nextData !== 'object') return false;
+    writeJson(DATA_KEY, nextData);
+    writeJson(PHR_TOOLS_KEY, nextTools || {});
+    return true;
+  }
+
   function iconSpeaker(on){
     return on
       ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.5 8.5a5 5 0 0 1 0 7"></path><path d="M18.5 5.5a9 9 0 0 1 0 13"></path></svg>'
@@ -1724,6 +1752,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     const identity = currentDanceIdentity(data || {});
     const sections = Array.isArray(data && data.sections) ? data.sections : [];
     const stepCount = sections.reduce((sum, section) => sum + ((section && Array.isArray(section.steps)) ? section.steps.length : 0), 0);
+    const projectPayload = buildRestorableDancePayload(data, readJson(PHR_TOOLS_KEY, {}));
     return {
       id: identity.id,
       title: identity.title,
@@ -1736,9 +1765,10 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       sections: sections.length,
       steps: stepCount,
       updatedAt: new Date().toISOString(),
+      projectJson: JSON.stringify(projectPayload),
       snapshot: {
-        data: JSON.parse(JSON.stringify(data || {})),
-        phrasedTools: readJson(PHR_TOOLS_KEY, {})
+        data: projectPayload.data,
+        phrasedTools: projectPayload.phrasedTools
       }
     };
   }
@@ -1751,11 +1781,8 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   }
 
   function loadSnapshotEntry(entry){
-    if (!entry || !entry.snapshot) return;
-    const snapshotData = entry.snapshot.data || entry.snapshot;
-    writeJson(DATA_KEY, snapshotData);
-    writeJson(PHR_TOOLS_KEY, entry.snapshot.phrasedTools || {});
-    location.reload();
+    if (!entry) return;
+    if (restoreRestorableDancePayload(entry.projectJson, entry.snapshot)) location.reload();
   }
 
   function deleteLocalSavedDance(id){
@@ -2616,6 +2643,31 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     return JSON.parse(JSON.stringify(value));
   }
 
+  function buildEditableDanceProject(data, suppliedTools){
+    const safeData = data || {};
+    const tools = suppliedTools ? clone(suppliedTools) : clone(normalizePhrasedTools(safeData));
+    return {
+      version: 1,
+      data: clone(safeData),
+      phrasedTools: tools
+    };
+  }
+
+  function restoreEditableDanceProject(payload, fallbackSnapshot){
+    let parsed = payload;
+    if (typeof parsed === 'string') {
+      try { parsed = JSON.parse(parsed); } catch { parsed = null; }
+    }
+    const source = parsed && typeof parsed === 'object' ? parsed : null;
+    const snapshot = fallbackSnapshot && typeof fallbackSnapshot === 'object' ? fallbackSnapshot : null;
+    const nextData = source && source.data ? source.data : (snapshot && snapshot.data ? snapshot.data : snapshot);
+    const nextTools = source && source.phrasedTools ? source.phrasedTools : (snapshot && snapshot.phrasedTools ? snapshot.phrasedTools : {});
+    if (!nextData || typeof nextData !== 'object') return false;
+    writeAppData(nextData);
+    writeStoredPhrasedTools(nextTools || {});
+    return true;
+  }
+
   function getSettings(){
     const saved = readJson(SETTINGS_KEY, {});
     return {
@@ -2830,6 +2882,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     const sections = getMainSections(data);
     const sectionCount = sections.length;
     const stepCount = sections.reduce((sum, section) => sum + ((section && Array.isArray(section.steps)) ? section.steps.length : 0), 0);
+    const projectPayload = buildEditableDanceProject(data, tools);
     return {
       id: identity.id,
       title: identity.title,
@@ -2844,7 +2897,8 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       sections: sectionCount,
       steps: stepCount,
       updatedAt: new Date().toISOString(),
-      snapshot: { data: clone(data), phrasedTools: clone(tools) }
+      projectJson: JSON.stringify(projectPayload),
+      snapshot: { data: projectPayload.data, phrasedTools: projectPayload.phrasedTools }
     };
   }
 
@@ -2852,7 +2906,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     const data = readAppData();
     if (!hasDanceContent(data)) return;
     const entry = buildSnapshotEntry(data);
-    const signature = JSON.stringify({ id: entry.id, counts: entry.counts, walls: entry.walls, level: entry.level, music: entry.music, format: entry.format, sequence: entry.sequence, snapshot: entry.snapshot });
+    const signature = JSON.stringify({ id: entry.id, counts: entry.counts, walls: entry.walls, level: entry.level, music: entry.music, format: entry.format, sequence: entry.sequence, projectJson: entry.projectJson, snapshot: entry.snapshot });
     if (signature === lastFeaturedSignature) return;
     lastFeaturedSignature = signature;
     let featured = readJson(FEATURED_KEY, []);
@@ -2877,11 +2931,8 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
 
   function loadSavedDance(id){
     const entry = getFeaturedDances().find(item => item && item.id === id);
-    if (!entry || !entry.snapshot) return;
-    const snapshotData = entry.snapshot.data || entry.snapshot;
-    writeAppData(snapshotData);
-    writeStoredPhrasedTools(entry.snapshot.phrasedTools || {});
-    location.reload();
+    if (!entry) return;
+    if (restoreEditableDanceProject(entry.projectJson, entry.snapshot)) location.reload();
   }
 
   function getSavedForLater(){
@@ -2891,11 +2942,13 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   function saveCurrentProjectForLater(){
     const data = readAppData();
     if (!hasDanceContent(data)) return false;
+    const projectPayload = buildEditableDanceProject(data);
     const payload = {
       savedAt: new Date().toISOString(),
+      projectJson: JSON.stringify(projectPayload),
       snapshot: {
-        data: clone(data),
-        phrasedTools: clone(normalizePhrasedTools(data))
+        data: projectPayload.data,
+        phrasedTools: projectPayload.phrasedTools
       }
     };
     writeJson(SAVE_LATER_KEY, payload);
@@ -2906,18 +2959,25 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   function maybeRestoreSavedForLaterOnBoot(){
     let payload = null;
     try { payload = getSavedForLater(); } catch {}
-    if (!payload || !payload.snapshot) return false;
+    if (!payload || (!payload.snapshot && !payload.projectJson)) return false;
     try {
       if (sessionStorage.getItem(SAVE_LATER_SESSION_KEY) === 'restored') return false;
     } catch {}
-    const targetData = payload.snapshot.data || payload.snapshot;
-    const targetTools = payload.snapshot.phrasedTools || {};
+
+    let parsedProject = payload.projectJson;
+    if (typeof parsedProject === 'string') {
+      try { parsedProject = JSON.parse(parsedProject); } catch { parsedProject = null; }
+    }
+    const targetData = parsedProject && parsedProject.data ? parsedProject.data : (payload.snapshot && (payload.snapshot.data || payload.snapshot));
+    const targetTools = parsedProject && parsedProject.phrasedTools ? parsedProject.phrasedTools : (payload.snapshot && payload.snapshot.phrasedTools ? payload.snapshot.phrasedTools : {});
+    if (!targetData || typeof targetData !== 'object') return false;
+
     const currentData = readAppData();
     const currentTools = readStoredPhrasedTools();
     const same = JSON.stringify(currentData || {}) === JSON.stringify(targetData || {}) && JSON.stringify(currentTools || {}) === JSON.stringify(targetTools || {});
     if (!same) {
       writeAppData(targetData);
-      writeStoredPhrasedTools(targetTools);
+      writeStoredPhrasedTools(targetTools || {});
       try { sessionStorage.setItem(SAVE_LATER_SESSION_KEY, 'restored'); } catch {}
       location.reload();
       return true;
@@ -4220,6 +4280,31 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     return JSON.parse(JSON.stringify(value));
   }
 
+  function buildEditableDanceProject(data, suppliedTools){
+    const safeData = data || {};
+    const tools = suppliedTools ? clone(suppliedTools) : clone(normalizePhrasedTools(safeData));
+    return {
+      version: 1,
+      data: clone(safeData),
+      phrasedTools: tools
+    };
+  }
+
+  function restoreEditableDanceProject(payload, fallbackSnapshot){
+    let parsed = payload;
+    if (typeof parsed === 'string') {
+      try { parsed = JSON.parse(parsed); } catch { parsed = null; }
+    }
+    const source = parsed && typeof parsed === 'object' ? parsed : null;
+    const snapshot = fallbackSnapshot && typeof fallbackSnapshot === 'object' ? fallbackSnapshot : null;
+    const nextData = source && source.data ? source.data : (snapshot && snapshot.data ? snapshot.data : snapshot);
+    const nextTools = source && source.phrasedTools ? source.phrasedTools : (snapshot && snapshot.phrasedTools ? snapshot.phrasedTools : {});
+    if (!nextData || typeof nextData !== 'object') return false;
+    writeAppData(nextData);
+    writeStoredPhrasedTools(nextTools || {});
+    return true;
+  }
+
   function getSettings(){
     const saved = readJson(SETTINGS_KEY, {});
     return {
@@ -4434,6 +4519,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     const sections = getMainSections(data);
     const sectionCount = sections.length;
     const stepCount = sections.reduce((sum, section) => sum + ((section && Array.isArray(section.steps)) ? section.steps.length : 0), 0);
+    const projectPayload = buildEditableDanceProject(data, tools);
     return {
       id: identity.id,
       title: identity.title,
@@ -4448,7 +4534,8 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       sections: sectionCount,
       steps: stepCount,
       updatedAt: new Date().toISOString(),
-      snapshot: { data: clone(data), phrasedTools: clone(tools) }
+      projectJson: JSON.stringify(projectPayload),
+      snapshot: { data: projectPayload.data, phrasedTools: projectPayload.phrasedTools }
     };
   }
 
@@ -4456,7 +4543,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     const data = readAppData();
     if (!hasDanceContent(data)) return;
     const entry = buildSnapshotEntry(data);
-    const signature = JSON.stringify({ id: entry.id, counts: entry.counts, walls: entry.walls, level: entry.level, music: entry.music, format: entry.format, sequence: entry.sequence, snapshot: entry.snapshot });
+    const signature = JSON.stringify({ id: entry.id, counts: entry.counts, walls: entry.walls, level: entry.level, music: entry.music, format: entry.format, sequence: entry.sequence, projectJson: entry.projectJson, snapshot: entry.snapshot });
     if (signature === lastFeaturedSignature) return;
     lastFeaturedSignature = signature;
     let featured = readJson(FEATURED_KEY, []);
@@ -4481,11 +4568,8 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
 
   function loadSavedDance(id){
     const entry = getFeaturedDances().find(item => item && item.id === id);
-    if (!entry || !entry.snapshot) return;
-    const snapshotData = entry.snapshot.data || entry.snapshot;
-    writeAppData(snapshotData);
-    writeStoredPhrasedTools(entry.snapshot.phrasedTools || {});
-    location.reload();
+    if (!entry) return;
+    if (restoreEditableDanceProject(entry.projectJson, entry.snapshot)) location.reload();
   }
 
   function getSavedForLater(){
@@ -4495,11 +4579,13 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   function saveCurrentProjectForLater(){
     const data = readAppData();
     if (!hasDanceContent(data)) return false;
+    const projectPayload = buildEditableDanceProject(data);
     const payload = {
       savedAt: new Date().toISOString(),
+      projectJson: JSON.stringify(projectPayload),
       snapshot: {
-        data: clone(data),
-        phrasedTools: clone(normalizePhrasedTools(data))
+        data: projectPayload.data,
+        phrasedTools: projectPayload.phrasedTools
       }
     };
     writeJson(SAVE_LATER_KEY, payload);
@@ -4510,18 +4596,25 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   function maybeRestoreSavedForLaterOnBoot(){
     let payload = null;
     try { payload = getSavedForLater(); } catch {}
-    if (!payload || !payload.snapshot) return false;
+    if (!payload || (!payload.snapshot && !payload.projectJson)) return false;
     try {
       if (sessionStorage.getItem(SAVE_LATER_SESSION_KEY) === 'restored') return false;
     } catch {}
-    const targetData = payload.snapshot.data || payload.snapshot;
-    const targetTools = payload.snapshot.phrasedTools || {};
+
+    let parsedProject = payload.projectJson;
+    if (typeof parsedProject === 'string') {
+      try { parsedProject = JSON.parse(parsedProject); } catch { parsedProject = null; }
+    }
+    const targetData = parsedProject && parsedProject.data ? parsedProject.data : (payload.snapshot && (payload.snapshot.data || payload.snapshot));
+    const targetTools = parsedProject && parsedProject.phrasedTools ? parsedProject.phrasedTools : (payload.snapshot && payload.snapshot.phrasedTools ? payload.snapshot.phrasedTools : {});
+    if (!targetData || typeof targetData !== 'object') return false;
+
     const currentData = readAppData();
     const currentTools = readStoredPhrasedTools();
     const same = JSON.stringify(currentData || {}) === JSON.stringify(targetData || {}) && JSON.stringify(currentTools || {}) === JSON.stringify(targetTools || {});
     if (!same) {
       writeAppData(targetData);
-      writeStoredPhrasedTools(targetTools);
+      writeStoredPhrasedTools(targetTools || {});
       try { sessionStorage.setItem(SAVE_LATER_SESSION_KEY, 'restored'); } catch {}
       location.reload();
       return true;
