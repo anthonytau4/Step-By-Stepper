@@ -606,6 +606,8 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   let transitionVisual = null;
   let startupAudio = null;
   let transitionAudio = null;
+  let transitionAudioPrimed = false;
+  let transitionAudioSeeded = false;
 
   function ensureOverlay(){
     if (overlay) return overlay;
@@ -1133,30 +1135,102 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     if (transitionAudio) return transitionAudio;
     transitionAudio = new Audio(loadingSongSrc);
     transitionAudio.preload = 'auto';
-    transitionAudio.loop = false;
-    transitionAudio.volume = 1;
+    transitionAudio.loop = true;
+    transitionAudio.volume = 0;
+    transitionAudio.muted = true;
     try { transitionAudio.playsInline = true; } catch {}
     return transitionAudio;
   }
 
-  function stopTransitionAudio(){
+  function seedTransitionAudioFromRandom(force = false){
+    const audio = ensureTransitionAudio();
+    if (transitionAudioSeeded && !force) return audio;
+    const applySeed = () => {
+      try {
+        const duration = Number(audio.duration);
+        if (!Number.isFinite(duration) || duration <= 1.2) return false;
+        const safeDuration = Math.max(0, duration - 0.35);
+        audio.currentTime = safeDuration > 0 ? Math.random() * safeDuration : 0;
+        transitionAudioSeeded = true;
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    if (!applySeed() && !audio.__stepperRandomSeedBound) {
+      audio.__stepperRandomSeedBound = true;
+      audio.addEventListener('loadedmetadata', () => {
+        applySeed();
+      }, { once: true });
+    }
+    return audio;
+  }
+
+  function muteTransitionAudio(){
     if (!transitionAudio) return;
     try {
-      transitionAudio.pause();
-      transitionAudio.currentTime = 0;
+      transitionAudio.muted = true;
+      transitionAudio.volume = 0;
     } catch {}
   }
 
-  function playTransitionAudio(){
-    stopTransitionAudio();
-    if (!areTransitionSoundsEnabled()) return;
-    const audio = ensureTransitionAudio();
+  function primeTransitionAudioBackground(options){
+    const audio = options && options.forceNewAudio ? new Audio(loadingSongSrc) : ensureTransitionAudio();
+    if (options && options.forceNewAudio) {
+      transitionAudio = audio;
+      transitionAudioPrimed = false;
+      transitionAudioSeeded = false;
+      audio.preload = 'auto';
+      audio.loop = true;
+      audio.volume = 0;
+      audio.muted = true;
+      try { audio.playsInline = true; } catch {}
+    }
+    if (!transitionAudioPrimed || (options && options.randomize)) seedTransitionAudioFromRandom(!!(options && options.randomize));
+    muteTransitionAudio();
+    transitionAudioPrimed = true;
     try {
-      audio.currentTime = 0;
+      const playPromise = audio.play();
+      if (playPromise && typeof playPromise.catch === 'function') playPromise.catch(() => {});
+    } catch {}
+    return audio;
+  }
+
+  function stopTransitionAudio(){
+    muteTransitionAudio();
+  }
+
+  function syncTransitionAudioMute(){
+    if (!transitionAudio) return;
+    if (running && areTransitionSoundsEnabled()) {
+      try {
+        transitionAudio.muted = false;
+        transitionAudio.volume = 1;
+      } catch {}
+      return;
+    }
+    muteTransitionAudio();
+  }
+
+  function playTransitionAudio(){
+    const audio = primeTransitionAudioBackground();
+    if (!areTransitionSoundsEnabled()) {
+      muteTransitionAudio();
+      return;
+    }
+    try {
+      audio.muted = false;
+      audio.volume = 1;
       const playPromise = audio.play();
       if (playPromise && typeof playPromise.catch === 'function') playPromise.catch(() => {});
     } catch {}
   }
+
+  window.__stepperPrimeLoadingAudio = function(options){
+    return primeTransitionAudioBackground(options || { randomize: true });
+  };
+  window.__stepperStopLoadingAudio = stopTransitionAudio;
+  window.__stepperSyncLoadingAudioMute = syncTransitionAudioMute;
 
   function runStartupSplash(){ return; }
 
@@ -1354,6 +1428,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
 
   function saveSettings(settings){
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    try { if (typeof window.__stepperSyncLoadingAudioMute === 'function') window.__stepperSyncLoadingAudioMute(); } catch {}
   }
 
   function readJson(key, fallback){
@@ -2603,8 +2678,8 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
 
 
 
-<script src="./stepper-runtime-recovery.js?v=20260320-recovery-4"></script>
-<script src="./stepper-static-startup-fix.js?v=20260320-startup-fix-4"></script>
+<script src="./stepper-runtime-recovery.js?v=20260320-recovery-5"></script>
+<script src="./stepper-static-startup-fix.js?v=20260320-startup-fix-5"></script>
 <script src="./stepper-phrased-tools-fix.js?v=20260319-phrased-fix-1"></script>
 <script src="./stepper-route-paths.js?v=20260320-paths-2"></script>
 <script src="./stepper-editor-phrasing-repair.js?v=20260320-phrasing-repair-2"></script>

@@ -5,7 +5,6 @@
   const STARTUP_FADE_MS = 340;
   const SETTINGS_KEY = 'stepper_sound_settings_v1';
   const STARTUP_AUDIO_SOURCES = [
-    (window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./loading-screen-song.m4a') : './loading-screen-song.m4a'),
     (window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./startup-song.m4a') : './startup-song.m4a'),
     (window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./startup-song.mp3') : './startup-song.mp3')
   ];
@@ -74,6 +73,9 @@
           const playPromise = audio.play();
           if (playPromise && typeof playPromise.catch === 'function') playPromise.catch(() => {});
         }
+      } catch {}
+      try {
+        if (typeof window.__stepperPrimeLoadingAudio === 'function') window.__stepperPrimeLoadingAudio({ randomize: true });
       } catch {}
       queueLeave();
     }
