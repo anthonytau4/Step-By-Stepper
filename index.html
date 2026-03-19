@@ -1262,6 +1262,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   let inlineHost = null;
   let thinkingAudio = null;
   let lastSyncedSignature = '';
+  let extraRenderTimer = null;
 
   function readAppData(){
     try {
@@ -2124,47 +2125,68 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     if (host) host.hidden = !activeExtraPage;
   }
 
-  let __stepperExtraRenderTimer = null;
-  let __stepperLastExtraRenderedPage = null;
-
-  function stepperExtraActiveEditable(){
-    const el = document.activeElement;
-    if (!el) return null;
-    const editable = !!(el.isContentEditable || (typeof el.matches === 'function' && el.matches('textarea, select, input:not([type=button]):not([type=submit]):not([type=checkbox]):not([type=radio]):not([type=range])')));
-    if (!editable) return null;
-    return el.closest(`#${INLINE_HOST_ID}, #stepper-extra-page-host`) ? el : null;
+  function isTextEntryElement(node){
+    if (!node || node.nodeType !== 1) return false;
+    if (node.isContentEditable) return true;
+    const tag = String(node.tagName || '').toUpperCase();
+    if (tag === 'TEXTAREA') return true;
+    if (tag !== 'INPUT') return false;
+    const type = String(node.getAttribute('type') || 'text').toLowerCase();
+    return !['button','submit','reset','checkbox','radio','range','file','color','hidden','image'].includes(type);
   }
 
-  function scheduleExtraRender(delay = 2000){
-    clearTimeout(__stepperExtraRenderTimer);
-    __stepperExtraRenderTimer = setTimeout(() => {
-      if (stepperExtraActiveEditable()) {
-        scheduleExtraRender(2000);
+  function getTextEntryValue(node){
+    if (!node || node.nodeType !== 1) return '';
+    if (node.isContentEditable) return String(node.textContent || '').trim();
+    if ('value' in node) return String(node.value || '').trim();
+    return '';
+  }
+
+  function visibleTypedDraftExists(root){
+    if (!root) return false;
+    const fields = root.querySelectorAll('input, textarea, [contenteditable="true"], [contenteditable="plaintext-only"]');
+    for (const field of fields) {
+      if (field.offsetParent === null && field !== document.activeElement) continue;
+      if (getTextEntryValue(field)) return true;
+    }
+    return false;
+  }
+
+  function shouldDeferExtraRender(){
+    const active = document.activeElement;
+    if (isTextEntryElement(active) && getTextEntryValue(active)) return true;
+    if (visibleTypedDraftExists(inlineHost)) return true;
+    if (visibleTypedDraftExists(host)) return true;
+    return false;
+  }
+
+  function scheduleRenderExtraPages(delay){
+    const wait = Number.isFinite(delay) ? Math.max(0, delay) : 2000;
+    if (extraRenderTimer) clearTimeout(extraRenderTimer);
+    extraRenderTimer = setTimeout(() => {
+      extraRenderTimer = null;
+      if (shouldDeferExtraRender()) {
+        scheduleRenderExtraPages(wait);
         return;
       }
       renderExtraPages(true);
-    }, Math.max(0, Number(delay) || 0));
+    }, wait);
   }
 
   function renderExtraPages(force){
-    if (!mainEl || !tabStrip) return;
-    ensureHost();
-    const pageChanged = __stepperLastExtraRenderedPage !== activeExtraPage;
-    if (!force && stepperExtraActiveEditable() && !pageChanged) {
-      syncExtraPageVisibility();
-      syncInlineHostVisibility();
-      updateButtonState();
-      scheduleExtraRender(2000);
-      return;
+    if (!force && shouldDeferExtraRender()) {
+      scheduleRenderExtraPages(2000);
+      return false;
     }
-    clearTimeout(__stepperExtraRenderTimer);
-    __stepperLastExtraRenderedPage = activeExtraPage;
+    if (!mainEl || !tabStrip) return false;
+    ensureHost();
     renderSavedDancesPage();
     renderChoreographyPanel(FEATURED_PAGE_ID);
     renderWhatsNewPage();
     syncExtraPageVisibility();
     renderInlineEditorPanels();
     updateButtonState();
+    return true;
   }
 
   function setActiveExtra(pageName){
@@ -2407,7 +2429,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     ensureHost();
     ensureInlineHost();
     wireNativeTabClose();
-    renderExtraPages(true);
+    renderExtraPages();
     return true;
   }
 
@@ -2436,15 +2458,14 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     setInterval(() => {
       saveFeaturedSnapshot();
       applyThinkingMusic();
-      if (!stepperExtraActiveEditable()) renderExtraPages();
-      else scheduleExtraRender(2000);
+      scheduleRenderExtraPages(2000);
       injectWhatsNewNotes();
       syncInlineHostVisibility();
     }, 1800);
     window.addEventListener('storage', () => {
       saveFeaturedSnapshot();
       applyThinkingMusic();
-      scheduleExtraRender(2000);
+      scheduleRenderExtraPages(2000);
       injectWhatsNewNotes();
       syncInlineHostVisibility();
     });

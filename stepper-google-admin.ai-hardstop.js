@@ -77,8 +77,55 @@
       admin: false,
       feature: false,
       sync: false
-    }
+    },
+    renderTimer: null
   };
+
+  function isTextEntryElement(node){
+    if (!node || node.nodeType !== 1) return false;
+    if (node.isContentEditable) return true;
+    const tag = String(node.tagName || '').toUpperCase();
+    if (tag === 'TEXTAREA') return true;
+    if (tag !== 'INPUT') return false;
+    const type = String(node.getAttribute('type') || 'text').toLowerCase();
+    return !['button','submit','reset','checkbox','radio','range','file','color','hidden','image'].includes(type);
+  }
+
+  function getTextEntryValue(node){
+    if (!node || node.nodeType !== 1) return '';
+    if (node.isContentEditable) return String(node.textContent || '').trim();
+    if ('value' in node) return String(node.value || '').trim();
+    return '';
+  }
+
+  function adminDraftExists(){
+    const host = document.getElementById(HOST_ID);
+    if (!host) return false;
+    const fields = host.querySelectorAll('input, textarea, [contenteditable="true"], [contenteditable="plaintext-only"]');
+    for (const field of fields) {
+      if (getTextEntryValue(field)) return true;
+    }
+    return false;
+  }
+
+  function shouldDeferAdminAutoRender(){
+    const active = document.activeElement;
+    if (isTextEntryElement(active) && getTextEntryValue(active)) return true;
+    return adminDraftExists();
+  }
+
+  function scheduleRenderPages(delay){
+    const wait = Number.isFinite(delay) ? Math.max(0, delay) : 2000;
+    if (state.renderTimer) clearTimeout(state.renderTimer);
+    state.renderTimer = setTimeout(() => {
+      state.renderTimer = null;
+      if (shouldDeferAdminAutoRender()) {
+        scheduleRenderPages(wait);
+        return;
+      }
+      renderPages(true);
+    }, wait);
+  }
 
   function normalizeEmail(value){
     return String(value || '').trim().toLowerCase();
@@ -258,7 +305,7 @@
     data.meta.counts = String(totalCounts);
     writeAppData(data);
     updateSavedSignature('');
-    renderPages();
+    renderPages(true);
     openBuildWorksheet();
     return { totalCounts, sections: sectionCounter };
   }
@@ -652,7 +699,7 @@
     renderPages(true);
     updateTabButtons();
     refreshLiveQueues().then(() => {
-      if (state.activePage) __stepperScheduleFullRender(2000);
+      if (state.activePage) scheduleRenderPages(2000);
     }).catch(() => {});
   }
 
@@ -2479,7 +2526,11 @@
     observer.observe(page, { childList: true, subtree: true, characterData: true });
   }
 
-  function renderPages(){
+  function renderPages(force){
+    if (!force && shouldDeferAdminAutoRender()) {
+      scheduleRenderPages(2000);
+      return false;
+    }
     locateUi();
     ensureHost();
     renderSignInPage();
@@ -2497,6 +2548,7 @@
     renderFeatureBadge();
     renderSiteHelper();
     showNotificationToasts();
+    return true;
   }
 
   async function prime(){
@@ -2537,6 +2589,10 @@
   }
 
   setInterval(() => {
+    if (shouldDeferAdminAutoRender()) {
+      scheduleRenderPages(2000);
+      return;
+    }
     if (!locateUi()) return;
     ensureHost();
     wireStartupBackendBase();
@@ -2578,7 +2634,7 @@
   window.addEventListener('storage', () => {
     if (state.session && state.session.credential) syncCurrentDanceToBackend(false);
     state.savedDancesUiSignature = '';
-    __stepperScheduleFullRender(2000);
+    scheduleRenderPages(2000);
   });
 
   async function refreshSubscription(){
@@ -3412,53 +3468,7 @@ Newest user question: ${question}`;
   }
 
   const __origRenderPages = renderPages;
-  let __stepperFullRenderTimer = null;
-  let __stepperLastRenderedPage = null;
-
-  function __stepperActiveEditable(){
-    const el = document.activeElement;
-    if (!el) return null;
-    const editable = !!(el.isContentEditable || (typeof el.matches === 'function' && el.matches('textarea, select, input:not([type=button]):not([type=submit]):not([type=checkbox]):not([type=radio]):not([type=range])')));
-    if (!editable) return null;
-    return el.closest(`#${SIGNIN_PAGE_ID}, #${SUBSCRIPTION_PAGE_ID}, #${ADMIN_PAGE_ID}, #${MODERATOR_PAGE_ID}`) ? el : null;
-  }
-
-  function __stepperLightRefresh(){
-    locateUi();
-    ensureHost();
-    syncPageVisibility();
-    renderPresenceOnly();
-    renderSuspensionBanner();
-    patchFeaturedPageCopy();
-    updateAdminTabVisibility();
-    updateTabButtons();
-    renderQuickActions();
-    renderSaveButton();
-    renderFeatureBadge();
-    renderSiteHelper();
-    showNotificationToasts();
-  }
-
-  function __stepperScheduleFullRender(delay){
-    clearTimeout(__stepperFullRenderTimer);
-    __stepperFullRenderTimer = setTimeout(() => {
-      if (__stepperActiveEditable()) {
-        __stepperScheduleFullRender(2000);
-        return;
-      }
-      renderPages(true);
-    }, Math.max(0, Number(delay) || 0));
-  }
-
-  renderPages = function(force){
-    const pageChanged = __stepperLastRenderedPage !== (state.activePage || null);
-    if (!force && __stepperActiveEditable() && !pageChanged) {
-      __stepperLightRefresh();
-      __stepperScheduleFullRender(2000);
-      return;
-    }
-    clearTimeout(__stepperFullRenderTimer);
-    __stepperLastRenderedPage = state.activePage || null;
+  renderPages = function(){
     __origRenderPages();
     ensureHost();
     renderModeratorPage();
@@ -3485,7 +3495,7 @@ Newest user question: ${question}`;
     if (__stepperLiveQueueRefreshBusy || !(state.session && state.session.credential)) return;
     __stepperLiveQueueRefreshBusy = true;
     refreshLiveQueues().then(() => {
-      if (state.activePage === 'admin' || state.activePage === 'moderator' || state.activePage === 'signin' || state.activePage === 'subscription') __stepperScheduleFullRender(2000);
+      if (state.activePage === 'admin' || state.activePage === 'moderator' || state.activePage === 'signin' || state.activePage === 'subscription') renderPages();
     }).catch(() => {}).finally(() => { __stepperLiveQueueRefreshBusy = false; });
   }, LIVE_QUEUE_SYNC_INTERVAL_MS);
 
