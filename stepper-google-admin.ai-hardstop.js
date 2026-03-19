@@ -1442,9 +1442,16 @@
     host.style.left = 'auto';
     host.style.transform = 'none';
     host.style.right = '18px';
-    host.style.bottom = state.chatOpen ? '92px' : '18px';
     host.style.zIndex = '8500';
     if (!shouldShow) { host.style.display='none'; host.innerHTML=''; return; }
+    const quickHost = document.getElementById('stepper-google-quick-actions');
+    let bottom = state.chatOpen ? 92 : 18;
+    if (quickHost && quickHost.style.display !== 'none' && quickHost.getClientRects().length) {
+      const rect = quickHost.getBoundingClientRect();
+      const lift = Math.max(0, Math.round(window.innerHeight - rect.top + 12));
+      bottom = Math.max(bottom, lift);
+    }
+    host.style.bottom = `${bottom}px`;
     const dirty = hasUnsavedChanges();
     host.style.display='';
     host.innerHTML = `<button type="button" data-save-now="1" style="border:1px solid rgba(79,70,229,.25);background:${dirty ? '#4f46e5' : '#ffffff'};color:${dirty ? '#ffffff' : '#111827'};padding:.72rem 1rem;border-radius:999px;font-weight:900;box-shadow:0 10px 30px rgba(0,0,0,.12);display:inline-flex;align-items:center;gap:.55rem;max-width:min(280px,calc(100vw - 28px));">${dirty ? 'Save changes' : 'Saved'}<span style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.78;">${dirty ? 'cloud needed' : 'cloud up to date'}</span></button>`;
@@ -1821,7 +1828,6 @@
       host.id = 'stepper-google-quick-actions';
       host.style.position = 'fixed';
       host.style.right = '14px';
-      host.style.bottom = state.chatOpen ? '92px' : '18px';
       host.style.zIndex = '8500';
       document.body.appendChild(host);
     }
@@ -1829,10 +1835,12 @@
     const entry = buildCurrentDanceEntry();
     const wide = window.innerWidth >= 980;
     if (!hasSession || !entry || !wide || state.activePage) { host.style.display='none'; host.innerHTML=''; return; }
+    host.style.bottom = `${state.chatOpen ? 92 : 18}px`;
     host.style.display='';
     host.innerHTML = `<div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end;"><button type="button" data-quick="feature" style="border:1px solid rgba(99,102,241,.18);background:#fff;padding:.75rem 1rem;border-radius:999px;font-weight:900;box-shadow:0 10px 30px rgba(0,0,0,.12);">Send to host for featuring</button><button type="button" data-quick="site" style="border:1px solid rgba(99,102,241,.18);background:#fff;padding:.75rem 1rem;border-radius:999px;font-weight:900;box-shadow:0 10px 30px rgba(0,0,0,.12);">Upload to site</button></div>`;
     host.querySelector('[data-quick="feature"]').addEventListener('click', ()=>requestModeration('feature'));
     host.querySelector('[data-quick="site"]').addEventListener('click', ()=>requestModeration('site'));
+    requestAnimationFrame(() => renderSaveButton());
   }
 
   function getSavedDancesUiSignature(){
