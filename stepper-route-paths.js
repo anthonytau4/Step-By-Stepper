@@ -2,6 +2,8 @@
   if (window.__stepperRoutePathsInstalled) return;
   window.__stepperRoutePathsInstalled = true;
 
+  const ROUTE_STORAGE_KEY = 'stepperRouteBootstrap';
+
   const ROUTES = {
     editor: '/editor/',
     preview: '/sheet/',
@@ -40,6 +42,25 @@
   let bindingsReady = false;
   let observer = null;
 
+
+
+  function readBootstrapRoute(){
+    try {
+      const params = new URLSearchParams(window.location.search || '');
+      const queryRoute = params.get('stepperRoute');
+      if (queryRoute && ROUTES[queryRoute]) return queryRoute;
+    } catch {}
+    try {
+      const hash = String(window.location.hash || '').replace(/^#/, '');
+      if (hash && ROUTES[hash]) return hash;
+    } catch {}
+    return null;
+  }
+
+  function persistBootstrapRoute(routeName){
+    if (!ROUTES[routeName]) return;
+    try { sessionStorage.setItem(ROUTE_STORAGE_KEY, routeName); } catch {}
+  }
   function normalizePath(pathname){
     const raw = String(pathname || '/').replace(/\/+/g, '/');
     if (raw === '/') return '/';
@@ -47,8 +68,16 @@
   }
 
   function currentRouteFromPath(){
+    const bootstrap = readBootstrapRoute();
+    if (bootstrap) return bootstrap;
     const path = window.location.pathname || '/';
     return PATH_TO_ROUTE[path] || PATH_TO_ROUTE[normalizePath(path)] || null;
+  }
+
+  function reflectRouteState(routeName){
+    const safe = ROUTES[routeName] ? routeName : 'editor';
+    try { document.documentElement.setAttribute('data-stepper-route', safe); } catch {}
+    try { if (document.body) document.body.setAttribute('data-stepper-route', safe); } catch {}
   }
 
   function canonicalPathFor(routeName){
@@ -56,6 +85,7 @@
   }
 
   function setCanonicalPath(routeName, replace){
+    reflectRouteState(routeName);
     const target = canonicalPathFor(routeName);
     if (!target) return;
     const current = normalizePath(window.location.pathname || '/');
@@ -63,6 +93,15 @@
     const fn = replace ? 'replaceState' : 'pushState';
     try {
       history[fn]({ stepperRoute: routeName }, '', target);
+    } catch {}
+    try {
+      const params = new URLSearchParams(window.location.search || '');
+      if (params.has('stepperRoute')) {
+        params.delete('stepperRoute');
+        const query = params.toString();
+        history.replaceState({ stepperRoute: routeName }, '', target + (query ? '?' + query : '') + (window.location.hash && !ROUTES[window.location.hash.replace(/^#/, '')] ? window.location.hash : ''));
+      }
+      if (ROUTES[window.location.hash.replace(/^#/, '')]) history.replaceState({ stepperRoute: routeName }, '', target);
     } catch {}
   }
 
@@ -112,6 +151,8 @@
 
   function applyInitialRoute(replace){
     const routeName = currentRouteFromPath() || 'editor';
+    reflectRouteState(routeName);
+    persistBootstrapRoute(routeName);
     setCanonicalPath(routeName, !!replace);
     if (routeName === 'editor') return true;
     return clickRoute(routeName);
@@ -132,6 +173,7 @@
   }
 
   function boot(){
+    reflectRouteState(currentRouteFromPath() || 'editor');
     startWatching();
     bindButtons();
     let tries = 0;
@@ -144,6 +186,7 @@
 
   window.addEventListener('popstate', () => {
     const routeName = currentRouteFromPath() || 'editor';
+    reflectRouteState(routeName);
     bindButtons();
     if (routeName === 'editor') {
       const build = getRouteButton('editor');
