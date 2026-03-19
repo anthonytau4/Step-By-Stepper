@@ -2938,10 +2938,11 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       .stepper-section-header-partable { position:relative; }
       .stepper-section-part-btn { position:absolute; right:2.75rem; top:50%; transform:translateY(-50%); font-size:.58rem; letter-spacing:.12em; text-transform:uppercase; padding:.32rem .55rem; border-radius:999px; background:rgba(99,102,241,.14); color:#4f46e5; font-weight:900; border:0; }
       #${PREVIEW_NOTE_ID} { margin-top:1rem; }
-      .stepper-help-fab { position:fixed; left:16px; bottom:16px; z-index:2147483500; width:50px; height:50px; border-radius:999px; border:0; background:#4f46e5; color:#fff; font-size:26px; font-weight:900; box-shadow:0 16px 28px rgba(0,0,0,.28); }
+      :root { --stepper-help-bottom:16px; --stepper-help-panel-bottom:76px; }
+      .stepper-help-fab { position:fixed; left:16px; bottom:var(--stepper-help-bottom,16px); z-index:2147483000; width:50px; height:50px; border-radius:999px; border:0; background:#4f46e5; color:#fff; font-size:26px; font-weight:900; box-shadow:0 16px 28px rgba(0,0,0,.28); }
       body { background:#f3f4f6; }
       .dark body, body.dark { background:#0a0a0a; }
-      .stepper-help-panel { position:fixed; left:16px; bottom:76px; z-index:2147483499; width:min(92vw, 360px); max-height:min(70vh, 520px); overflow:auto; border-radius:24px; padding:18px; box-shadow:0 18px 40px rgba(0,0,0,.28); }
+      .stepper-help-panel { position:fixed; left:16px; bottom:var(--stepper-help-panel-bottom,76px); z-index:2147482999; width:min(92vw, 360px); max-height:min(70vh, 520px); overflow:auto; border-radius:24px; padding:18px; box-shadow:0 18px 40px rgba(0,0,0,.28); }
       .stepper-help-panel[hidden] { display:none !important; }
       .stepper-help-panel h3 { margin:0 0 10px; font-size:1.05rem; font-weight:900; }
       .stepper-help-panel p { margin:.4rem 0; line-height:1.45; }
@@ -3143,6 +3144,59 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     });
   }
 
+
+  function findGlossaryBarElement(){
+    const nodes = Array.from(document.querySelectorAll('button, [role="button"], a, div'));
+    let best = null;
+    let bestRect = null;
+    for (const node of nodes) {
+      if (!node || node.id === 'stepper-help-fab' || node.id === 'stepper-help-panel') continue;
+      const text = (node.textContent || '').replace(/\s+/g,' ').trim();
+      if (!text || !/Glossary/i.test(text)) continue;
+      const rect = node.getBoundingClientRect();
+      if (!rect.width || !rect.height) continue;
+      const style = window.getComputedStyle(node);
+      if (style.visibility === 'hidden' || style.display === 'none' || Number(style.opacity || 1) === 0) continue;
+      if (rect.bottom < window.innerHeight * 0.55) continue;
+      if (!bestRect || rect.bottom > bestRect.bottom || (rect.bottom === bestRect.bottom && rect.width > bestRect.width)) {
+        best = node;
+        bestRect = rect;
+      }
+    }
+    return best;
+  }
+
+  function repositionHelpUi(){
+    const fab = document.getElementById('stepper-help-fab');
+    const panel = document.getElementById('stepper-help-panel');
+    if (!fab || !panel) return;
+    let fabBottom = 16;
+    let panelBottom = 76;
+    const glossaryBar = findGlossaryBarElement();
+    if (glossaryBar) {
+      const rect = glossaryBar.getBoundingClientRect();
+      const overlapsLeftSide = rect.left < 160;
+      const coversBottomBand = rect.bottom > (window.innerHeight - 120);
+      if (overlapsLeftSide || coversBottomBand) {
+        const offset = Math.max(16, Math.round(window.innerHeight - rect.top + 12));
+        fabBottom = offset;
+        panelBottom = offset + 60;
+      }
+      if (rect.bottom > window.innerHeight - 8) {
+        fab.style.zIndex = '2147482990';
+        panel.style.zIndex = '2147482989';
+      } else {
+        fab.style.zIndex = '2147483000';
+        panel.style.zIndex = '2147482999';
+      }
+    } else {
+      fab.style.zIndex = '2147483000';
+      panel.style.zIndex = '2147482999';
+    }
+    document.documentElement.style.setProperty('--stepper-help-bottom', `${fabBottom}px`);
+    document.documentElement.style.setProperty('--stepper-help-panel-bottom', `${panelBottom}px`);
+  }
+
   function ensureHelpMenu(){
     let fab = document.getElementById('stepper-help-fab');
     let panel = document.getElementById('stepper-help-panel');
@@ -3174,13 +3228,31 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     `;
     if (!fab.__stepperHelpWired) {
       fab.__stepperHelpWired = true;
-      fab.addEventListener('click', () => { panel.hidden = !panel.hidden; });
+      fab.addEventListener('click', () => { panel.hidden = !panel.hidden; repositionHelpUi(); });
       document.addEventListener('click', (event) => {
         if (panel.hidden) return;
         if (event.target === fab || fab.contains(event.target) || panel.contains(event.target)) return;
         panel.hidden = true;
       });
+      let rafId = 0;
+      const queueHelpLayout = () => {
+        if (rafId) return;
+        rafId = requestAnimationFrame(() => {
+          rafId = 0;
+          repositionHelpUi();
+        });
+      };
+      window.addEventListener('resize', queueHelpLayout, { passive:true });
+      window.addEventListener('scroll', queueHelpLayout, { passive:true });
+      document.addEventListener('click', queueHelpLayout, true);
+      document.addEventListener('input', queueHelpLayout, true);
+      const observer = new MutationObserver(queueHelpLayout);
+      observer.observe(document.body, { childList:true, subtree:true, characterData:true, attributes:true, attributeFilter:['class','style','hidden','aria-hidden'] });
+      fab.__stepperHelpObserver = observer;
+      fab.__stepperHelpQueueLayout = queueHelpLayout;
     }
+    if (fab.__stepperHelpQueueLayout) fab.__stepperHelpQueueLayout();
+    else repositionHelpUi();
   }
 
   function renderSettingsPanel(){
