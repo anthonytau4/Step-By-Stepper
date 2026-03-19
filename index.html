@@ -1223,7 +1223,6 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   const INLINE_HOST_ID = 'stepper-editor-inline-host';
   const CHOREO_PANEL_ID = 'stepper-inline-choreography';
   const SETTINGS_PANEL_ID = 'stepper-inline-settings';
-  const PDF_IMPORT_PANEL_ID = 'stepper-inline-pdf-import';
   const EXTRA_NOTES = [
     'New: tab switches now use a single loading pass with smoother pacing, awkward hold beats, and a proper finish right as the loading bar lands.',
     'New: tab changes now run destination-based loading states, so Editor, Sheet, Whats New, Featured Choreo, and My Saved Dances each show their own status pass during the switch.',
@@ -1319,6 +1318,10 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="2.5" width="19" height="19" rx="5"></rect><path d="M10 16V9l7-1.5V14"></path><circle cx="8" cy="16" r="2"></circle><circle cx="17" cy="14" r="2"></circle><line x1="5" y1="19" x2="19" y2="5"></line></svg>';
   }
 
+  function iconUploadCloud(){
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V6"></path><path d="m8 10 4-4 4 4"></path><path d="M20 16.5a4.5 4.5 0 0 0-1.2-8.84 6 6 0 0 0-11.6 1.84A4 4 0 0 0 7 17.5"></path><path d="M8 20h8"></path></svg>';
+  }
+
   function iconSparkles(){
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3z"></path><path d="M19 14l.9 2.1L22 17l-2.1.9L19 20l-.9-2.1L16 17l2.1-.9L19 14z"></path><path d="M5 14l.9 2.1L8 17l-2.1.9L5 20l-.9-2.1L2 17l2.1-.9L5 14z"></path></svg>';
   }
@@ -1334,358 +1337,6 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   function renderWhatsNewBadge(iconSvg, tone='stepper'){
     const cls = tone === 'gold' ? 'stepper-note-badge is-gold' : 'stepper-note-badge is-stepper';
     return `<span class="${cls}">${iconSvg}</span>`;
-  }
-
-  let pdfJsLoaderPromise = null;
-  let pdfImportBusy = false;
-
-  function iconUploadCloud(){
-    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"></path><path d="m7 9 5-5 5 5"></path><path d="M20 16.5a3.5 3.5 0 0 0-2.3-6.14 5 5 0 0 0-9.7-1.36A4 4 0 0 0 8 17H7"></path><path d="M16 16l-4 4-4-4"></path></svg>';
-  }
-
-  function loadPdfJs(){
-    if (window.pdfjsLib) {
-      try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; } catch {}
-      return Promise.resolve(window.pdfjsLib);
-    }
-    if (pdfJsLoaderPromise) return pdfJsLoaderPromise;
-    pdfJsLoaderPromise = new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
-      script.onload = () => {
-        if (window.pdfjsLib) {
-          try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; } catch {}
-          resolve(window.pdfjsLib);
-        } else reject(new Error('PDF reader failed to load.'));
-      };
-      script.onerror = () => reject(new Error('Could not load the PDF reader.'));
-      document.head.appendChild(script);
-    });
-    return pdfJsLoaderPromise;
-  }
-
-  function normalizePdfText(raw){
-    return String(raw || '')
-      .replace(/
-/g, '\n')
-      .replace(/[–—]/g, '-')
-      .replace(/[ ]/g, ' ')
-      .replace(/	/g, ' ')
-      .replace(/
-{3,}/g, '\n\n')
-      .replace(/[ ]{2,}/g, ' ')
-      .trim();
-  }
-
-  function guessStepNameFromDescription(desc){
-    const text = String(desc || '').replace(/^[\d&.,\- ]+:/, '').trim();
-    if (!text) return '';
-    const firstChunk = text.split(/[.;]/)[0].trim();
-    const words = firstChunk.split(/\s+/).filter(Boolean).slice(0, 5);
-    return words.join(' ').replace(/(^.|\s+.)/g, m => m.toUpperCase());
-  }
-
-  function splitMoveNames(titleLine){
-    return String(titleLine || '')
-      .split(/,(?![^()]*\))/)
-      .map(part => part.replace(/^[-–—•\s]+/, '').trim())
-      .filter(Boolean);
-  }
-
-  function parseCountsLine(line){
-    const match = String(line || '').match(/^((?:\d+[&a-zA-Z]?\s*(?:[-,]\s*\d+[&a-zA-Z]?)*|[&a-zA-Z](?:\s*[&,/-]\s*[&a-zA-Z\d]+)*))\s*:\s*(.+)$/);
-    if (!match) return null;
-    return { count: match[1].replace(/\s+/g, ' ').trim(), text: match[2].trim() };
-  }
-
-  function parseSectionBlock(blockTitle, lines, kind, predictedFootSeed){
-    const moveNames = splitMoveNames(blockTitle);
-    const steps = [];
-    let predictedFoot = predictedFootSeed || 'R';
-    let countIndex = 0;
-    lines.forEach((line) => {
-      const parsed = parseCountsLine(line);
-      if (parsed) {
-        const guessedName = moveNames[countIndex] || guessStepNameFromDescription(parsed.text) || `Step ${countIndex + 1}`;
-        steps.push({ id: 'pdf-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8), type:'step', count: parsed.count, name: guessedName, description: parsed.text, foot: predictedFoot, weight: true, showNote:false, note:'' });
-        predictedFoot = predictedFoot === 'R' ? 'L' : 'R';
-        countIndex += 1;
-        return;
-      }
-      if (!line || /^((Restart|Bridge|Tag))/i.test(line)) return;
-      const guessedName = moveNames[countIndex] || guessStepNameFromDescription(line) || `Step ${countIndex + 1}`;
-      steps.push({ id: 'pdf-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8), type:'step', count:'', name: guessedName, description: line.trim(), foot: predictedFoot, weight: true, showNote:false, note:'' });
-      predictedFoot = predictedFoot === 'R' ? 'L' : 'R';
-      countIndex += 1;
-    });
-    if (!steps.length) {
-      steps.push({ id: 'pdf-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8), type:'step', count:'', name: blockTitle || 'Imported Step', description: lines.join(' ').trim(), foot: predictedFootSeed || 'R', weight:true, showNote:false, note:'' });
-    }
-    const cleanTitle = String(blockTitle || '').trim();
-    if (kind === 'tag') {
-      return {
-        kind:'tag',
-        tag:{ id:'tag-' + Date.now() + '-' + Math.random().toString(36).slice(2,7), name: cleanTitle || 'Tag', sections:[{ id:'tagsec-' + Date.now() + '-' + Math.random().toString(36).slice(2,7), name:'', steps }] }
-      };
-    }
-    return { kind:'section', section:{ id:'sec-' + Date.now() + '-' + Math.random().toString(36).slice(2,7), name: cleanTitle, steps } };
-  }
-
-  function parsePdfStepsheet(text, currentData){
-    const normalized = normalizePdfText(text);
-    const lines = normalized.split(/\n+/).map(line => line.trim()).filter(Boolean);
-    const meta = Object.assign({ title:'', choreographer:'', country:'', level:'Beginner', counts:'32', walls:'4', music:'', type:'8-count', startFoot:'Right' }, currentData && currentData.meta ? currentData.meta : {});
-    let titleFound = false;
-    const sectionBlocks = [];
-    let current = null;
-    const flushCurrent = () => {
-      if (!current) return;
-      if (current.lines.length || current.title) sectionBlocks.push(current);
-      current = null;
-    };
-
-    const metaMatchers = [
-      { key:'counts', regex:/^Count\s*:?\s*(\d+)/i },
-      { key:'walls', regex:/^Wall\s*:?\s*(\d+)/i },
-      { key:'level', regex:/^Level\s*:?\s*(.+)$/i },
-      { key:'music', regex:/^Music\s*:?\s*(.+)$/i },
-      { key:'choreographer', regex:/^Choreographer\s*:?\s*(.+)$/i },
-      { key:'country', regex:/^Country\s*:?\s*(.+)$/i },
-      { key:'type', regex:/^Type\s*:?\s*(.+)$/i },
-      { key:'startFoot', regex:/^Start\s*Foot\s*:?\s*(.+)$/i }
-    ];
-
-    lines.forEach((line) => {
-      const sectionMatch = line.match(/^(Section\s*\d+|Sec\.?\s*\d+|Part\s*[A-Z\d]+|Tag\s*\d*|Bridge\s*\d*)\s*[:.-]\s*(.*)$/i);
-      if (sectionMatch) {
-        flushCurrent();
-        const rawLabel = sectionMatch[1] || '';
-        current = {
-          kind: /^(Tag|Bridge)/i.test(rawLabel) ? 'tag' : 'section',
-          title: (sectionMatch[2] || '').trim(),
-          lines: []
-        };
-        return;
-      }
-      for (const entry of metaMatchers) {
-        const match = line.match(entry.regex);
-        if (match) {
-          meta[entry.key] = String(match[1] || '').trim();
-          return;
-        }
-      }
-      if (!titleFound && !/^(Count|Wall|Level|Music|Choreographer|Country|Type|Start Foot)/i.test(line)) {
-        meta.title = line.replace(/^[-–—•\s]+/, '').trim();
-        titleFound = !!meta.title;
-        return;
-      }
-      if (!current) current = { kind:'section', title:'', lines: [] };
-      current.lines.push(line);
-    });
-    flushCurrent();
-
-    const sections = [];
-    const tags = [];
-    let footSeed = meta.startFoot && /left/i.test(meta.startFoot) ? 'L' : 'R';
-    sectionBlocks.forEach((block, index) => {
-      const parsed = parseSectionBlock(block.title || `Section ${index + 1}`, block.lines, block.kind, footSeed);
-      if (parsed.kind === 'tag') tags.push(parsed.tag);
-      else sections.push(parsed.section);
-      const firstStep = parsed.kind === 'tag' ? (((parsed.tag.sections || [])[0] || {}).steps || [])[0] : (parsed.section.steps || [])[0];
-      footSeed = firstStep && firstStep.foot === 'R' ? 'L' : 'R';
-    });
-
-    if (!sections.length) {
-      sections.push({ id:'sec-' + Date.now(), name:'Imported Section', steps:[{ id:'pdf-' + Date.now(), type:'step', count:'', name:'Imported Step', description: normalized, foot: footSeed, weight:true, showNote:false, note:'' }] });
-    }
-
-    meta.counts = String(meta.counts || deriveCounts({ sections, tags, meta }) || '32');
-    meta.walls = String(meta.walls || deriveWalls({ sections, tags, meta }) || '4');
-    return { meta, sections, tags };
-  }
-
-  async function extractTextFromPdf(file){
-    const pdfjsLib = await loadPdfJs();
-    const buffer = await file.arrayBuffer();
-    const task = pdfjsLib.getDocument({ data: buffer, useWorkerFetch: true, isEvalSupported:false });
-    const pdf = await task.promise;
-    const pageTexts = [];
-    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-      const page = await pdf.getPage(pageNumber);
-      const content = await page.getTextContent();
-      const items = Array.from(content.items || []).map(item => String(item.str || '').trim()).filter(Boolean);
-      pageTexts.push(items.join('\n'));
-    }
-    return normalizePdfText(pageTexts.join('\n\n'));
-  }
-
-  function patchLiveFieldsFromImportedData(data){
-    trySyncFieldByText('Dance Title', data.meta.title || '');
-    trySyncFieldByText('Choreographer', data.meta.choreographer || '');
-    trySyncFieldByText('Country', data.meta.country || '');
-    trySyncFieldByText('Level', data.meta.level || 'Beginner');
-    trySyncFieldByText('Counts', data.meta.counts || '32', data.meta.autoCounts !== false);
-    trySyncFieldByText('Walls', data.meta.walls || '4', data.meta.autoWalls !== false);
-    trySyncFieldByText('Music', data.meta.music || '');
-  }
-
-  function getStepperBridge(){
-    return window.StepByStepperGlobals && typeof window.StepByStepperGlobals === 'object' ? window.StepByStepperGlobals : {};
-  }
-
-  function sanitizeImportedName(value, fallback){
-    const text = String(value || '').trim();
-    return text || fallback || 'Imported Step';
-  }
-
-  function normalizeImportedStep(step, fallbackIndex){
-    const description = String(step && (step.description || step.desc || '') || '').trim();
-    const name = sanitizeImportedName(step && step.name, guessStepNameFromDescription(description) || `Imported Step ${fallbackIndex + 1}`);
-    return {
-      id: 'pdf-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
-      type: 'step',
-      count: String(step && (step.count || step.counts || '') || '').trim(),
-      name,
-      description,
-      foot: String(step && step.foot || '').trim() || 'R',
-      weight: step && Object.prototype.hasOwnProperty.call(step, 'weight') ? !!step.weight : true,
-      showNote: false,
-      note: ''
-    };
-  }
-
-  function buildImportedDataFromBackendPayload(payload, current){
-    const base = current && typeof current === 'object' ? current : { meta:{}, sections:[], tags:[] };
-    const meta = Object.assign({}, base.meta || {}, payload && payload.meta && typeof payload.meta === 'object' ? payload.meta : {});
-    const sourceSections = Array.isArray(payload && payload.sections) ? payload.sections : [];
-    const sourceTags = Array.isArray(payload && payload.tags) ? payload.tags : [];
-    const sections = sourceSections.length ? sourceSections.map((section, sectionIndex) => ({
-      id: String(section && section.id || '') || ('sec-' + Date.now() + '-' + sectionIndex + '-' + Math.random().toString(36).slice(2, 7)),
-      name: String(section && section.name || `Section ${sectionIndex + 1}`).trim(),
-      steps: (Array.isArray(section && section.steps) ? section.steps : []).map((step, stepIndex) => normalizeImportedStep(step, stepIndex)).filter(item => item.name || item.description)
-    })).filter(section => section.steps.length) : (base.sections || []);
-    const tags = sourceTags.map((tag, tagIndex) => ({
-      id: String(tag && tag.id || '') || ('tag-' + Date.now() + '-' + tagIndex + '-' + Math.random().toString(36).slice(2, 7)),
-      name: String(tag && tag.name || `Tag ${tagIndex + 1}`).trim(),
-      sections: (Array.isArray(tag && tag.sections) ? tag.sections : []).map((section, sectionIndex) => ({
-        id: String(section && section.id || '') || ('tagsec-' + Date.now() + '-' + sectionIndex + '-' + Math.random().toString(36).slice(2, 7)),
-        name: String(section && section.name || '').trim(),
-        steps: (Array.isArray(section && section.steps) ? section.steps : []).map((step, stepIndex) => normalizeImportedStep(step, stepIndex)).filter(item => item.name || item.description)
-      })).filter(section => section.steps.length)
-    })).filter(tag => tag.sections.length);
-    return { meta, sections, tags, isDarkMode: !!(base && base.isDarkMode) };
-  }
-
-  async function stageGlossarySuggestions(suggestions){
-    const bridge = getStepperBridge();
-    if (!bridge || typeof bridge.authFetch !== 'function' || !Array.isArray(suggestions) || !suggestions.length) return { sent:0, failed:0 };
-    let sent = 0;
-    let failed = 0;
-    for (const suggestion of suggestions.slice(0, 12)) {
-      const step = {
-        name: String(suggestion && suggestion.name || '').trim(),
-        description: String(suggestion && (suggestion.description || suggestion.desc || '') || '').trim(),
-        counts: String(suggestion && (suggestion.counts || suggestion.count || '') || '').trim() || '1',
-        foot: String(suggestion && suggestion.foot || '').trim() || 'Either',
-        tags: String(suggestion && suggestion.tags || 'PDF Import AI suggestion').trim()
-      };
-      if (!step.name && !step.description) continue;
-      try {
-        await bridge.authFetch('/api/glossary/request', {
-          method:'POST',
-          headers:{ 'Content-Type':'application/json' },
-          body: JSON.stringify({ step })
-        });
-        sent += 1;
-      } catch (error) {
-        failed += 1;
-      }
-    }
-    return { sent, failed };
-  }
-
-  async function importPdfWithBackendAi(file, text, current){
-    const bridge = getStepperBridge();
-    if (!bridge || typeof bridge.authFetch !== 'function') return null;
-    const data = await bridge.authFetch('/api/ai/import-stepsheet', {
-      method:'POST',
-      headers:{ 'Content-Type':'application/json' },
-      body: JSON.stringify({
-        fileName: file && file.name ? String(file.name) : '',
-        text,
-        currentMeta: current && current.meta ? current.meta : {}
-      })
-    });
-    return data;
-  }
-
-  async function importPdfIntoEditor(file){
-    if (!file) return;
-    if (pdfImportBusy) return;
-    pdfImportBusy = true;
-    try {
-      const current = readAppData() || { meta:{}, sections:[], tags:[] };
-      const text = await extractTextFromPdf(file);
-      if (!text) throw new Error('The PDF did not give me readable text.');
-      let imported = null;
-      let glossaryResult = { sent:0, failed:0 };
-      let importSummary = '';
-      try {
-        const aiResult = await importPdfWithBackendAi(file, text, current);
-        if (aiResult && aiResult.ok !== false) {
-          imported = buildImportedDataFromBackendPayload(aiResult, current);
-          glossaryResult = await stageGlossarySuggestions(aiResult.glossarySuggestions || []);
-          importSummary = String(aiResult.summary || '').trim();
-        }
-      } catch (error) {
-        imported = null;
-      }
-      if (!imported) {
-        const parsed = parsePdfStepsheet(text, current);
-        imported = { meta:Object.assign({}, current.meta || {}, parsed.meta || {}), sections: parsed.sections || [], tags: parsed.tags || [], isDarkMode: !!(current && current.isDarkMode) };
-      }
-      writeAppData(imported);
-      patchLiveFieldsFromImportedData(imported);
-      const bridge = getStepperBridge();
-      if (bridge && typeof bridge.syncCurrentDanceToBackend === 'function') {
-        try { await bridge.syncCurrentDanceToBackend(true); } catch {}
-      }
-      const sectionCount = Array.isArray(imported.sections) ? imported.sections.length : 0;
-      const glossaryMessage = glossaryResult.sent ? ` ${glossaryResult.sent} glossary suggestion${glossaryResult.sent === 1 ? '' : 's'} sent for review.` : '';
-      alert(`${importSummary || 'PDF imported.'} ${sectionCount} section${sectionCount === 1 ? '' : 's'} loaded into the editor so Build and Sheet stay matched.${glossaryMessage}`.trim());
-      window.setTimeout(() => { window.location.reload(); }, 120);
-    } catch (error) {
-      alert(error && error.message ? error.message : 'PDF import failed.');
-    } finally {
-      pdfImportBusy = false;
-      renderPdfImportPanel();
-    }
-  }
-
-  function renderPdfImportPanel(){
-    const panel = ensureSheetPdfHost();
-    if (!panel) return;
-    const theme = themeClasses();
-    panel.className = `rounded-3xl border shadow-sm overflow-hidden ${theme.shell}`;
-    panel.innerHTML = `
-      <div class="px-6 py-5 border-b ${theme.panel}">
-        <h2 class="text-2xl font-black tracking-tight uppercase flex items-center gap-2"><span class="stepper-panel-icon">${iconUploadCloud()}</span> PDF Import AI</h2>
-      </div>
-      <div class="p-6 sm:p-8 space-y-5">
-        <div class="rounded-3xl border p-5 sm:p-6 ${theme.soft}">
-          <p class="text-base sm:text-lg font-bold leading-relaxed">Save a stepsheet as PDF or copy it into Docs first, then upload it here and Step by Stepper will read the dance into your Sheet and Build helper together.</p>
-          <p class="mt-3 text-sm ${theme.subtle}">Open <strong>Sheet</strong>, tap <strong>Import PDF</strong>, choose the file, and it will sort the title, music, level, counts, walls and sections into the matching places for you.</p>
-          <div class="mt-5 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
-            <label class="stepper-mini-btn ${theme.button}" style="display:inline-flex;align-items:center;gap:.55rem;justify-content:center;"><span class="stepper-panel-icon">${iconUploadCloud()}</span><span>Choose PDF</span><input type="file" accept="application/pdf" data-stepper-pdf-input class="hidden"></label>
-            <button type="button" data-stepper-pdf-import class="stepper-mini-btn ${theme.accent}" ${pdfImportBusy ? 'disabled' : ''}>${pdfImportBusy ? 'Importing…' : 'Import PDF'}</button>
-          </div>
-        </div>
-      </div>
-    `;
-    const fileInput = panel.querySelector('[data-stepper-pdf-input]');
-    const importBtn = panel.querySelector('[data-stepper-pdf-import]');
-    if (importBtn) importBtn.addEventListener('click', () => importPdfIntoEditor(fileInput && fileInput.files ? fileInput.files[0] : null));
-    if (fileInput) fileInput.addEventListener('change', () => { if (fileInput.files && fileInput.files[0]) importPdfIntoEditor(fileInput.files[0]); });
   }
 
   function iconShoe(){
@@ -1866,20 +1517,15 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   }
 
   function ensureInlineHost(){
-    if (!inlineHost) inlineHost = document.getElementById(INLINE_HOST_ID);
-    if (!inlineHost) {
-      inlineHost = document.createElement('div');
-      inlineHost.id = INLINE_HOST_ID;
-      inlineHost.hidden = true;
-      inlineHost.className = 'max-w-4xl mx-auto px-3 sm:px-4 pt-4 sm:pt-6 pb-0 print:hidden';
-      inlineHost.innerHTML = `<div class="space-y-5"><section id="${CHOREO_PANEL_ID}"></section><section id="${SETTINGS_PANEL_ID}"></section></div>`;
-    }
-    if (!inlineHost.querySelector('#' + CHOREO_PANEL_ID) || !inlineHost.querySelector('#' + SETTINGS_PANEL_ID)) {
-      inlineHost.innerHTML = `<div class="space-y-5"><section id="${CHOREO_PANEL_ID}"></section><section id="${SETTINGS_PANEL_ID}"></section></div>`;
-    }
-    if (mainEl && mainEl.parentNode && inlineHost.parentNode !== mainEl.parentNode) {
+    if (inlineHost) return inlineHost;
+    inlineHost = document.createElement('div');
+    inlineHost.id = INLINE_HOST_ID;
+    inlineHost.hidden = true;
+    inlineHost.className = 'max-w-4xl mx-auto px-3 sm:px-4 pt-4 sm:pt-6 pb-0 print:hidden';
+    inlineHost.innerHTML = `<div class="space-y-5"><section id="${CHOREO_PANEL_ID}"></section><section id="${SETTINGS_PANEL_ID}"></section></div>`;
+    if (mainEl && mainEl.parentNode) {
       mainEl.parentNode.insertBefore(inlineHost, mainEl);
-    } else if (!inlineHost.parentNode) {
+    } else {
       document.body.appendChild(inlineHost);
     }
     return inlineHost;
@@ -1887,14 +1533,13 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
 
   function themeClasses(){
     const dark = isDarkMode();
-    const inverted = !dark;
     return {
-      dark: inverted,
-      shell: inverted ? 'bg-neutral-900 border-neutral-800 text-neutral-100' : 'bg-neutral-50 border-neutral-200 text-neutral-900',
-      panel: inverted ? 'bg-neutral-950 border-neutral-800 text-neutral-100' : 'bg-white border-neutral-200 text-neutral-900',
-      soft: inverted ? 'bg-neutral-900/80 border-neutral-800 text-neutral-300' : 'bg-white border-neutral-200 text-neutral-700',
-      button: inverted ? 'bg-neutral-900 border-neutral-700 text-neutral-100' : 'bg-white border-neutral-200 text-neutral-900',
-      subtle: inverted ? 'text-neutral-400' : 'text-neutral-500'
+      dark,
+      shell: dark ? 'bg-neutral-900 border-neutral-800 text-neutral-100' : 'bg-neutral-50 border-neutral-200 text-neutral-900',
+      panel: dark ? 'bg-neutral-950 border-neutral-800 text-neutral-100' : 'bg-white border-neutral-200 text-neutral-900',
+      soft: dark ? 'bg-neutral-900/80 border-neutral-800 text-neutral-300' : 'bg-white border-neutral-200 text-neutral-700',
+      button: dark ? 'bg-neutral-900 border-neutral-700 text-neutral-100' : 'bg-white border-neutral-200 text-neutral-900',
+      subtle: dark ? 'text-neutral-400' : 'text-neutral-500'
     };
   }
 
@@ -2954,16 +2599,15 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
 
   function themeClasses(){
     const dark = isDarkMode();
-    const inverted = !dark;
     return {
-      dark: inverted,
-      shell: inverted ? 'bg-neutral-900 border-neutral-800 text-neutral-100' : 'bg-neutral-50 border-neutral-200 text-neutral-900',
-      panel: inverted ? 'bg-neutral-950 border-neutral-800 text-neutral-100' : 'bg-white border-neutral-200 text-neutral-900',
-      soft: inverted ? 'bg-neutral-900/80 border-neutral-800 text-neutral-300' : 'bg-white border-neutral-200 text-neutral-700',
-      button: inverted ? 'bg-neutral-900 border-neutral-700 text-neutral-100' : 'bg-white border-neutral-200 text-neutral-900',
-      subtle: inverted ? 'text-neutral-400' : 'text-neutral-500',
-      accent: inverted ? 'bg-orange-400 text-neutral-950 border-orange-300' : 'bg-orange-500 text-white border-orange-300',
-      orange: inverted ? 'bg-rose-300 text-neutral-950 border-rose-200' : 'bg-rose-500 text-white border-rose-300'
+      dark,
+      shell: dark ? 'bg-neutral-900 border-neutral-800 text-neutral-100' : 'bg-neutral-50 border-neutral-200 text-neutral-900',
+      panel: dark ? 'bg-neutral-950 border-neutral-800 text-neutral-100' : 'bg-white border-neutral-200 text-neutral-900',
+      soft: dark ? 'bg-neutral-900/80 border-neutral-800 text-neutral-300' : 'bg-white border-neutral-200 text-neutral-700',
+      button: dark ? 'bg-neutral-900 border-neutral-700 text-neutral-100' : 'bg-white border-neutral-200 text-neutral-900',
+      subtle: dark ? 'text-neutral-400' : 'text-neutral-500',
+      accent: dark ? 'bg-indigo-500 text-neutral-950' : 'bg-indigo-600 text-white',
+      orange: dark ? 'bg-orange-500 text-neutral-950' : 'bg-orange-500 text-white'
     };
   }
 
@@ -3271,38 +2915,36 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     const style = document.createElement('style');
     style.id = 'stepper-phrased-tools-style';
     style.textContent = `
-      :root { --stepper-brand-orange:#f97316; --stepper-brand-peach:#fb923c; --stepper-brand-rose:#fb7185; --stepper-brand-ink:#171717; --stepper-brand-cream:#fff7ed; }
       #root, #stepper-static-startup, #root button, #root input, #root select, #root textarea { font-family: var(--stepper-font-family, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
       .stepper-extra-tab-icon, .stepper-setting-icon, .stepper-panel-icon { display:inline-flex; align-items:center; justify-content:center; width:1.45rem; height:1.45rem; }
       .stepper-extra-tab-icon svg, .stepper-setting-icon svg, .stepper-panel-icon svg { width:100%; height:100%; }
       .stepper-note-badge { display:inline-flex; align-items:center; justify-content:center; width:2rem; height:2rem; border-radius:.9rem; border:1px solid rgba(255,255,255,.1); box-shadow:0 10px 24px rgba(15,23,42,.18), inset 0 1px 0 rgba(255,255,255,.16); }
       .stepper-note-badge svg { width:1rem; height:1rem; }
-      .stepper-note-badge.is-stepper { background:linear-gradient(135deg,var(--stepper-brand-orange) 0%,var(--stepper-brand-rose) 100%); color:#fff7ed; }
+      .stepper-note-badge.is-stepper { background:linear-gradient(180deg,#1f2a44 0%,#312e81 100%); color:#f8fafc; }
       .stepper-note-badge.is-gold { background:linear-gradient(180deg,#facc15 0%,#f59e0b 100%); color:#5b3200; border-color:rgba(180,83,9,.28); box-shadow:0 10px 24px rgba(180,83,9,.2), inset 0 1px 0 rgba(255,255,255,.32); }
       .stepper-part-pill { display:inline-flex; align-items:center; gap:.45rem; padding:.55rem .8rem; border-radius:999px; font-weight:800; font-size:.76rem; letter-spacing:.08em; text-transform:uppercase; }
-      .stepper-mini-btn { border-radius:999px; padding:.62rem 1rem; font-weight:900; font-size:.72rem; letter-spacing:.08em; text-transform:uppercase; border:1px solid rgba(249,115,22,.28); box-shadow:0 10px 24px rgba(249,115,22,.12); }
+      .stepper-mini-btn { border-radius:999px; padding:.55rem .9rem; font-weight:800; font-size:.72rem; letter-spacing:.08em; text-transform:uppercase; border:1px solid rgba(99,102,241,.25); }
       .stepper-tools-tab { border-radius:999px; padding:.55rem .9rem; font-weight:800; font-size:.72rem; letter-spacing:.08em; text-transform:uppercase; border:1px solid transparent; }
       .stepper-tools-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:1rem; }
       .stepper-field label { display:block; font-size:.68rem; font-weight:900; letter-spacing:.14em; text-transform:uppercase; margin-bottom:.45rem; }
       .stepper-field input, .stepper-field select { width:100%; border-radius:1rem; border:1px solid rgba(148,163,184,.35); padding:.85rem .95rem; background:rgba(255,255,255,.9); color:#111827; }
       .dark .stepper-field input, .dark .stepper-field select { background:rgba(23,23,23,.9); color:#f5f5f5; border-color:rgba(64,64,64,.9); }
-      .stepper-font-choice { width:100%; text-align:left; border-radius:1.35rem; border:1px solid rgba(249,115,22,.22); padding:1rem 1rem .95rem; transition:transform .15s ease, border-color .15s ease, box-shadow .15s ease; }
-      .stepper-font-choice:hover { transform:translateY(-1px); box-shadow:0 10px 24px rgba(249,115,22,.12); }
+      .stepper-font-choice { width:100%; text-align:left; border-radius:1.35rem; border:1px solid rgba(99,102,241,.18); padding:1rem 1rem .95rem; transition:transform .15s ease, border-color .15s ease, box-shadow .15s ease; }
+      .stepper-font-choice:hover { transform:translateY(-1px); box-shadow:0 10px 24px rgba(79,70,229,.12); }
       .stepper-font-choice strong { display:block; font-size:1rem; line-height:1.15; }
       .stepper-font-choice span { display:block; margin-top:.3rem; font-size:.8rem; opacity:.8; }
-      .stepper-font-choice[data-active="true"] { border-color:rgba(249,115,22,.72); box-shadow:0 0 0 2px rgba(251,113,133,.18); }
+      .stepper-font-choice[data-active="true"] { border-color:rgba(79,70,229,.72); box-shadow:0 0 0 2px rgba(99,102,241,.18); }
       .stepper-seq-row { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:.65rem; align-items:center; }
       .stepper-danger-btn { border-radius:999px; padding:.55rem .75rem; font-weight:900; text-transform:uppercase; letter-spacing:.08em; font-size:.7rem; }
       #${MENU_ID} { position:fixed; z-index:9999; min-width:220px; border-radius:18px; padding:.55rem; box-shadow:0 18px 36px rgba(0,0,0,.28); }
       #${MENU_ID}[hidden] { display:none; }
       #${MENU_ID} button { width:100%; text-align:left; border-radius:14px; padding:.85rem .95rem; font-weight:800; }
       .stepper-section-header-partable { position:relative; }
-      .stepper-section-part-btn { position:absolute; right:2.75rem; top:50%; transform:translateY(-50%); font-size:.58rem; letter-spacing:.12em; text-transform:uppercase; padding:.32rem .55rem; border-radius:999px; background:rgba(249,115,22,.14); color:var(--stepper-brand-orange); font-weight:900; border:1px solid rgba(249,115,22,.18); }
+      .stepper-section-part-btn { position:absolute; right:2.75rem; top:50%; transform:translateY(-50%); font-size:.58rem; letter-spacing:.12em; text-transform:uppercase; padding:.32rem .55rem; border-radius:999px; background:rgba(99,102,241,.14); color:#4f46e5; font-weight:900; border:0; }
       #${PREVIEW_NOTE_ID} { margin-top:1rem; }
-      .stepper-help-fab { position:fixed; left:16px; bottom:16px; z-index:2147483500; width:50px; height:50px; border-radius:999px; border:0; background:linear-gradient(135deg,var(--stepper-brand-orange) 0%,var(--stepper-brand-rose) 100%); color:#fff7ed; font-size:26px; font-weight:900; box-shadow:0 16px 28px rgba(0,0,0,.28); }
+      .stepper-help-fab { position:fixed; left:16px; bottom:16px; z-index:2147483500; width:50px; height:50px; border-radius:999px; border:0; background:#4f46e5; color:#fff; font-size:26px; font-weight:900; box-shadow:0 16px 28px rgba(0,0,0,.28); }
       body { background:#f3f4f6; }
-      body[data-stepper-invert-mode] { background:#0a0a0a; }
-      body[data-stepper-invert-mode-dark] { background:#f3f4f6; }
+      .dark body, body.dark { background:#0a0a0a; }
       .stepper-help-panel { position:fixed; left:16px; bottom:76px; z-index:2147483499; width:min(92vw, 360px); max-height:min(70vh, 520px); overflow:auto; border-radius:24px; padding:18px; box-shadow:0 18px 40px rgba(0,0,0,.28); }
       .stepper-help-panel[hidden] { display:none !important; }
       .stepper-help-panel h3 { margin:0 0 10px; font-size:1.05rem; font-weight:900; }
@@ -3319,76 +2961,25 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   function applyFontSettings(){
     const settings = getSettings();
     document.documentElement.style.setProperty('--stepper-font-family', FONT_FAMILIES[settings.fontFamily] || FONT_FAMILIES.system);
-    applyModeBranding();
-  }
-
-  function applyModeBranding(){
-    const dark = isDarkMode();
-    document.body.toggleAttribute('data-stepper-invert-mode', !dark);
-    document.body.toggleAttribute('data-stepper-invert-mode-dark', dark);
   }
 
   function ensureInlineHost(){
-    let host = document.getElementById('stepper-editor-inline-host');
-    if (!host) {
-      host = document.createElement('div');
-      host.id = 'stepper-editor-inline-host';
-      host.hidden = true;
-      host.className = 'max-w-4xl mx-auto px-3 sm:px-4 pt-4 sm:pt-6 pb-0 print:hidden';
-      host.innerHTML = `<div id="stepper-inline-tools-stack" class="space-y-5 mt-5"><section id="${PHR_PANEL_ID}"></section><section id="${SETTINGS_PANEL_ID}"></section></div>`;
-      const main = document.querySelector('main');
-      if (main && main.parentNode) main.parentNode.insertBefore(host, main);
-      else document.body.appendChild(host);
-    }
-    let stack = document.getElementById('stepper-inline-tools-stack');
+    const host = document.getElementById('stepper-editor-inline-host');
+    if (!host) return null;
+    let stack = host.querySelector('div.space-y-5');
     if (!stack) {
       stack = document.createElement('div');
-      stack.id = 'stepper-inline-tools-stack';
-      stack.className = 'space-y-5 mt-5';
+      stack.className = 'space-y-5';
+      while (host.firstChild) stack.appendChild(host.firstChild);
       host.appendChild(stack);
     }
     let panel = document.getElementById(PHR_PANEL_ID);
     if (!panel) {
       panel = document.createElement('section');
       panel.id = PHR_PANEL_ID;
-      stack.appendChild(panel);
-    }
-    let settingsPanel = document.getElementById(SETTINGS_PANEL_ID);
-    if (settingsPanel && settingsPanel.parentNode !== stack) {
-      stack.appendChild(settingsPanel);
-    }
-    if (panel.parentNode !== stack) stack.insertBefore(panel, stack.firstChild || null);
-    return host;
-  }
-
-  function isSheetViewActive(){
-    if (!sheetBtn) return false;
-    if (sheetBtn.getAttribute('aria-pressed') === 'true' || sheetBtn.getAttribute('aria-selected') === 'true' || sheetBtn.getAttribute('data-state') === 'active') return true;
-    const cls = String(sheetBtn.className || '');
-    if (/indigo|orange|active|selected|current/.test(cls) && !/neutral-200|neutral-800/.test(cls)) return true;
-    return document.body.getAttribute('data-stepper-sheet-import-active') === 'true';
-  }
-
-  function ensureSheetPdfHost(){
-    if (!mainEl && !locateUi()) return null;
-    let host = document.getElementById(PDF_IMPORT_PANEL_ID);
-    const active = isSheetViewActive();
-    if (!active) {
-      if (host) host.style.display = 'none';
-      document.body.removeAttribute('data-stepper-sheet-import-active');
-      return host;
-    }
-    document.body.setAttribute('data-stepper-sheet-import-active', 'true');
-    if (!host) {
-      host = document.createElement('section');
-      host.id = PDF_IMPORT_PANEL_ID;
-      host.className = 'max-w-4xl mx-auto px-3 sm:px-4 pb-6 print:hidden';
-    }
-    host.style.display = '';
-    if (footerWrap && footerWrap.parentNode && host.parentNode !== footerWrap.parentNode) {
-      footerWrap.parentNode.insertBefore(host, footerWrap);
-    } else if (mainEl && mainEl.parentNode && host.parentNode !== mainEl.parentNode) {
-      mainEl.parentNode.appendChild(host);
+      const settingsPanel = document.getElementById('stepper-inline-settings');
+      if (settingsPanel && settingsPanel.parentNode === stack) stack.insertBefore(panel, settingsPanel);
+      else stack.appendChild(panel);
     }
     return host;
   }
@@ -3409,6 +3000,10 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="2.5" width="19" height="19" rx="5"></rect><path d="M10 16V9l7-1.5V14"></path><circle cx="8" cy="16" r="2"></circle><circle cx="17" cy="14" r="2"></circle></svg>'
       : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="2.5" width="19" height="19" rx="5"></rect><path d="M10 16V9l7-1.5V14"></path><circle cx="8" cy="16" r="2"></circle><circle cx="17" cy="14" r="2"></circle><line x1="5" y1="19" x2="19" y2="5"></line></svg>';
   }
+  function iconUploadCloud(){
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V6"></path><path d="m8 10 4-4 4 4"></path><path d="M20 16.5a4.5 4.5 0 0 0-1.2-8.84 6 6 0 0 0-11.6 1.84A4 4 0 0 0 7 17.5"></path><path d="M8 20h8"></path></svg>';
+  }
+
   function iconSparkles(){
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3z"></path><path d="M19 14l.9 2.1L22 17l-2.1.9L19 20l-.9-2.1L16 17l2.1-.9L19 14z"></path><path d="M5 14l.9 2.1L8 17l-2.1.9L5 20l-.9-2.1L2 17l2.1-.9L5 14z"></path></svg>';
   }
@@ -3596,6 +3191,80 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     }
   }
 
+
+  function buildImportedDanceData(parsed){
+    const meta = parsed && typeof parsed.meta === 'object' ? parsed.meta : {};
+    const sections = Array.isArray(parsed && parsed.sections) ? parsed.sections : [];
+    return {
+      meta: {
+        title: String(meta.title || 'Imported Dance').trim() || 'Imported Dance',
+        choreographer: String(meta.choreographer || '').trim(),
+        country: String(meta.country || '').trim(),
+        music: String(meta.music || '').trim(),
+        level: String(meta.level || 'Improver').trim() || 'Improver',
+        counts: String(meta.counts || '32').trim() || '32',
+        walls: String(meta.walls || '4').trim() || '4',
+        type: String(meta.type || '4-count').trim() || '4-count'
+      },
+      sections: sections.map((section, sectionIndex) => ({
+        id: 'section-' + Date.now() + '-' + sectionIndex,
+        name: String((section && (section.title || section.name)) || `Section ${sectionIndex + 1}`).trim() || `Section ${sectionIndex + 1}`,
+        steps: (Array.isArray(section && section.steps) ? section.steps : []).map((step, stepIndex) => ({
+          id: 'step-' + Date.now() + '-' + sectionIndex + '-' + stepIndex,
+          type: 'step',
+          count: String((step && (step.count || step.counts)) || String(stepIndex + 1)).trim() || String(stepIndex + 1),
+          name: String(step && step.name || '').trim(),
+          description: String((step && (step.description || step.desc)) || '').trim(),
+          foot: ['L','R','Both','None'].includes(String(step && step.foot || '').trim()) ? String(step.foot).trim() : 'None',
+          weight: !(step && step.weight === false)
+        })).filter((step) => step.name || step.description)
+      })).filter((section) => section.steps.length),
+      tags: [],
+      isDarkMode: !!isDarkMode()
+    };
+  }
+
+  async function importPdfIntoEditor(){
+    const fileInput = document.getElementById('stepper-pdf-import-file');
+    const status = document.getElementById('stepper-pdf-import-status');
+    const button = document.getElementById('stepper-pdf-import-action');
+    if (!fileInput || !status || !button) return;
+    const file = fileInput.files && fileInput.files[0];
+    if (!file) {
+      status.textContent = 'Choose a stepsheet PDF first.';
+      return;
+    }
+    status.textContent = 'Importing PDF into the editor...';
+    button.disabled = true;
+    const originalHtml = button.innerHTML;
+    button.innerHTML = `${iconUploadCloud()} Importing...`;
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      let binary = '';
+      const chunkSize = 0x8000;
+      for (let index = 0; index < bytes.length; index += chunkSize) {
+        binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+      }
+      const apiBase = (window.STEPPER_API_BASE || 'https://step-by-stepper.onrender.com').replace(/\/$/, '');
+      const response = await fetch(`${apiBase}/api/ai/import-stepsheet`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName: file.name, fileBase64: btoa(binary) })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.ok || !result.parsed) throw new Error(result.error || 'PDF import failed.');
+      writeAppData(buildImportedDanceData(result.parsed));
+      writeStoredPhrasedTools({ danceFormat:'regular', uiTab:'parts', parts:[], sequence:[] });
+      status.textContent = 'PDF imported. Loading it into the editor now...';
+      setTimeout(() => location.reload(), 300);
+    } catch (error) {
+      status.textContent = error && error.message ? error.message : 'PDF import failed.';
+    } finally {
+      button.disabled = false;
+      button.innerHTML = originalHtml;
+    }
+  }
+
   function renderSettingsPanel(){
     const panel = document.getElementById('stepper-inline-settings');
     if (!panel) return;
@@ -3631,6 +3300,20 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
           <div><div class="text-lg font-black tracking-tight">Thinking Music</div><p class="mt-1 text-sm ${theme.subtle}">Loops the lobby track while you work without resetting every few seconds.</p></div>
           <div class="flex items-center gap-3 shrink-0"><span class="stepper-setting-icon">${iconMusic(settings.thinkingMusicEnabled)}</span><span class="text-xs font-black uppercase tracking-widest ${theme.subtle}">${settings.thinkingMusicEnabled ? 'On' : 'Off'}</span></div>
         </button>
+        <div class="rounded-3xl border p-5 sm:p-6 ${theme.soft}">
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <div class="text-lg font-black tracking-tight">Import PDF</div>
+              <p class="mt-1 text-sm ${theme.subtle}">Save the stepsheet as a PDF or copy it into Docs first, then upload it here to load it straight into the editor and sheet.</p>
+            </div>
+            <span class="stepper-setting-icon">${iconUploadCloud()}</span>
+          </div>
+          <div class="mt-4 flex flex-col sm:flex-row gap-3">
+            <input id="stepper-pdf-import-file" type="file" accept="application/pdf" class="flex-1 rounded-2xl border px-4 py-3 text-sm font-bold ${theme.button}">
+            <button type="button" id="stepper-pdf-import-action" class="rounded-2xl px-5 py-3 font-black tracking-tight uppercase ${theme.accent} inline-flex items-center justify-center gap-2">${iconUploadCloud()} Import PDF</button>
+          </div>
+          <p id="stepper-pdf-import-status" class="mt-3 text-sm font-semibold ${theme.subtle}">Upload a PDF here and it will load the dance into your current editor project.</p>
+        </div>
       </div>
     `;
     panel.querySelector('[data-stepper-setting="sfx"]').addEventListener('click', () => { const current = getSettings(); current.sfxEnabled = !current.sfxEnabled; saveSettings(current); renderSettingsPanel(); });
@@ -3642,6 +3325,8 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
         renderSettingsPanel();
       });
     });
+    const importButton = panel.querySelector('#stepper-pdf-import-action');
+    if (importButton) importButton.addEventListener('click', importPdfIntoEditor);
   }
 
   function renderChoreoPanel(){
@@ -3919,7 +3604,6 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     renderPhrasedPanel();
     renderChoreoPanel();
     renderSettingsPanel();
-    renderPdfImportPanel();
     wireManualCountsAndWallsOverrides();
     const syncedStats = syncAutoCountsAndWalls(false);
     if (syncedStats) {
@@ -4053,23 +3737,6 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     };
     bind('Counts', 'counts', 'autoCounts', deriveCounts);
     bind('Walls', 'walls', 'autoWalls', deriveWalls);
-  }
-
-  function wireSheetPdfImportVisibility(){
-    if (sheetBtn && !sheetBtn.__stepperPdfImportWired) {
-      sheetBtn.__stepperPdfImportWired = true;
-      sheetBtn.addEventListener('click', () => {
-        document.body.setAttribute('data-stepper-sheet-import-active', 'true');
-        window.setTimeout(() => renderPdfImportPanel(), 0);
-      }, true);
-    }
-    if (buildBtn && !buildBtn.__stepperPdfImportWired) {
-      buildBtn.__stepperPdfImportWired = true;
-      buildBtn.addEventListener('click', () => {
-        document.body.removeAttribute('data-stepper-sheet-import-active');
-        window.setTimeout(() => renderPdfImportPanel(), 0);
-      }, true);
-    }
   }
 
   function wirePreviewAutoStats(){
@@ -4243,28 +3910,13 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   }
 
   function injectWhatsNewNotes(){
-    const notes = Array.from(document.querySelectorAll('section p, section div, section article p'));
-    const whatsNewHeading = Array.from(document.querySelectorAll('h2')).find(node => /what's new/i.test(node.textContent || ''));
-    if (!whatsNewHeading) return;
-    const container = whatsNewHeading.closest('section');
-    if (!container) return;
-    const existing = container.querySelector('[data-stepper-note="pdf-import-ai"]');
-    if (existing) return;
-    const list = container.querySelector('.space-y-3') || container.querySelector('.space-y-6') || container.lastElementChild;
-    if (!list) return;
-    const theme = themeClasses();
-    const note = document.createElement('div');
-    note.setAttribute('data-stepper-note', 'pdf-import-ai');
-    note.className = `rounded-2xl border px-4 py-4 flex gap-3 ${theme.dark ? 'border-neutral-800 bg-neutral-950' : 'border-neutral-200 bg-white'}`;
-    note.innerHTML = `<div class="mt-0.5 shrink-0">${renderWhatsNewBadge(iconUploadCloud())}</div><p class="font-medium leading-relaxed">Added PDF Import AI on the Sheet page. Open <strong>Sheet</strong>, choose <strong>Import PDF</strong>, upload a stepsheet you saved as PDF or copied into Docs first, and it will load the dance into your sheet and Build helper together.</p>`;
-    list.insertBefore(note, list.firstChild || null);
+    return;
   }
 
   function boot(){
     if (maybeRestoreSavedForLaterOnBoot()) return;
     ensureCustomStyles();
     applyFontSettings();
-    applyModeBranding();
     ensureInlineHost();
     renderCustomPanels();
     decorateSectionHeaders();
@@ -4280,7 +3932,6 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       requestAnimationFrame(() => {
         queued = false;
         applyFontSettings();
-        applyModeBranding();
         renderCustomPanels();
         decorateSectionHeaders();
         injectWhatsNewNotes();
