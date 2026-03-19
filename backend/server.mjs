@@ -381,8 +381,40 @@ async function readDbFromPath(targetPath) {
   if (!Array.isArray(parsed.approvedGlossarySteps)) parsed.approvedGlossarySteps = [];
   if (!Array.isArray(parsed.siteMemory)) parsed.siteMemory = [];
   if (!Array.isArray(parsed.securityAlerts)) parsed.securityAlerts = [];
-  if (!Array.isArray(parsed.staffChat)) parsed.staffChat = [];
+
+  if (Array.isArray(parsed.submissions)) {
+    parsed.submissions = parsed.submissions.map((item) => {
+      if (!item || typeof item !== 'object') return item;
+      const votes = Array.isArray(item.moderatorVotes) ? item.moderatorVotes : [];
+      item.moderatorVotes = votes
+        .map((vote) => ({
+          email: normalizeEmail(vote?.email),
+          name: String(vote?.name || vote?.email || '').trim(),
+          decision: String(vote?.decision || '').trim().toLowerCase() === 'disapprove' ? 'disapprove' : 'approve',
+          note: String(vote?.note || '').trim().slice(0, 800),
+          at: String(vote?.at || vote?.moderatorApprovedAt || item?.updatedAt || item?.createdAt || '').trim() || new Date().toISOString()
+        }))
+        .filter((vote) => vote.email);
+      return item;
+    });
+  }
   return parsed;
+}
+
+function summarizeModeratorVotes(item) {
+  const votes = Array.isArray(item?.moderatorVotes) ? item.moderatorVotes : [];
+  let approve = 0;
+  let disapprove = 0;
+  for (const vote of votes) {
+    if (String(vote?.decision || '').trim().toLowerCase() === 'disapprove') disapprove += 1;
+    else approve += 1;
+  }
+  return {
+    approve,
+    disapprove,
+    total: approve + disapprove,
+    text: `${approve} moderators approve and ${disapprove} disapprove`
+  };
 }
 
 function syncModeratorRegistry(db) {
@@ -1500,6 +1532,7 @@ app.get("/api/admin/submissions", requireAdmin, async (_req, res) => {
         previewSections: sanitizePreviewSections(item?.previewSections).length ? sanitizePreviewSections(item?.previewSections) : (source ? buildPreviewSections(source) : []),
         jsonPayload: String(item?.jsonPayload || source?.jsonPayload || '').trim() || buildStoredJsonPayload(source || item || {}),
         isFeatured: featuredIds.has(String(source?.registryId || item?.registryId || '')),
+        moderatorVoteSummary: summarizeModeratorVotes(item),
         source
       };
     })
@@ -1945,6 +1978,7 @@ app.get('/api/moderator/submissions', requireModerator, async (_req, res) => {
         snapshot: item?.snapshot || source?.snapshot || null,
         previewSections: sanitizePreviewSections(item?.previewSections).length ? sanitizePreviewSections(item?.previewSections) : (source ? buildPreviewSections(source) : []),
         jsonPayload: String(item?.jsonPayload || source?.jsonPayload || '').trim() || buildStoredJsonPayload(source || item || {}),
+        moderatorVoteSummary: summarizeModeratorVotes(item),
         source
       };
     })
@@ -1964,17 +1998,31 @@ app.post('/api/moderator/submissions/:id/approve', requireModerator, async (req,
   if (!item) return res.status(404).json({ ok: false, error: 'Submission not found.' });
   const decision = String(req.body?.decision || 'approve').trim().toLowerCase() === 'disapprove' ? 'disapprove' : 'approve';
   const note = String(req.body?.note || '').trim().slice(0, 800);
+  const reviewerEmail = normalizeEmail(req.stepperUser?.email);
+  const reviewerName = String(req.stepperUser?.name || req.stepperUser?.email || '').trim();
+  const reviewedAt = new Date().toISOString();
+  if (!Array.isArray(item.moderatorVotes)) item.moderatorVotes = [];
+  item.moderatorVotes = item.moderatorVotes.filter(vote => normalizeEmail(vote?.email) !== reviewerEmail);
+  item.moderatorVotes.push({
+    email: reviewerEmail,
+    name: reviewerName,
+    decision,
+    note,
+    at: reviewedAt
+  });
+  const summary = summarizeModeratorVotes(item);
   item.moderatorApproved = decision === 'approve';
   item.moderatorReviewStatus = decision === 'approve' ? 'approved' : 'disapproved';
-  item.moderatorApprovedAt = new Date().toISOString();
+  item.moderatorApprovedAt = reviewedAt;
   item.moderatorApprovedBy = {
-    email: String(req.stepperUser?.email || '').trim(),
-    name: String(req.stepperUser?.name || req.stepperUser?.email || '').trim()
+    email: reviewerEmail,
+    name: reviewerName
   };
   item.moderatorNote = note;
-  item.updatedAt = new Date().toISOString();
+  item.moderatorVoteSummary = summary;
+  item.updatedAt = reviewedAt;
   await writeDb(db);
-  res.json({ ok: true, item });
+  res.json({ ok: true, item, moderatorVoteSummary: summary });
 });
 
 app.get('/api/subscription/status', requireGoogleUser, async (req, res) => {

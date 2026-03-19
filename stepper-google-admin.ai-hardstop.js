@@ -2955,9 +2955,11 @@
     try {
       const data = await authFetch('/api/moderator/submissions');
       state.moderatorQueue = Array.isArray(data.items) ? data.items : [];
+      state.__moderatorDirty = true;
       return state.moderatorQueue;
     } catch {
       state.moderatorQueue = [];
+      state.__moderatorDirty = true;
       return [];
     }
   }
@@ -3162,7 +3164,7 @@
       });
       await refreshModeratorQueue();
       if (isAdminSession()) await refreshSubmissions();
-      renderPages();
+      renderPages(true);
     } catch (error) {
       alert(error.message || 'Could not send moderator review.');
     }
@@ -3253,6 +3255,7 @@
             <div class="flex flex-wrap items-center gap-3"><h3 class="text-lg font-black tracking-tight">${escapeHtml(item.title || 'Untitled Dance')}</h3><span class="stepper-google-pill ${theme.orange}">${escapeHtml(item.requestType || 'request')}</span>${item.priority ? `<span class="stepper-google-pill ${theme.orange}">Priority</span>` : ''}</div>
             <p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.ownerName || item.ownerEmail || 'Member')} • ${escapeHtml(item.ownerEmail || '')}</p>
             <p class="mt-2 text-sm ${theme.subtle}">Leave a note when you approve or disapprove so admin can see exactly what you put on it.</p>
+            <p class="mt-2 text-sm font-semibold ${theme.subtle}">${escapeHtml((item.moderatorVoteSummary && item.moderatorVoteSummary.text) || '0 moderators approve and 0 disapprove')}</p>
           </div>
         </div>
         <div class="mt-4 ${theme.panel} rounded-2xl border p-4">
@@ -3329,8 +3332,10 @@
       }
       const badges = card.querySelector('[data-moderator-badges="1"]');
       if (badges) {
-        if (String(item.moderatorReviewStatus || '') === 'approved') badges.innerHTML = `<span class="stepper-google-pill ${theme.orange}" style="background:#fef3c7;color:#92400e;border:1px solid #f59e0b;">Moderator approved</span>`;
-        else if (String(item.moderatorReviewStatus || '') === 'disapproved') badges.innerHTML = `<span class="stepper-google-pill ${theme.orange}" style="background:#fee2e2;color:#991b1b;border:1px solid #ef4444;">Moderator disapproved</span>`;
+        const summaryText = (item.moderatorVoteSummary && item.moderatorVoteSummary.text) || '0 moderators approve and 0 disapprove';
+        if (String(item.moderatorReviewStatus || '') === 'approved') badges.innerHTML = `<span class="stepper-google-pill ${theme.orange}" style="background:#fef3c7;color:#92400e;border:1px solid #f59e0b;">Moderator approved</span><span class="stepper-google-pill ${theme.orange}">${escapeHtml(summaryText)}</span>`;
+        else if (String(item.moderatorReviewStatus || '') === 'disapproved') badges.innerHTML = `<span class="stepper-google-pill ${theme.orange}" style="background:#fee2e2;color:#991b1b;border:1px solid #ef4444;">Moderator disapproved</span><span class="stepper-google-pill ${theme.orange}">${escapeHtml(summaryText)}</span>`;
+        else if ((item.moderatorVoteSummary && item.moderatorVoteSummary.total)) badges.innerHTML = `<span class="stepper-google-pill ${theme.orange}">${escapeHtml(summaryText)}</span>`;
         else badges.innerHTML = '';
       }
       if (item.moderatorNote && !card.querySelector('[data-moderator-note-view="1"]')) {
@@ -3507,14 +3512,20 @@ Newest user question: ${question}`;
   }
 
   const __origRenderPages = renderPages;
-  renderPages = function(){
-    __origRenderPages();
+  renderPages = function(force){
+    const forced = !!force;
+    const previousPage = state.__lastRenderedPage || '';
+    __origRenderPages(forced);
     ensureHost();
-    renderModeratorPage();
+    if (state.activePage === 'moderator' && (forced || previousPage !== 'moderator' || state.__moderatorDirty)) {
+      renderModeratorPage();
+      state.__moderatorDirty = false;
+    }
     decorateSubscriptionPage();
     decorateAdminPage();
     renderCommunityGlossary();
     setVisibility(document.getElementById(MODERATOR_PAGE_ID), state.activePage === 'moderator');
+    state.__lastRenderedPage = state.activePage;
     window.StepByStepperGlobals = {
       buildCurrentDanceEntry,
       normalizeStoredEntry,
@@ -3536,7 +3547,7 @@ Newest user question: ${question}`;
     if (__stepperLiveQueueRefreshBusy || !(state.session && state.session.credential)) return;
     __stepperLiveQueueRefreshBusy = true;
     refreshLiveQueues().then(() => {
-      if (state.activePage === 'admin' || state.activePage === 'moderator' || state.activePage === 'signin' || state.activePage === 'subscription') renderPages();
+      if (state.activePage === 'admin' || state.activePage === 'signin' || state.activePage === 'subscription') renderPages();
     }).catch(() => {}).finally(() => { __stepperLiveQueueRefreshBusy = false; });
   }, LIVE_QUEUE_SYNC_INTERVAL_MS);
 
