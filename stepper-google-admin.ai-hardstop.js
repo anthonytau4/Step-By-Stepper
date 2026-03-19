@@ -45,6 +45,7 @@
     adminSummary: { users: 0, moderators: 0, barred: 0, pendingBars: 0, pendingInvites: 0, pendingApplications: 0, pendingSubmissions: 0 },
     glossaryApproved: [],
     glossaryRequests: [],
+    glossaryDraft: { requestType: 'new', name: '', counts: '', foot: 'Either', tags: '', description: '', original: null, source: '' },
     siteMemories: [],
     aiDance: { busy: false, mode: 'judge', prompt: '', result: null },
     communityGlossaryOpen: false,
@@ -1536,7 +1537,7 @@
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ step: payload })
       });
-      alert(data && data.message ? data.message : 'Glossary step request sent to Admin.');
+      alert(data && data.message ? data.message : 'Glossary request sent to Admin for Glossary+.');
       return true;
     } catch (error) {
       alert(error.message || 'Could not send that glossary step request.');
@@ -1544,6 +1545,86 @@
     }
   }
   window.__stepperSendGlossaryStepRequest = requestGlossaryStep;
+
+  function normalizeGlossaryDraft(raw){
+    const source = raw && typeof raw === 'object' ? raw : {};
+    const requestType = String(source.requestType || '').trim() === 'edit' ? 'edit' : 'new';
+    const original = requestType === 'edit' && source.original && typeof source.original === 'object' ? {
+      sourceId: String(source.original.sourceId || '').trim(),
+      name: String(source.original.name || '').trim(),
+      description: String(source.original.description || '').trim(),
+      counts: String(source.original.counts || '').trim(),
+      foot: String(source.original.foot || '').trim(),
+      tags: String(source.original.tags || '').trim()
+    } : null;
+    return {
+      requestType,
+      name: String(source.name || '').trim(),
+      counts: String(source.counts || '').trim() || '1',
+      foot: String(source.foot || '').trim() || 'Either',
+      tags: String(source.tags || '').trim(),
+      description: String(source.description || '').trim(),
+      original,
+      source: String(source.source || '').trim()
+    };
+  }
+
+  function setGlossaryDraft(raw, options){
+    const opts = options && typeof options === 'object' ? options : {};
+    state.glossaryDraft = normalizeGlossaryDraft(raw);
+    if (opts.render && state.activePage === 'signin') renderPages();
+    return state.glossaryDraft;
+  }
+
+  function readGlossaryDraftFromPage(page){
+    const draft = normalizeGlossaryDraft(state.glossaryDraft || {});
+    if (!page) return draft;
+    const name = page.querySelector('[data-stepper-glossary-name="1"]');
+    const counts = page.querySelector('[data-stepper-glossary-counts="1"]');
+    const foot = page.querySelector('[data-stepper-glossary-foot="1"]');
+    const tags = page.querySelector('[data-stepper-glossary-tags="1"]');
+    const description = page.querySelector('[data-stepper-glossary-description="1"]');
+    return normalizeGlossaryDraft({
+      ...draft,
+      name: name ? name.value : draft.name,
+      counts: counts ? counts.value : draft.counts,
+      foot: foot ? foot.value : draft.foot,
+      tags: tags ? tags.value : draft.tags,
+      description: description ? description.value : draft.description
+    });
+  }
+
+  function wireGlossaryDraftInputs(page){
+    if (!page) return;
+    const bind = (selector, key) => {
+      const el = page.querySelector(selector);
+      if (!el) return;
+      const draft = normalizeGlossaryDraft(state.glossaryDraft || {});
+      if ((el.value || '') !== String(draft[key] || '')) el.value = String(draft[key] || '');
+      el.addEventListener('input', () => {
+        const next = normalizeGlossaryDraft({ ...state.glossaryDraft, [key]: el.value });
+        state.glossaryDraft = next;
+      });
+    };
+    bind('[data-stepper-glossary-name="1"]', 'name');
+    bind('[data-stepper-glossary-counts="1"]', 'counts');
+    bind('[data-stepper-glossary-foot="1"]', 'foot');
+    bind('[data-stepper-glossary-tags="1"]', 'tags');
+    bind('[data-stepper-glossary-description="1"]', 'description');
+  }
+
+  async function submitGlossaryDraftFromAnywhere(preferredPage){
+    const draft = readGlossaryDraftFromPage(preferredPage);
+    state.glossaryDraft = draft;
+    const ok = await requestGlossaryStep(draft);
+    if (ok) {
+      state.glossaryDraft = normalizeGlossaryDraft({ requestType: 'new', foot: 'Either' });
+      if (preferredPage && state.activePage === 'signin') renderPages();
+    }
+    return ok;
+  }
+  window.__stepperStageGlossaryDraft = setGlossaryDraft;
+  window.__stepperSubmitGlossaryDraft = submitGlossaryDraftFromAnywhere;
 
   async function decideGlossaryRequest(id, decision){
     const note = window.prompt(decision === 'approve' ? 'Optional approval note for this glossary step:' : 'Why are you declining this glossary step?', '');
@@ -1987,16 +2068,17 @@
               <div>
                 <div class="text-lg font-black tracking-tight">Request dance step for the glossary</div>
                 <p class="mt-2 text-sm ${theme.subtle}">Send a custom step to Admin. If it is approved, it becomes a community glossary step for everyone else. Right-foot requests automatically preview a left-foot twin and vice versa.</p>
+                ${(state.glossaryDraft && state.glossaryDraft.requestType === 'edit' && state.glossaryDraft.original && state.glossaryDraft.original.name) ? `<p class="mt-3 text-xs font-semibold ${theme.subtle}">Loaded from an edited worksheet step. This will be sent as a glossary edit suggestion, not as a dance submission.</p>` : ''}
               </div>
             </div>
             <div class="mt-4 grid gap-4 sm:grid-cols-2">
-              <input data-stepper-glossary-name="1" class="stepper-google-input" placeholder="Step name" />
-              <input data-stepper-glossary-counts="1" class="stepper-google-input" placeholder="Counts, e.g. 1&2" />
-              <input data-stepper-glossary-foot="1" class="stepper-google-input" placeholder="Foot: Right, Left, or Either" />
-              <input data-stepper-glossary-tags="1" class="stepper-google-input" placeholder="Tags or aliases (optional)" />
+              <input data-stepper-glossary-name="1" class="stepper-google-input" placeholder="Step name" value="${escapeHtml((state.glossaryDraft && state.glossaryDraft.name) || '')}" />
+              <input data-stepper-glossary-counts="1" class="stepper-google-input" placeholder="Counts, e.g. 1&2" value="${escapeHtml((state.glossaryDraft && state.glossaryDraft.counts) || '')}" />
+              <input data-stepper-glossary-foot="1" class="stepper-google-input" placeholder="Foot: Right, Left, or Either" value="${escapeHtml((state.glossaryDraft && state.glossaryDraft.foot) || 'Either')}" />
+              <input data-stepper-glossary-tags="1" class="stepper-google-input" placeholder="Tags or aliases (optional)" value="${escapeHtml((state.glossaryDraft && state.glossaryDraft.tags) || '')}" />
             </div>
-            <div class="mt-4 ${theme.panel} rounded-3xl border p-4"><textarea data-stepper-glossary-description="1" class="stepper-google-input" rows="4" placeholder="Describe the step clearly so Admin can preview it."></textarea></div>
-            <div class="mt-4 flex flex-wrap gap-3"><button type="button" data-stepper-action="request-glossary-step" class="stepper-google-cta ${theme.button}">Send glossary step request</button></div>
+            <div class="mt-4 ${theme.panel} rounded-3xl border p-4"><textarea data-stepper-glossary-description="1" class="stepper-google-input" rows="4" placeholder="Describe the step clearly so Admin can preview it.">${escapeHtml((state.glossaryDraft && state.glossaryDraft.description) || '')}</textarea></div>
+            <div class="mt-4 flex flex-wrap gap-3"><button type="button" data-stepper-action="request-glossary-step" class="stepper-google-cta ${theme.button}">${state.glossaryDraft && state.glossaryDraft.requestType === 'edit' ? 'Send glossary edit suggestion' : 'Send glossary step request'}</button></div>
           </div>
           <div class="mx-auto max-w-3xl rounded-3xl border p-5 sm:p-6 ${theme.soft}">
             <div class="flex flex-wrap items-center justify-between gap-4">
@@ -2087,23 +2169,10 @@
         if (item) applyStepToCurrentWorksheet(item);
       });
     });
+    wireGlossaryDraftInputs(page);
     const glossaryBtn = page.querySelector('[data-stepper-action="request-glossary-step"]');
     if (glossaryBtn) glossaryBtn.addEventListener('click', () => {
-      const payload = {
-        name: page.querySelector('[data-stepper-glossary-name="1"]')?.value || '',
-        counts: page.querySelector('[data-stepper-glossary-counts="1"]')?.value || '',
-        foot: page.querySelector('[data-stepper-glossary-foot="1"]')?.value || '',
-        tags: page.querySelector('[data-stepper-glossary-tags="1"]')?.value || '',
-        description: page.querySelector('[data-stepper-glossary-description="1"]')?.value || ''
-      };
-      requestGlossaryStep(payload).then((ok)=>{
-        if (ok) {
-          ['[data-stepper-glossary-name="1"]','[data-stepper-glossary-counts="1"]','[data-stepper-glossary-foot="1"]','[data-stepper-glossary-tags="1"]','[data-stepper-glossary-description="1"]'].forEach(sel => {
-            const el = page.querySelector(sel);
-            if (el) el.value = '';
-          });
-        }
-      });
+      submitGlossaryDraftFromAnywhere(page);
     });
 
     renderGoogleButton();
@@ -3468,11 +3537,13 @@ Newest user question: ${question}`;
     const fallbackCount = textLines[0] || '';
     const fallbackName = textLines[1] || textLines[0] || '';
     const fallbackDescription = textLines[2] || '';
+    const tagsEl = row.querySelector('input[placeholder="Tags or aliases (optional)"]');
     const payload = {
       name: String(nameEl && nameEl.value || fallbackName || '').trim(),
       description: String(descEl && descEl.value || fallbackDescription || '').trim(),
       counts: String(countEl && countEl.value || fallbackCount || '').trim() || '1',
-      foot: String(footEl && footEl.value || 'Either').trim() || 'Either'
+      foot: String(footEl && footEl.value || 'Either').trim() || 'Either',
+      tags: String(tagsEl && tagsEl.value || '').trim()
     };
     if (!payload.name || !payload.description) return null;
     return payload;
@@ -3499,14 +3570,18 @@ Newest user question: ${question}`;
       alert('Edit the step first, then right click it to send the change to Admin.');
       return false;
     }
-    return requestGlossaryStep({
+    const staged = setGlossaryDraft({
       requestType: 'edit',
       name: current.name,
       description: current.description,
       counts: current.counts,
       foot: current.foot,
-      original: draft.original
-    });
+      tags: current.tags || '',
+      original: draft.original,
+      source: 'step-context-menu'
+    }, { render: state.activePage === 'signin' });
+    const signInPage = document.getElementById(SIGNIN_PAGE_ID);
+    return submitGlossaryDraftFromAnywhere(signInPage);
   }
 
   function injectGlossaryContextAction(){
