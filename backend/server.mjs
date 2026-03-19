@@ -5,6 +5,7 @@ import OpenAI from "openai";
 import { OAuth2Client } from "google-auth-library";
 import pdfParse from "pdf-parse";
 import { promises as fs } from "fs";
+import { MongoClient } from "mongodb";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -27,10 +28,19 @@ const dataDir = process.env.DATA_DIR
 const dbPath = path.join(dataDir, "stepper-db.json");
 const dbBackupPath = `${dbPath}.bak`;
 const dbTempPath = `${dbPath}.tmp`;
+const mongoUri = String(process.env.MONGODB_URI || process.env.MONGO_URI || process.env.MONGO_URL || '').trim();
+const mongoDbName = String(process.env.MONGODB_DB_NAME || process.env.MONGODB_DB || 'step_by_stepper').trim() || 'step_by_stepper';
+const mongoCollectionName = String(process.env.MONGODB_COLLECTION || 'app_state').trim() || 'app_state';
+let mongoClientInstance = null;
+let mongoCollection = null;
+let mongoAvailable = false;
+let mongoFailureReason = '';
+let writeQueue = Promise.resolve();
 console.log('[Stepper] RENDER_DISK_MOUNT_PATH =', process.env.RENDER_DISK_MOUNT_PATH || '(not set)');
 console.log('[Stepper] DATA_DIR =', process.env.DATA_DIR || '(not set)');
 console.log('[Stepper] resolved dataDir =', dataDir);
 console.log('[Stepper] resolved dbPath =', dbPath);
+console.log('[Stepper] storage mode =', mongoUri ? `mongodb (${mongoDbName}/${mongoCollectionName})` : 'json-file');
 const openaiClient = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
@@ -422,21 +432,113 @@ function parseAllowedOrigins(value) {
 }
 
 const allowedOrigins = parseAllowedOrigins(process.env.ALLOWED_ORIGIN || "*");
+
+function isAllowedOrigin(origin) {
+  if (!origin) return true;
+  if (allowedOrigins === "*") return true;
+  const safe = safeOrigin(origin) || String(origin || '').trim();
+  return Array.isArray(allowedOrigins) && allowedOrigins.includes(safe);
+}
+
+function applyCorsHeaders(req, res) {
+  const requestOrigin = safeOrigin(req.headers.origin);
+  const allowOrigin = requestOrigin && isAllowedOrigin(requestOrigin)
+    ? requestOrigin
+    : (allowedOrigins === "*" ? "*" : "");
+  if (allowOrigin) {
+    res.setHeader('Access-Control-Allow-Origin', allowOrigin);
+    res.setHeader('Vary', 'Origin');
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD');
+  const requestedHeaders = String(req.headers['access-control-request-headers'] || '').trim();
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    requestedHeaders || 'Content-Type, Authorization, X-Stepper-Google-Token, X-Google-Credential, X-Requested-With'
+  );
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Max-Age', '86400');
+}
+
 const corsOptions = {
   origin(origin, callback) {
-    if (allowedOrigins === "*" || !origin || allowedOrigins.includes(origin)) {
+    if (isAllowedOrigin(origin)) {
       callback(null, true);
       return;
     }
-    callback(new Error("Origin not allowed by Step-By-Stepper backend."));
+    callback(null, false);
   },
-  methods: ["GET", "POST", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Stepper-Google-Token", "X-Google-Credential"],
-  optionsSuccessStatus: 204
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Stepper-Google-Token", "X-Google-Credential", "X-Requested-With"],
+  exposedHeaders: ["Content-Type", "Authorization"],
+  optionsSuccessStatus: 204,
+  preflightContinue: false
 };
+app.use((req, res, next) => {
+  applyCorsHeaders(req, res);
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+  next();
+});
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
+app.options('*', (_req, res) => res.status(204).end());
 app.use(express.json({ limit: "20mb" }));
+
+async function initMongo() {
+  if (!mongoUri) return false;
+  if (mongoAvailable && mongoCollection) return true;
+  try {
+    if (!mongoClientInstance) {
+      mongoClientInstance = new MongoClient(mongoUri, {
+        serverSelectionTimeoutMS: 8000,
+        connectTimeoutMS: 8000,
+        retryWrites: true
+      });
+    }
+    await mongoClientInstance.connect();
+    mongoCollection = mongoClientInstance.db(mongoDbName).collection(mongoCollectionName);
+    mongoAvailable = true;
+    mongoFailureReason = '';
+    return true;
+  } catch (error) {
+    mongoAvailable = false;
+    mongoCollection = null;
+    mongoFailureReason = String(error?.message || error || 'MongoDB unavailable.');
+    console.warn('[Stepper] MongoDB unavailable; falling back to JSON storage.', mongoFailureReason);
+    return false;
+  }
+}
+
+function normalizeDbShape(parsed) {
+  if (!parsed || typeof parsed !== "object") throw new Error("Database state did not contain an object.");
+  if (!parsed.users || typeof parsed.users !== "object") parsed.users = {};
+  if (!Array.isArray(parsed.featuredChoreo)) parsed.featuredChoreo = [];
+  if (!Array.isArray(parsed.danceRegistry)) parsed.danceRegistry = [];
+  if (!Array.isArray(parsed.submissions)) parsed.submissions = [];
+  if (!Array.isArray(parsed.moderatorApplications)) parsed.moderatorApplications = [];
+  if (!Array.isArray(parsed.moderatorRegistry)) parsed.moderatorRegistry = [];
+  if (!Array.isArray(parsed.adminRegistry)) parsed.adminRegistry = [];
+  if (!Array.isArray(parsed.pendingModeratorInvites)) parsed.pendingModeratorInvites = [];
+  if (!Array.isArray(parsed.pendingSuspensions)) parsed.pendingSuspensions = [];
+  if (!Array.isArray(parsed.glossaryRequests)) parsed.glossaryRequests = [];
+  if (!Array.isArray(parsed.approvedGlossarySteps)) parsed.approvedGlossarySteps = [];
+  if (!Array.isArray(parsed.siteMemory)) parsed.siteMemory = [];
+  if (!Array.isArray(parsed.securityAlerts)) parsed.securityAlerts = [];
+  if (!Array.isArray(parsed.staffChat)) parsed.staffChat = [];
+  return parsed;
+}
+
+async function readDbFromMongo() {
+  const ok = await initMongo();
+  if (!ok || !mongoCollection) throw new Error(mongoFailureReason || 'MongoDB unavailable.');
+  const doc = await mongoCollection.findOne({ _id: 'app_state' });
+  if (!doc || !doc.state || typeof doc.state !== 'object') {
+    const blank = emptyDb();
+    await mongoCollection.updateOne({ _id: 'app_state' }, { $set: { state: blank, updatedAt: new Date().toISOString() } }, { upsert: true });
+    return blank;
+  }
+  return normalizeDbShape(doc.state);
+}
 
 function emptyDb() {
   return {
@@ -479,22 +581,7 @@ async function ensureDb() {
 async function readDbFromPath(targetPath) {
   const raw = await fs.readFile(targetPath, "utf8");
   const parsed = JSON.parse(raw);
-  if (!parsed || typeof parsed !== "object") throw new Error("Database file did not contain an object.");
-  if (!parsed.users || typeof parsed.users !== "object") parsed.users = {};
-  if (!Array.isArray(parsed.featuredChoreo)) parsed.featuredChoreo = [];
-  if (!Array.isArray(parsed.danceRegistry)) parsed.danceRegistry = [];
-  if (!Array.isArray(parsed.submissions)) parsed.submissions = [];
-  if (!Array.isArray(parsed.moderatorApplications)) parsed.moderatorApplications = [];
-  if (!Array.isArray(parsed.moderatorRegistry)) parsed.moderatorRegistry = [];
-  if (!Array.isArray(parsed.adminRegistry)) parsed.adminRegistry = [];
-  if (!Array.isArray(parsed.pendingModeratorInvites)) parsed.pendingModeratorInvites = [];
-  if (!Array.isArray(parsed.pendingSuspensions)) parsed.pendingSuspensions = [];
-  if (!Array.isArray(parsed.glossaryRequests)) parsed.glossaryRequests = [];
-  if (!Array.isArray(parsed.approvedGlossarySteps)) parsed.approvedGlossarySteps = [];
-  if (!Array.isArray(parsed.siteMemory)) parsed.siteMemory = [];
-  if (!Array.isArray(parsed.securityAlerts)) parsed.securityAlerts = [];
-  if (!Array.isArray(parsed.staffChat)) parsed.staffChat = [];
-  return parsed;
+  return normalizeDbShape(parsed);
 }
 
 function syncModeratorRegistry(db) {
@@ -531,6 +618,16 @@ function syncModeratorRegistry(db) {
 }
 
 async function readDb() {
+  if (mongoUri) {
+    try {
+      const parsed = await readDbFromMongo();
+      return syncAndPruneDb(parsed);
+    } catch (error) {
+      mongoAvailable = false;
+      mongoFailureReason = String(error?.message || error || 'MongoDB unavailable.');
+      console.warn('[Stepper] MongoDB init skipped; using JSON storage fallback.');
+    }
+  }
   await ensureDb();
   try {
     const parsed = await readDbFromPath(dbPath);
@@ -598,20 +695,44 @@ function syncAdminRegistry(db) {
 }
 
 async function writeDb(payload) {
-  await ensureDb();
-  const data = JSON.stringify(syncAdminRegistry(syncModeratorRegistry(syncAndPruneDb(payload))), null, 2);
-  try {
+  const normalized = syncAdminRegistry(syncModeratorRegistry(syncAndPruneDb(payload)));
+  if (mongoUri) {
     try {
-      await fs.copyFile(dbPath, dbBackupPath);
-    } catch {}
-    await fs.writeFile(dbTempPath, data, 'utf8');
-    await fs.rename(dbTempPath, dbPath);
-    try {
-      await fs.copyFile(dbPath, dbBackupPath);
-    } catch {}
-  } finally {
-    try { await fs.unlink(dbTempPath); } catch {}
+      const ok = await initMongo();
+      if (ok && mongoCollection) {
+        await mongoCollection.updateOne(
+          { _id: 'app_state' },
+          { $set: { state: normalized, updatedAt: new Date().toISOString() } },
+          { upsert: true }
+        );
+        mongoAvailable = true;
+        mongoFailureReason = '';
+        return;
+      }
+    } catch (error) {
+      mongoAvailable = false;
+      mongoFailureReason = String(error?.message || error || 'MongoDB unavailable.');
+      console.warn('[Stepper] MongoDB write failed; using JSON storage fallback.', mongoFailureReason);
+    }
   }
+  await ensureDb();
+  const data = JSON.stringify(normalized, null, 2);
+  writeQueue = writeQueue.then(async () => {
+    const uniqueTempPath = `${dbPath}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
+    try {
+      try {
+        await fs.copyFile(dbPath, dbBackupPath);
+      } catch {}
+      await fs.writeFile(uniqueTempPath, data, 'utf8');
+      await fs.rename(uniqueTempPath, dbPath);
+      try {
+        await fs.copyFile(dbPath, dbBackupPath);
+      } catch {}
+    } finally {
+      try { await fs.unlink(uniqueTempPath); } catch {}
+    }
+  });
+  return writeQueue;
 }
 
 
@@ -1406,7 +1527,10 @@ app.get("/api/health", async (_req, res) => {
     googleEnabled: !!googleClientId,
     openaiEnabled: !!openaiClient,
     geminiEnabled: !!geminiApiKey,
-    cloudStorage: "json-file",
+    cloudStorage: mongoAvailable ? "mongodb" : (mongoUri ? "json-file-fallback" : "json-file"),
+    mongoConfigured: !!mongoUri,
+    mongoAvailable,
+    mongoFailureReason: mongoAvailable ? "" : mongoFailureReason,
     onlineCount: getOnlineUsers(db).length,
     danceCount: Array.isArray(db.danceRegistry) ? db.danceRegistry.length : 0,
     glossaryCount: Array.isArray(db.approvedGlossarySteps) ? db.approvedGlossarySteps.length : 0
@@ -1420,7 +1544,10 @@ app.get("/api/auth/config", (_req, res) => {
     googleClientId: googleClientId || "",
     openaiEnabled: !!openaiClient,
     geminiEnabled: !!geminiApiKey,
-    cloudStorage: "json-file",
+    cloudStorage: mongoAvailable ? "mongodb" : (mongoUri ? "json-file-fallback" : "json-file"),
+    mongoConfigured: !!mongoUri,
+    mongoAvailable,
+    mongoFailureReason: mongoAvailable ? "" : mongoFailureReason,
     authMode: googleClientId ? "google-id-token" : "none",
     adminEmail,
     onlineWindowMs,
