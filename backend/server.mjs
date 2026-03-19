@@ -3,6 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import OpenAI from "openai";
 import { OAuth2Client } from "google-auth-library";
+import pdfParse from "pdf-parse";
 import { promises as fs } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -166,6 +167,117 @@ async function runSiteHelperAI({ system, prompt, history = [], preferredModel = 
   throw lastError || new Error('AI request failed.');
 }
 
+
+function safeJsonParse(value, fallback = null) {
+  try { return JSON.parse(String(value || '')); } catch { return fallback; }
+}
+
+function makeStepNameFromDescription(description = '') {
+  const text = String(description || '').replace(/\s+/g, ' ').trim();
+  if (!text) return 'Imported Step';
+  const chunk = text.split(/[,.]/)[0].trim();
+  const words = chunk.split(/\s+/).slice(0, 6);
+  return words.join(' ') || 'Imported Step';
+}
+
+function parseStepsheetTextFallback(sourceText = '') {
+  const text = String(sourceText || '').replace(/\r/g, '');
+  const lines = text.split('\n').map(line => line.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const title = lines.find(line => line.length > 2 && !/^count\b/i.test(line) && !/^wall\b/i.test(line) && !/^level\b/i.test(line)) || 'Imported Dance';
+  const countMatch = text.match(/\bcount\s*:?\s*(\d{1,3})/i);
+  const wallMatch = text.match(/\bwall\s*:?\s*([^\n]+)/i);
+  const levelMatch = text.match(/\blevel\s*:?\s*([^\n]+)/i);
+  const choreographerMatch = text.match(/\bchoreographer\s*:?\s*([^\n]+)/i);
+  const musicMatch = text.match(/\bmusic\s*:?\s*([^\n]+)/i);
+  const sections = [];
+  let current = { id: 'section-1', title: 'Section 1', steps: [] };
+  let sectionIndex = 1;
+  const stepLineRegex = /^([\d&,+\-–\sa-zA-Z]+)\s*[:.\-–]\s*(.+)$/;
+
+  for (const line of lines) {
+    if (/^(section|part|tag|bridge)\b/i.test(line)) {
+      if (current.steps.length) sections.push(current);
+      sectionIndex = sections.length + 1;
+      current = { id: `section-${sectionIndex}`, title: line, steps: [] };
+      continue;
+    }
+    const match = line.match(stepLineRegex);
+    if (!match) continue;
+    const count = match[1].trim().replace(/\s+/g, ' ');
+    const description = match[2].trim();
+    current.steps.push({
+      id: `step-${sectionIndex}-${current.steps.length + 1}`,
+      type: 'step',
+      count,
+      name: makeStepNameFromDescription(description),
+      description,
+      foot: /\bleft\b|\bL\b/.test(description) ? 'L' : /\bright\b|\bR\b/.test(description) ? 'R' : 'None',
+      weight: !/without transferring weight|no weight/i.test(description)
+    });
+  }
+
+  if (current.steps.length) sections.push(current);
+  if (!sections.length) {
+    const genericSteps = lines.slice(0, 24).map((line, index) => ({
+      id: `step-1-${index + 1}`,
+      type: 'step',
+      count: String(index + 1),
+      name: makeStepNameFromDescription(line),
+      description: line,
+      foot: 'None',
+      weight: true
+    }));
+    sections.push({ id: 'section-1', title: 'Section 1', steps: genericSteps });
+  }
+
+  return {
+    meta: {
+      title,
+      counts: countMatch ? String(countMatch[1]).trim() : '',
+      walls: wallMatch ? String(wallMatch[1]).trim().split(/\s+/).slice(0, 4).join(' ') : '',
+      level: levelMatch ? String(levelMatch[1]).trim() : '',
+      choreographer: choreographerMatch ? String(choreographerMatch[1]).trim() : '',
+      music: musicMatch ? String(musicMatch[1]).trim() : ''
+    },
+    sections,
+    tags: []
+  };
+}
+
+function sanitizeImportedDanceShape(payload = {}) {
+  const meta = payload && typeof payload.meta === 'object' ? payload.meta : {};
+  const rawSections = Array.isArray(payload?.sections) ? payload.sections : [];
+  const sections = rawSections.map((section, sectionIndex) => ({
+    id: String(section?.id || `section-${sectionIndex + 1}`),
+    title: String(section?.title || `Section ${sectionIndex + 1}`).trim() || `Section ${sectionIndex + 1}`,
+    steps: (Array.isArray(section?.steps) ? section.steps : []).map((step, stepIndex) => ({
+      id: String(step?.id || `step-${sectionIndex + 1}-${stepIndex + 1}`),
+      type: 'step',
+      count: String(step?.count || '').trim(),
+      name: String(step?.name || makeStepNameFromDescription(step?.description || '')).trim() || 'Imported Step',
+      description: String(step?.description || '').trim(),
+      foot: ['L','R','Both','None'].includes(String(step?.foot || '').trim()) ? String(step.foot).trim() : 'None',
+      weight: step?.weight !== false,
+      note: String(step?.note || '').trim(),
+      showNote: !!step?.showNote
+    }))
+  })).filter(section => section.steps.length);
+  return {
+    meta: {
+      title: String(meta?.title || '').trim(),
+      choreographer: String(meta?.choreographer || '').trim(),
+      country: String(meta?.country || '').trim(),
+      level: String(meta?.level || '').trim(),
+      counts: String(meta?.counts || '').trim(),
+      walls: String(meta?.walls || '').trim(),
+      music: String(meta?.music || '').trim(),
+      type: String(meta?.type || '8-count').trim() || '8-count'
+    },
+    sections: sections.length ? sections : parseStepsheetTextFallback('').sections,
+    tags: []
+  };
+}
+
 function getUserMembership(bucket, profile = null) {
   const current = bucket && bucket.membership && typeof bucket.membership === 'object' ? bucket.membership : {};
   const admin = isAdminProfile(profile || bucket?.profile, null) || String(bucket?.role || '').trim().toLowerCase() === 'admin';
@@ -324,7 +436,7 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
-app.use(express.json({ limit: "4mb" }));
+app.use(express.json({ limit: "20mb" }));
 
 function emptyDb() {
   return {
@@ -2152,6 +2264,48 @@ app.delete('/api/admin/site-memory/:id', requireAdmin, async (req, res) => {
   db.siteMemory = (Array.isArray(db.siteMemory) ? db.siteMemory : []).filter(item => String(item?.id || '') !== id);
   await writeDb(db);
   res.json({ ok:true, items: db.siteMemory });
+});
+
+
+app.post('/api/ai/import-stepsheet', async (req, res) => {
+  try {
+    const base64 = String(req.body?.fileBase64 || '').trim();
+    if (!base64) return res.status(400).json({ ok: false, error: 'No PDF file was supplied.' });
+    const filename = String(req.body?.filename || 'stepsheet.pdf').trim() || 'stepsheet.pdf';
+    const buffer = Buffer.from(base64, 'base64');
+    if (!buffer.length) return res.status(400).json({ ok: false, error: 'The uploaded PDF looked empty.' });
+    const parsed = await pdfParse(buffer);
+    const rawText = String(parsed?.text || '').replace(/ /g, ' ').trim();
+    if (!rawText) return res.status(400).json({ ok: false, error: 'This PDF did not give up readable text.' });
+
+    const fallback = parseStepsheetTextFallback(rawText);
+    let imported = fallback;
+    let provider = 'fallback';
+    try {
+      const system = [
+        'You turn line-dance stepsheet text into strict JSON for a dance editor.',
+        'Return JSON only. No markdown.',
+        'Shape: {"meta":{"title":"","choreographer":"","country":"","level":"","counts":"","walls":"","music":"","type":"8-count"},"sections":[{"title":"Section 1","steps":[{"count":"1","name":"","description":"","foot":"L|R|Both|None","weight":true}]}],"tags":[]}',
+        'Keep the original wording as much as possible. Make step names short and natural.',
+        'If unsure, leave fields blank rather than inventing facts.'
+      ].join(' ');
+      const prompt = `Filename: ${filename}
+
+Stepsheet text:
+${rawText.slice(0, 24000)}`;
+      const ai = await runSiteHelperAI({ system, prompt, history: [], preferredModel: 'gemini' });
+      const parsedJson = safeJsonParse(ai?.text, null);
+      if (parsedJson && typeof parsedJson === 'object') {
+        imported = sanitizeImportedDanceShape(parsedJson);
+        provider = String(ai?.provider || 'ai');
+      }
+    } catch {}
+
+    return res.json({ ok: true, provider, data: sanitizeImportedDanceShape(imported), extractedText: rawText.slice(0, 5000) });
+  } catch (error) {
+    console.error('[Stepper] PDF import failed:', error);
+    return res.status(error?.status || 500).json({ ok: false, error: error?.message || 'PDF import failed.' });
+  }
 });
 
 app.post('/api/ai/dance-tools', requireGoogleUser, async (req, res) => {
