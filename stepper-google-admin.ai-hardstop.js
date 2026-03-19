@@ -3446,7 +3446,12 @@ Newest user question: ${question}`;
   function getStepRowElement(target){
     let node = target instanceof Element ? target : null;
     while (node && node !== document.body) {
-      if (node.querySelector && node.querySelector('input[placeholder="Move Name"]') && node.querySelector('input[placeholder="Move details..."]')) return node;
+      if (node.querySelector) {
+        const hasMoveInputs = node.querySelector('input[placeholder="Move Name"]') && node.querySelector('input[placeholder="Move details..."]');
+        const hasStepShape = node.querySelector('input[placeholder="1"]') && node.querySelector('select') && node.querySelector('button[title],button[aria-haspopup],button svg');
+        const hasDisplayedStepShape = node.querySelector('select') && node.querySelector('input[type="checkbox"]') && node.textContent && /(Duplicate \(Smart\)|Replace Move|Syncopate Count|Remove)/.test(document.body.textContent || '') && /[A-Za-z]/.test(node.textContent || '');
+        if (hasMoveInputs || hasStepShape || hasDisplayedStepShape) return node;
+      }
       node = node.parentElement;
     }
     return null;
@@ -3454,14 +3459,19 @@ Newest user question: ${question}`;
 
   function getStepRowPayload(row){
     if (!row) return null;
-    const nameEl = row.querySelector('input[placeholder="Move Name"]');
-    const descEl = row.querySelector('input[placeholder="Move details..."]');
-    const countEl = row.querySelector('input[placeholder="1"]');
+    const inputByPlaceholder = (value) => row.querySelector(`input[placeholder="${value}"]`);
+    const nameEl = inputByPlaceholder('Move Name');
+    const descEl = inputByPlaceholder('Move details...');
+    const countEl = inputByPlaceholder('1');
     const footEl = row.querySelector('select');
+    const textLines = String(row.textContent || '').split(/\n+/).map((line) => line.trim()).filter(Boolean);
+    const fallbackCount = textLines[0] || '';
+    const fallbackName = textLines[1] || textLines[0] || '';
+    const fallbackDescription = textLines[2] || '';
     const payload = {
-      name: String(nameEl && nameEl.value || '').trim(),
-      description: String(descEl && descEl.value || '').trim(),
-      counts: String(countEl && countEl.value || '').trim() || '1',
+      name: String(nameEl && nameEl.value || fallbackName || '').trim(),
+      description: String(descEl && descEl.value || fallbackDescription || '').trim(),
+      counts: String(countEl && countEl.value || fallbackCount || '').trim() || '1',
       foot: String(footEl && footEl.value || 'Either').trim() || 'Either'
     };
     if (!payload.name || !payload.description) return null;
@@ -3500,20 +3510,25 @@ Newest user question: ${question}`;
   }
 
   function injectGlossaryContextAction(){
-    const menus = Array.from(document.querySelectorAll('div.fixed.inset-0.z-50.print\:hidden, div.fixed.inset-0.z-50'));
-    menus.forEach((overlay) => {
-      const menu = overlay.querySelector('button');
-      if (!menu) return;
-      if (!overlay.textContent || !overlay.textContent.includes('Duplicate (Smart)') || !overlay.textContent.includes('Replace Move')) return;
+    if (!lastGlossaryContextTarget || !isEditedGlossaryRow(lastGlossaryContextTarget)) return;
+    const candidateRoots = Array.from(document.querySelectorAll('body *')).filter((node) => {
+      if (!(node instanceof HTMLElement)) return false;
+      const text = String(node.textContent || '').trim();
+      if (!text || !text.includes('Duplicate (Smart)') || !text.includes('Replace Move') || !text.includes('Remove')) return false;
+      const buttons = Array.from(node.querySelectorAll('button')).filter((btn) => String(btn.textContent || '').trim());
+      return buttons.length >= 4;
+    });
+    candidateRoots.forEach((overlay) => {
       if (overlay.querySelector('[data-action="send-step-admin-external"]')) return;
-      if (!lastGlossaryContextTarget || !isEditedGlossaryRow(lastGlossaryContextTarget)) return;
-      const removeBtn = Array.from(overlay.querySelectorAll('button')).find((btn) => String(btn.textContent || '').trim() === 'Remove');
-      const host = removeBtn && removeBtn.parentElement ? removeBtn.parentElement : overlay.querySelector('div.absolute');
-      if (!host) return;
+      const buttons = Array.from(overlay.querySelectorAll('button')).filter((btn) => String(btn.textContent || '').trim());
+      const removeBtn = buttons.find((btn) => String(btn.textContent || '').trim() === 'Remove');
+      const duplicateBtn = buttons.find((btn) => String(btn.textContent || '').trim() === 'Duplicate (Smart)');
+      if (!removeBtn || !duplicateBtn) return;
+      const host = removeBtn.parentElement || overlay;
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.setAttribute('data-action', 'send-step-admin-external');
-      btn.className = removeBtn ? removeBtn.className : 'w-full text-left px-4 py-3';
+      btn.className = removeBtn.className || duplicateBtn.className || 'w-full text-left px-4 py-3';
       btn.innerHTML = '<span style="display:inline-flex;align-items:center;gap:.7rem;width:100%;"><span style="font-size:18px;line-height:1;">✉</span><span style="font-weight:700;">Send step to admin</span></span>';
       btn.addEventListener('click', (event) => {
         event.preventDefault();
@@ -3522,10 +3537,10 @@ Newest user question: ${question}`;
           try { overlay.dispatchEvent(new MouseEvent('click', { bubbles: true })); } catch {}
         });
       });
-      const separator = host.ownerDocument.createElement('div');
+      const separator = document.createElement('div');
       separator.className = 'my-1 h-px bg-black/10 dark:bg-white/10';
-      host.insertBefore(separator, removeBtn || null);
-      host.insertBefore(btn, removeBtn || null);
+      host.insertBefore(separator, removeBtn);
+      host.insertBefore(btn, removeBtn);
     });
   }
 
