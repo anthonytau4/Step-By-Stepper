@@ -3486,7 +3486,8 @@ Newest user question: ${question}`;
       isModeratorSession,
       isAdminSession,
       applyStepToCurrentWorksheet,
-      autoGenerateCountsForWorksheet
+      autoGenerateCountsForWorksheet,
+      requestGlossaryStep
     };
   };
 
