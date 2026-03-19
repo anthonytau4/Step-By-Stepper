@@ -1673,11 +1673,11 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       </div>
       <div class="p-6 sm:p-8 space-y-5">
         <div class="rounded-3xl border p-5 sm:p-6 ${theme.soft}">
-          <p class="text-base sm:text-lg font-bold leading-relaxed">Import a stepsheet PDF and Step by Stepper will read the dance, build the title, music, level, counts, walls and sections, then load them straight into your dance so the Sheet and Build helper stay matched.</p>
-          <p class="mt-3 text-sm ${theme.subtle}">Go to <strong>Sheet</strong>, open <strong>PDF Import AI</strong>, choose your PDF, and it will fill the dance in for you. When you are signed in, the smart import can also send useful glossary ideas for review.</p>
+          <p class="text-base sm:text-lg font-bold leading-relaxed">Save a stepsheet as PDF or copy it into Docs first, then upload it here and Step by Stepper will read the dance into your Sheet and Build helper together.</p>
+          <p class="mt-3 text-sm ${theme.subtle}">Open <strong>Sheet</strong>, tap <strong>Import PDF</strong>, choose the file, and it will sort the title, music, level, counts, walls and sections into the matching places for you.</p>
           <div class="mt-5 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
-            <input type="file" accept="application/pdf" data-stepper-pdf-input class="block w-full text-sm">
-            <button type="button" data-stepper-pdf-import class="stepper-mini-btn ${theme.accent}" ${pdfImportBusy ? 'disabled' : ''}>${pdfImportBusy ? 'Importing…' : 'Import PDF into Editor'}</button>
+            <label class="stepper-mini-btn ${theme.button}" style="display:inline-flex;align-items:center;gap:.55rem;justify-content:center;"><span class="stepper-panel-icon">${iconUploadCloud()}</span><span>Choose PDF</span><input type="file" accept="application/pdf" data-stepper-pdf-input class="hidden"></label>
+            <button type="button" data-stepper-pdf-import class="stepper-mini-btn ${theme.accent}" ${pdfImportBusy ? 'disabled' : ''}>${pdfImportBusy ? 'Importing…' : 'Import PDF'}</button>
           </div>
         </div>
       </div>
@@ -1866,15 +1866,20 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   }
 
   function ensureInlineHost(){
-    if (inlineHost) return inlineHost;
-    inlineHost = document.createElement('div');
-    inlineHost.id = INLINE_HOST_ID;
-    inlineHost.hidden = true;
-    inlineHost.className = 'max-w-4xl mx-auto px-3 sm:px-4 pt-4 sm:pt-6 pb-0 print:hidden';
-    inlineHost.innerHTML = `<div class="space-y-5"><section id="${CHOREO_PANEL_ID}"></section><section id="${SETTINGS_PANEL_ID}"></section></div>`;
-    if (mainEl && mainEl.parentNode) {
+    if (!inlineHost) inlineHost = document.getElementById(INLINE_HOST_ID);
+    if (!inlineHost) {
+      inlineHost = document.createElement('div');
+      inlineHost.id = INLINE_HOST_ID;
+      inlineHost.hidden = true;
+      inlineHost.className = 'max-w-4xl mx-auto px-3 sm:px-4 pt-4 sm:pt-6 pb-0 print:hidden';
+      inlineHost.innerHTML = `<div class="space-y-5"><section id="${CHOREO_PANEL_ID}"></section><section id="${SETTINGS_PANEL_ID}"></section></div>`;
+    }
+    if (!inlineHost.querySelector('#' + CHOREO_PANEL_ID) || !inlineHost.querySelector('#' + SETTINGS_PANEL_ID)) {
+      inlineHost.innerHTML = `<div class="space-y-5"><section id="${CHOREO_PANEL_ID}"></section><section id="${SETTINGS_PANEL_ID}"></section></div>`;
+    }
+    if (mainEl && mainEl.parentNode && inlineHost.parentNode !== mainEl.parentNode) {
       mainEl.parentNode.insertBefore(inlineHost, mainEl);
-    } else {
+    } else if (!inlineHost.parentNode) {
       document.body.appendChild(inlineHost);
     }
     return inlineHost;
@@ -1882,13 +1887,14 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
 
   function themeClasses(){
     const dark = isDarkMode();
+    const inverted = !dark;
     return {
-      dark,
-      shell: dark ? 'bg-neutral-900 border-neutral-800 text-neutral-100' : 'bg-neutral-50 border-neutral-200 text-neutral-900',
-      panel: dark ? 'bg-neutral-950 border-neutral-800 text-neutral-100' : 'bg-white border-neutral-200 text-neutral-900',
-      soft: dark ? 'bg-neutral-900/80 border-neutral-800 text-neutral-300' : 'bg-white border-neutral-200 text-neutral-700',
-      button: dark ? 'bg-neutral-900 border-neutral-700 text-neutral-100' : 'bg-white border-neutral-200 text-neutral-900',
-      subtle: dark ? 'text-neutral-400' : 'text-neutral-500'
+      dark: inverted,
+      shell: inverted ? 'bg-neutral-900 border-neutral-800 text-neutral-100' : 'bg-neutral-50 border-neutral-200 text-neutral-900',
+      panel: inverted ? 'bg-neutral-950 border-neutral-800 text-neutral-100' : 'bg-white border-neutral-200 text-neutral-900',
+      soft: inverted ? 'bg-neutral-900/80 border-neutral-800 text-neutral-300' : 'bg-white border-neutral-200 text-neutral-700',
+      button: inverted ? 'bg-neutral-900 border-neutral-700 text-neutral-100' : 'bg-white border-neutral-200 text-neutral-900',
+      subtle: inverted ? 'text-neutral-400' : 'text-neutral-500'
     };
   }
 
@@ -2948,15 +2954,16 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
 
   function themeClasses(){
     const dark = isDarkMode();
+    const inverted = !dark;
     return {
-      dark,
-      shell: dark ? 'bg-neutral-900 border-neutral-800 text-neutral-100' : 'bg-neutral-50 border-neutral-200 text-neutral-900',
-      panel: dark ? 'bg-neutral-950 border-neutral-800 text-neutral-100' : 'bg-white border-neutral-200 text-neutral-900',
-      soft: dark ? 'bg-neutral-900/80 border-neutral-800 text-neutral-300' : 'bg-white border-neutral-200 text-neutral-700',
-      button: dark ? 'bg-neutral-900 border-neutral-700 text-neutral-100' : 'bg-white border-neutral-200 text-neutral-900',
-      subtle: dark ? 'text-neutral-400' : 'text-neutral-500',
-      accent: dark ? 'bg-indigo-500 text-neutral-950' : 'bg-indigo-600 text-white',
-      orange: dark ? 'bg-orange-500 text-neutral-950' : 'bg-orange-500 text-white'
+      dark: inverted,
+      shell: inverted ? 'bg-neutral-900 border-neutral-800 text-neutral-100' : 'bg-neutral-50 border-neutral-200 text-neutral-900',
+      panel: inverted ? 'bg-neutral-950 border-neutral-800 text-neutral-100' : 'bg-white border-neutral-200 text-neutral-900',
+      soft: inverted ? 'bg-neutral-900/80 border-neutral-800 text-neutral-300' : 'bg-white border-neutral-200 text-neutral-700',
+      button: inverted ? 'bg-neutral-900 border-neutral-700 text-neutral-100' : 'bg-white border-neutral-200 text-neutral-900',
+      subtle: inverted ? 'text-neutral-400' : 'text-neutral-500',
+      accent: inverted ? 'bg-orange-400 text-neutral-950 border-orange-300' : 'bg-orange-500 text-white border-orange-300',
+      orange: inverted ? 'bg-rose-300 text-neutral-950 border-rose-200' : 'bg-rose-500 text-white border-rose-300'
     };
   }
 
@@ -3264,36 +3271,38 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     const style = document.createElement('style');
     style.id = 'stepper-phrased-tools-style';
     style.textContent = `
+      :root { --stepper-brand-orange:#f97316; --stepper-brand-peach:#fb923c; --stepper-brand-rose:#fb7185; --stepper-brand-ink:#171717; --stepper-brand-cream:#fff7ed; }
       #root, #stepper-static-startup, #root button, #root input, #root select, #root textarea { font-family: var(--stepper-font-family, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
       .stepper-extra-tab-icon, .stepper-setting-icon, .stepper-panel-icon { display:inline-flex; align-items:center; justify-content:center; width:1.45rem; height:1.45rem; }
       .stepper-extra-tab-icon svg, .stepper-setting-icon svg, .stepper-panel-icon svg { width:100%; height:100%; }
       .stepper-note-badge { display:inline-flex; align-items:center; justify-content:center; width:2rem; height:2rem; border-radius:.9rem; border:1px solid rgba(255,255,255,.1); box-shadow:0 10px 24px rgba(15,23,42,.18), inset 0 1px 0 rgba(255,255,255,.16); }
       .stepper-note-badge svg { width:1rem; height:1rem; }
-      .stepper-note-badge.is-stepper { background:linear-gradient(180deg,#1f2a44 0%,#312e81 100%); color:#f8fafc; }
+      .stepper-note-badge.is-stepper { background:linear-gradient(135deg,var(--stepper-brand-orange) 0%,var(--stepper-brand-rose) 100%); color:#fff7ed; }
       .stepper-note-badge.is-gold { background:linear-gradient(180deg,#facc15 0%,#f59e0b 100%); color:#5b3200; border-color:rgba(180,83,9,.28); box-shadow:0 10px 24px rgba(180,83,9,.2), inset 0 1px 0 rgba(255,255,255,.32); }
       .stepper-part-pill { display:inline-flex; align-items:center; gap:.45rem; padding:.55rem .8rem; border-radius:999px; font-weight:800; font-size:.76rem; letter-spacing:.08em; text-transform:uppercase; }
-      .stepper-mini-btn { border-radius:999px; padding:.55rem .9rem; font-weight:800; font-size:.72rem; letter-spacing:.08em; text-transform:uppercase; border:1px solid rgba(99,102,241,.25); }
+      .stepper-mini-btn { border-radius:999px; padding:.62rem 1rem; font-weight:900; font-size:.72rem; letter-spacing:.08em; text-transform:uppercase; border:1px solid rgba(249,115,22,.28); box-shadow:0 10px 24px rgba(249,115,22,.12); }
       .stepper-tools-tab { border-radius:999px; padding:.55rem .9rem; font-weight:800; font-size:.72rem; letter-spacing:.08em; text-transform:uppercase; border:1px solid transparent; }
       .stepper-tools-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:1rem; }
       .stepper-field label { display:block; font-size:.68rem; font-weight:900; letter-spacing:.14em; text-transform:uppercase; margin-bottom:.45rem; }
       .stepper-field input, .stepper-field select { width:100%; border-radius:1rem; border:1px solid rgba(148,163,184,.35); padding:.85rem .95rem; background:rgba(255,255,255,.9); color:#111827; }
       .dark .stepper-field input, .dark .stepper-field select { background:rgba(23,23,23,.9); color:#f5f5f5; border-color:rgba(64,64,64,.9); }
-      .stepper-font-choice { width:100%; text-align:left; border-radius:1.35rem; border:1px solid rgba(99,102,241,.18); padding:1rem 1rem .95rem; transition:transform .15s ease, border-color .15s ease, box-shadow .15s ease; }
-      .stepper-font-choice:hover { transform:translateY(-1px); box-shadow:0 10px 24px rgba(79,70,229,.12); }
+      .stepper-font-choice { width:100%; text-align:left; border-radius:1.35rem; border:1px solid rgba(249,115,22,.22); padding:1rem 1rem .95rem; transition:transform .15s ease, border-color .15s ease, box-shadow .15s ease; }
+      .stepper-font-choice:hover { transform:translateY(-1px); box-shadow:0 10px 24px rgba(249,115,22,.12); }
       .stepper-font-choice strong { display:block; font-size:1rem; line-height:1.15; }
       .stepper-font-choice span { display:block; margin-top:.3rem; font-size:.8rem; opacity:.8; }
-      .stepper-font-choice[data-active="true"] { border-color:rgba(79,70,229,.72); box-shadow:0 0 0 2px rgba(99,102,241,.18); }
+      .stepper-font-choice[data-active="true"] { border-color:rgba(249,115,22,.72); box-shadow:0 0 0 2px rgba(251,113,133,.18); }
       .stepper-seq-row { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:.65rem; align-items:center; }
       .stepper-danger-btn { border-radius:999px; padding:.55rem .75rem; font-weight:900; text-transform:uppercase; letter-spacing:.08em; font-size:.7rem; }
       #${MENU_ID} { position:fixed; z-index:9999; min-width:220px; border-radius:18px; padding:.55rem; box-shadow:0 18px 36px rgba(0,0,0,.28); }
       #${MENU_ID}[hidden] { display:none; }
       #${MENU_ID} button { width:100%; text-align:left; border-radius:14px; padding:.85rem .95rem; font-weight:800; }
       .stepper-section-header-partable { position:relative; }
-      .stepper-section-part-btn { position:absolute; right:2.75rem; top:50%; transform:translateY(-50%); font-size:.58rem; letter-spacing:.12em; text-transform:uppercase; padding:.32rem .55rem; border-radius:999px; background:rgba(99,102,241,.14); color:#4f46e5; font-weight:900; border:0; }
+      .stepper-section-part-btn { position:absolute; right:2.75rem; top:50%; transform:translateY(-50%); font-size:.58rem; letter-spacing:.12em; text-transform:uppercase; padding:.32rem .55rem; border-radius:999px; background:rgba(249,115,22,.14); color:var(--stepper-brand-orange); font-weight:900; border:1px solid rgba(249,115,22,.18); }
       #${PREVIEW_NOTE_ID} { margin-top:1rem; }
-      .stepper-help-fab { position:fixed; left:16px; bottom:16px; z-index:2147483500; width:50px; height:50px; border-radius:999px; border:0; background:#4f46e5; color:#fff; font-size:26px; font-weight:900; box-shadow:0 16px 28px rgba(0,0,0,.28); }
+      .stepper-help-fab { position:fixed; left:16px; bottom:16px; z-index:2147483500; width:50px; height:50px; border-radius:999px; border:0; background:linear-gradient(135deg,var(--stepper-brand-orange) 0%,var(--stepper-brand-rose) 100%); color:#fff7ed; font-size:26px; font-weight:900; box-shadow:0 16px 28px rgba(0,0,0,.28); }
       body { background:#f3f4f6; }
-      .dark body, body.dark { background:#0a0a0a; }
+      body[data-stepper-invert-mode] { background:#0a0a0a; }
+      body[data-stepper-invert-mode-dark] { background:#f3f4f6; }
       .stepper-help-panel { position:fixed; left:16px; bottom:76px; z-index:2147483499; width:min(92vw, 360px); max-height:min(70vh, 520px); overflow:auto; border-radius:24px; padding:18px; box-shadow:0 18px 40px rgba(0,0,0,.28); }
       .stepper-help-panel[hidden] { display:none !important; }
       .stepper-help-panel h3 { margin:0 0 10px; font-size:1.05rem; font-weight:900; }
@@ -3310,11 +3319,27 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   function applyFontSettings(){
     const settings = getSettings();
     document.documentElement.style.setProperty('--stepper-font-family', FONT_FAMILIES[settings.fontFamily] || FONT_FAMILIES.system);
+    applyModeBranding();
+  }
+
+  function applyModeBranding(){
+    const dark = isDarkMode();
+    document.body.toggleAttribute('data-stepper-invert-mode', !dark);
+    document.body.toggleAttribute('data-stepper-invert-mode-dark', dark);
   }
 
   function ensureInlineHost(){
-    const host = document.getElementById('stepper-editor-inline-host');
-    if (!host) return null;
+    let host = document.getElementById('stepper-editor-inline-host');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'stepper-editor-inline-host';
+      host.hidden = true;
+      host.className = 'max-w-4xl mx-auto px-3 sm:px-4 pt-4 sm:pt-6 pb-0 print:hidden';
+      host.innerHTML = `<div id="stepper-inline-tools-stack" class="space-y-5 mt-5"><section id="${PHR_PANEL_ID}"></section><section id="${SETTINGS_PANEL_ID}"></section></div>`;
+      const main = document.querySelector('main');
+      if (main && main.parentNode) main.parentNode.insertBefore(host, main);
+      else document.body.appendChild(host);
+    }
     let stack = document.getElementById('stepper-inline-tools-stack');
     if (!stack) {
       stack = document.createElement('div');
@@ -3894,6 +3919,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     renderPhrasedPanel();
     renderChoreoPanel();
     renderSettingsPanel();
+    renderPdfImportPanel();
     wireManualCountsAndWallsOverrides();
     const syncedStats = syncAutoCountsAndWalls(false);
     if (syncedStats) {
@@ -4230,7 +4256,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     const note = document.createElement('div');
     note.setAttribute('data-stepper-note', 'pdf-import-ai');
     note.className = `rounded-2xl border px-4 py-4 flex gap-3 ${theme.dark ? 'border-neutral-800 bg-neutral-950' : 'border-neutral-200 bg-white'}`;
-    note.innerHTML = `<div class="mt-0.5 shrink-0">${renderWhatsNewBadge(iconUploadCloud())}</div><p class="font-medium leading-relaxed">Added PDF Import AI on the Sheet page. Open <strong>PDF Import AI</strong>, choose a stepsheet PDF, and it will load the dance into your sheet and Build helper together. When it spots useful step ideas, it can also send them in for Glossary+ review.</p>`;
+    note.innerHTML = `<div class="mt-0.5 shrink-0">${renderWhatsNewBadge(iconUploadCloud())}</div><p class="font-medium leading-relaxed">Added PDF Import AI on the Sheet page. Open <strong>Sheet</strong>, choose <strong>Import PDF</strong>, upload a stepsheet you saved as PDF or copied into Docs first, and it will load the dance into your sheet and Build helper together.</p>`;
     list.insertBefore(note, list.firstChild || null);
   }
 
@@ -4238,6 +4264,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     if (maybeRestoreSavedForLaterOnBoot()) return;
     ensureCustomStyles();
     applyFontSettings();
+    applyModeBranding();
     ensureInlineHost();
     renderCustomPanels();
     decorateSectionHeaders();
@@ -4253,6 +4280,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       requestAnimationFrame(() => {
         queued = false;
         applyFontSettings();
+        applyModeBranding();
         renderCustomPanels();
         decorateSectionHeaders();
         injectWhatsNewNotes();
