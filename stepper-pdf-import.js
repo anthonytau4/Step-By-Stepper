@@ -13,11 +13,33 @@
     return String(value || '').trim().replace(/\/+$/, '');
   }
 
+  const DATA_KEY = 'linedance_builder_data_v13';
+
   function rememberApiBase(value) {
     const normalized = normalizeApiBase(value);
     if (!normalized) return;
     window.STEPPER_API_BASE = normalized;
     try { localStorage.setItem(API_BASE_KEY, normalized); } catch (_) {}
+  }
+
+  function makeId() {
+    return Math.random().toString(36).slice(2, 11);
+  }
+
+  function readEditorSnapshot() {
+    try {
+      const raw = localStorage.getItem(DATA_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function writeEditorSnapshot(snapshot) {
+    localStorage.setItem(DATA_KEY, JSON.stringify(snapshot));
+    try {
+      window.dispatchEvent(new StorageEvent('storage', { key: DATA_KEY, newValue: JSON.stringify(snapshot) }));
+    } catch (_) {}
   }
 
   function getApiBaseCandidates(preferred) {
@@ -64,7 +86,7 @@
 
         if (resp.ok && data && data.ok) {
           rememberApiBase(base);
-          return { endpoint, data };
+          return { base, endpoint, data };
         }
 
         const bodyPreview = data
@@ -90,6 +112,130 @@
     }
 
     throw lastError || new Error('Could not reach the PDF import backend.');
+  }
+
+
+  async function fetchJsonAcrossCandidates(path, preferredBase) {
+    const candidates = getApiBaseCandidates(preferredBase);
+    for (const base of candidates) {
+      const endpoint = base + path;
+      try {
+        const resp = await fetch(endpoint, { headers: { Accept: 'application/json' } });
+        const contentType = (resp.headers.get('content-type') || '').toLowerCase();
+        if (!resp.ok || !contentType.includes('application/json')) continue;
+        const data = await resp.json().catch(() => null);
+        if (data && data.ok) return { base, data };
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  async function enrichImportedData(data, preferredBase) {
+    const [glossaryResult, memoryResult] = await Promise.all([
+      fetchJsonAcrossCandidates('/api/glossary/steps', preferredBase),
+      fetchJsonAcrossCandidates('/api/site-memory', preferredBase)
+    ]);
+    const glossaryItems = glossaryResult && Array.isArray(glossaryResult.data.items) ? glossaryResult.data.items : [];
+    const siteMemory = memoryResult && Array.isArray(memoryResult.data.items) ? memoryResult.data.items : [];
+    const normalized = Object.assign({}, data, {
+      steps: normalizeImportedSteps(data.steps || [], glossaryItems, siteMemory)
+    });
+    return normalized;
+  }
+
+  function normalizeImportedSteps(steps, glossaryItems, siteMemory) {
+    const glossaryByName = new Map();
+    const glossaryByDescription = [];
+    (glossaryItems || []).forEach((item) => {
+      const nameKey = String(item && item.name || '').trim().toLowerCase();
+      const descKey = String(item && item.description || '').trim().toLowerCase();
+      if (nameKey && !glossaryByName.has(nameKey)) glossaryByName.set(nameKey, item);
+      if (descKey) glossaryByDescription.push([descKey, item]);
+    });
+
+    return (steps || []).map((step, index) => {
+      const rawName = String(step && step.name || '').trim();
+      const rawDescription = String(step && (step.description || step.name) || '').trim().replace(/\s+/g, ' ');
+      const match = glossaryByName.get(rawName.toLowerCase())
+        || glossaryByName.get(deriveStepName(rawDescription).toLowerCase())
+        || glossaryByDescription.find(([desc]) => desc === rawDescription.toLowerCase() || rawDescription.toLowerCase().includes(desc) || desc.includes(rawDescription.toLowerCase()));
+      const glossaryMatch = Array.isArray(match) ? match[1] : match;
+      const memoryHint = findRelevantSiteMemory(rawDescription, siteMemory);
+      const name = glossaryMatch && glossaryMatch.name ? glossaryMatch.name : deriveStepName(rawName || rawDescription);
+      const description = glossaryMatch && glossaryMatch.description ? glossaryMatch.description : rawDescription;
+      const foot = normalizeEditorFoot(step && step.foot || (glossaryMatch && glossaryMatch.foot) || inferFootFromText(description));
+      const counts = String(step && step.counts || (glossaryMatch && (glossaryMatch.counts || glossaryMatch.count)) || index + 1 || '1').trim() || '1';
+      return {
+        id: makeId(),
+        type: 'step',
+        count: counts,
+        counts,
+        name,
+        description,
+        foot,
+        weight: foot === 'L' || foot === 'R',
+        showNote: !!memoryHint,
+        note: memoryHint
+      };
+    });
+  }
+
+  function deriveStepName(text) {
+    const source = String(text || '').trim().replace(/\s+/g, ' ');
+    if (!source) return 'Imported Step';
+    const firstClause = source.split(/[.,;:]/)[0].trim();
+    const words = firstClause.split(/\s+/).slice(0, 6).map((word) => word.charAt(0).toUpperCase() + word.slice(1));
+    return words.join(' ') || 'Imported Step';
+  }
+
+  function inferFootFromText(text) {
+    const lower = String(text || '').toLowerCase();
+    if (lower.includes(' right ' ) || lower.startsWith('right ') || lower.endsWith(' right')) return 'R';
+    if (lower.includes(' left ') || lower.startsWith('left ') || lower.endsWith(' left')) return 'L';
+    if (lower.includes('both')) return 'Both';
+    return 'Either';
+  }
+
+  function normalizeEditorFoot(value) {
+    const lower = String(value || '').trim().toLowerCase();
+    if (lower === 'right' || lower === 'r') return 'R';
+    if (lower === 'left' || lower === 'l') return 'L';
+    if (lower === 'both') return 'Both';
+    return 'Either';
+  }
+
+  function findRelevantSiteMemory(description, items) {
+    const text = String(description || '').toLowerCase();
+    const memories = (items || []).map((item) => String(item && item.text || '').trim()).filter(Boolean);
+    const hit = memories.find((entry) => {
+      const lower = entry.toLowerCase();
+      return lower.includes('glossary') || lower.includes('counts') || lower.includes('foot') || lower.includes('write');
+    });
+    return hit && text ? `AI helper memory: ${hit.slice(0, 220)}` : '';
+  }
+
+  function buildEditorSnapshot(data) {
+    const existing = readEditorSnapshot() || {};
+    const meta = Object.assign({}, existing.meta || {}, {
+      title: String(data && data.title || '').trim(),
+      choreographer: String(data && data.choreographer || '').trim(),
+      music: String(data && data.music || '').trim(),
+      level: String(data && data.level || (existing.meta && existing.meta.level) || '').trim(),
+      counts: String(data && (data.count || data.counts) || (existing.meta && existing.meta.counts) || '').trim(),
+      walls: String(data && data.wall || (existing.meta && existing.meta.walls) || '').trim()
+    });
+    const importedSteps = Array.isArray(data && data.steps) ? data.steps : [];
+    const sections = [{
+      id: makeId(),
+      name: String(data && data.title || 'Imported PDF').trim(),
+      steps: importedSteps.length ? importedSteps : [{ id: makeId(), type: 'step', count: '', name: '', description: '', foot: 'Either', weight: false, showNote: false, note: '' }]
+    }];
+    return {
+      meta,
+      sections,
+      tags: [],
+      isDarkMode: !!existing.isDarkMode
+    };
   }
 
   let injected = false;
@@ -368,7 +514,7 @@
 
     try {
       const result = await requestPdfParse(formData);
-      const data = result.data;
+      const data = await enrichImportedData(result.data, result.base);
 
       parsedData = data;
       const n = (data.steps || []).length;
@@ -405,9 +551,13 @@
   function esc(str) { const d = document.createElement('div'); d.textContent = String(str || ''); return d.innerHTML; }
 
   function applyToEditor(data) {
+    const snapshot = buildEditorSnapshot(data);
+    writeEditorSnapshot(snapshot);
     window.__STEPPER_PDF_DATA = data;
     window.dispatchEvent(new CustomEvent('stepper-pdf-import', { detail: data }));
     tryDirectPopulate(data);
+    setStatus('success', 'Imported into the editor. Reloading with the new steps...');
+    setTimeout(() => window.location.reload(), 180);
   }
 
   function tryDirectPopulate(data) {
@@ -419,7 +569,6 @@
       if ((ph.includes('choreographer') || ph.includes('choreo') || nm.includes('choreographer')) && data.choreographer) setNative(input, data.choreographer);
       if ((ph.includes('music') || ph.includes('song') || nm.includes('music')) && data.music) setNative(input, data.music);
     });
-    showToast(data);
   }
 
   function setNative(el, val) {
