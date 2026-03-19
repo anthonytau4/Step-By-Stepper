@@ -88,6 +88,26 @@
     .stepper-static-startup__logo,.stepper-static-startup__playback-logo{width:min(34vw,140px);height:min(34vw,140px);}
   }
 </style>
+<script>
+(function(){
+  try {
+    var path = String(window.location.pathname || '/');
+    var basePath = path.endsWith('/') ? path : path.replace(/[^\/]*$/, '');
+    var absoluteBase = new URL(basePath || './', window.location.href).href;
+    window.__stepperAssetBaseHref = absoluteBase;
+    window.__stepperResolveAssetUrl = function(assetPath){
+      try { return new URL(String(assetPath || ''), window.__stepperAssetBaseHref || absoluteBase).href; }
+      catch (error) { return String(assetPath || ''); }
+    };
+    if (!document.querySelector('base[data-stepper-asset-base]')) {
+      var base = document.createElement('base');
+      base.setAttribute('data-stepper-asset-base', 'true');
+      base.href = absoluteBase;
+      document.head.appendChild(base);
+    }
+  } catch (error) {}
+})();
+</script>
 </head>
   <body>
 
@@ -527,9 +547,9 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   const STARTUP_BASE_MS = 1830;
   const STARTUP_MS = Math.max(STARTUP_BASE_MS + 220, STARTUP_AUDIO_MS + 260);
   const overlayId = 'stepper-snake-transition-overlay';
-  const transitionGifSrc = './stepper_loading_bar_dark_preview.gif';
-  const transitionEndFrameSrc = './stepper_loading_bar_dark_end.png';
-  const startupSongSrc = './startup-song.m4a';
+  const transitionGifSrc = window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./stepper_loading_bar_dark_preview.gif') : './stepper_loading_bar_dark_preview.gif';
+  const transitionEndFrameSrc = window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./stepper_loading_bar_dark_end.png') : './stepper_loading_bar_dark_end.png';
+  const startupSongSrc = window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./startup-song.m4a') : './startup-song.m4a';
   const TRANSITION_MESSAGE_SETS = {
     editor: [
       'Recalculating glossary',
@@ -2535,10 +2555,10 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
 
 
 
-<script src="./stepper-runtime-recovery.js?v=20260319-recovery-2"></script>
-<script src="./stepper-static-startup-fix.js?v=20260319-startup-fix-1"></script>
+<script src="./stepper-runtime-recovery.js?v=20260320-recovery-3"></script>
+<script src="./stepper-static-startup-fix.js?v=20260320-startup-fix-2"></script>
 <script src="./stepper-phrased-tools-fix.js?v=20260319-phrased-fix-1"></script>
-<script src="./stepper-route-paths.js?v=20260319-paths-phrased-1"></script>
+<script src="./stepper-route-paths.js?v=20260320-paths-2"></script>
 <script src="./stepper-editor-phrasing-repair.js?v=20260319-phrasing-repair-1"></script>
 
 <script>window.STEPPER_API_BASE = "https://step-by-stepper.onrender.com";</script>

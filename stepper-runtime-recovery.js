@@ -4,8 +4,8 @@
 
   const ROUTE_STORAGE_KEY = 'stepperRouteBootstrap';
   const overlayId = 'stepper-runtime-recovery-overlay';
-  const transitionGifSrc = './stepper_loading_bar_dark_preview.gif';
-  const transitionEndFrameSrc = './stepper_loading_bar_dark_end.png';
+  const transitionGifSrc = window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./stepper_loading_bar_dark_preview.gif') : './stepper_loading_bar_dark_preview.gif';
+  const transitionEndFrameSrc = window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./stepper_loading_bar_dark_end.png') : './stepper_loading_bar_dark_end.png';
   const TRANSITION_LABELS = {
     editor: 'Editor',
     preview: 'Sheet',

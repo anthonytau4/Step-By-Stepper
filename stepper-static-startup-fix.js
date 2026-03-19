@@ -5,7 +5,7 @@
   const STARTUP_FADE_MS = 340;
   function buildStartupAudio(){
     if (window.createAudioElement) {
-      const audio = window.createAudioElement(['./startup-song.mp3','./startup-song.m4a']);
+      const audio = window.createAudioElement([(window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./startup-song.mp3') : './startup-song.mp3'),(window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./startup-song.m4a') : './startup-song.m4a')]);
       audio.loop = false;
       audio.volume = 1;
       return audio;
@@ -13,7 +13,7 @@
     const audio = document.createElement('audio');
     audio.preload = 'auto';
     try { audio.playsInline = true; } catch {}
-    [['./startup-song.mp3','audio/mpeg'],['./startup-song.m4a','audio/mp4']].forEach(([src,type]) => {
+    [[(window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./startup-song.mp3') : './startup-song.mp3'),'audio/mpeg'],[(window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./startup-song.m4a') : './startup-song.m4a'),'audio/mp4']].forEach(([src,type]) => {
       const source = document.createElement('source');
       source.src = src;
       source.type = type;
