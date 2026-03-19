@@ -2536,6 +2536,40 @@
     prime();
   }
 
+  const isEditableElement = (el) => !!(el && (el.matches('input, textarea, select, [contenteditable="true"], [contenteditable=""]') || el.closest('input, textarea, select, [contenteditable="true"], [contenteditable=""]')));
+  const currentPageNode = () => {
+    if (!state || !state.activePage) return null;
+    if (state.activePage === 'signin') return document.getElementById(SIGNIN_PAGE_ID);
+    if (state.activePage === 'subscription') return document.getElementById(SUBSCRIPTION_PAGE_ID);
+    if (state.activePage === 'admin') return document.getElementById(ADMIN_PAGE_ID);
+    if (state.activePage === 'moderator') return document.getElementById(MODERATOR_PAGE_ID);
+    return null;
+  };
+  const pageHasDraftText = () => {
+    const page = currentPageNode();
+    const active = document.activeElement;
+    if (page && active && page.contains(active) && isEditableElement(active)) return true;
+    const scope = page || document;
+    return Array.from(scope.querySelectorAll('input:not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]), textarea, [contenteditable="true"], [contenteditable=""]')).some((el) => {
+      if (!el || !el.isConnected) return false;
+      const value = 'value' in el ? String(el.value || '') : String(el.textContent || '');
+      return value.trim().length > 0;
+    });
+  };
+  let renderPagesDelayTimer = null;
+  const requestRenderPages = (delay = 2000, force = false) => {
+    if (!force && pageHasDraftText()) {
+      if (renderPagesDelayTimer) clearTimeout(renderPagesDelayTimer);
+      renderPagesDelayTimer = setTimeout(() => requestRenderPages(delay, true), delay);
+      return;
+    }
+    if (renderPagesDelayTimer) {
+      clearTimeout(renderPagesDelayTimer);
+      renderPagesDelayTimer = null;
+    }
+    renderPages();
+  };
+
   setInterval(() => {
     if (!locateUi()) return;
     ensureHost();
@@ -2578,7 +2612,7 @@
   window.addEventListener('storage', () => {
     if (state.session && state.session.credential) syncCurrentDanceToBackend(false);
     state.savedDancesUiSignature = '';
-    renderPages();
+    requestRenderPages(2000, false);
   });
 
   async function refreshSubscription(){
@@ -3430,11 +3464,7 @@ Newest user question: ${question}`;
       isModeratorSession,
       isAdminSession,
       applyStepToCurrentWorksheet,
-      autoGenerateCountsForWorksheet,
-      authFetch,
-      requestGlossaryStep,
-      syncCurrentDanceToBackend,
-      saveChangesNow
+      autoGenerateCountsForWorksheet
     };
   };
 
@@ -3443,7 +3473,7 @@ Newest user question: ${question}`;
     if (__stepperLiveQueueRefreshBusy || !(state.session && state.session.credential)) return;
     __stepperLiveQueueRefreshBusy = true;
     refreshLiveQueues().then(() => {
-      if (state.activePage === 'admin' || state.activePage === 'moderator' || state.activePage === 'signin' || state.activePage === 'subscription') renderPages();
+      if (state.activePage === 'admin' || state.activePage === 'moderator' || state.activePage === 'signin' || state.activePage === 'subscription') requestRenderPages(2000, false);
     }).catch(() => {}).finally(() => { __stepperLiveQueueRefreshBusy = false; });
   }, LIVE_QUEUE_SYNC_INTERVAL_MS);
 

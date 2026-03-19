@@ -2,7 +2,6 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import OpenAI from "openai";
-import pdfParse from "pdf-parse";
 import { OAuth2Client } from "google-auth-library";
 import { promises as fs } from "fs";
 import path from "path";
@@ -325,7 +324,7 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
-app.use(express.json({ limit: "20mb" }));
+app.use(express.json({ limit: "4mb" }));
 
 function emptyDb() {
   return {
@@ -486,21 +485,29 @@ function syncAdminRegistry(db) {
   return db;
 }
 
-async function writeDb(payload) {
+let dbWriteQueue = Promise.resolve();
+
+async function performDbWrite(payload) {
   await ensureDb();
   const data = JSON.stringify(syncAdminRegistry(syncModeratorRegistry(syncAndPruneDb(payload))), null, 2);
+  const tempPath = `${dbPath}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
   try {
     try {
       await fs.copyFile(dbPath, dbBackupPath);
     } catch {}
-    await fs.writeFile(dbTempPath, data, 'utf8');
-    await fs.rename(dbTempPath, dbPath);
+    await fs.writeFile(tempPath, data, 'utf8');
+    await fs.rename(tempPath, dbPath);
     try {
       await fs.copyFile(dbPath, dbBackupPath);
     } catch {}
   } finally {
-    try { await fs.unlink(dbTempPath); } catch {}
+    try { await fs.unlink(tempPath); } catch {}
   }
+}
+
+async function writeDb(payload) {
+  dbWriteQueue = dbWriteQueue.then(() => performDbWrite(payload), () => performDbWrite(payload));
+  return dbWriteQueue;
 }
 
 
@@ -1170,82 +1177,6 @@ function normalizeGlossaryStepPayload(step, owner = {}) {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
-}
-
-
-function fallbackImportStepsheet(text = '') {
-  const clean = String(text || '').replace(/\r/g, '');
-  const lines = clean.split('\n').map(line => line.trim()).filter(Boolean);
-  const joined = lines.join('\n');
-  const title = lines[0] || 'Imported Dance';
-  const countsMatch = joined.match(/\bCount\s*:?\s*(\d{1,3})/i);
-  const wallsMatch = joined.match(/\bWall\s*:?\s*([0-9A-Za-z\-]+)/i);
-  const levelMatch = joined.match(/\bLevel\s*:?\s*([^\n]+)/i);
-  const musicMatch = joined.match(/\bMusic\s*:?\s*([^\n]+)/i);
-  const choreographerMatch = joined.match(/\bChoreographer\s*:?\s*([^\n]+)/i);
-  const countryMatch = joined.match(/\((NZ|AU|UK|US|CA|IE)\)/i);
-  const sections = [];
-  let current = null;
-  const sectionHeader = /^(Section\s+\d+|Tag\s*\d*|Bridge\s*\d*|Restart\s*\d*|Intro|Ending)\b[:\-]?\s*(.*)$/i;
-  const stepLine = /^(\d+(?:\s*[&a]?\s*(?:[-–]\s*\d+(?:\s*[&a]?)?)?)?)\s*[:.)-]\s*(.+)$/i;
-  for (const line of lines.slice(1)) {
-    const header = line.match(sectionHeader);
-    if (header) {
-      current = { name: `${header[1]}${header[2] ? ': ' + header[2].trim() : ''}`.trim(), steps: [] };
-      sections.push(current);
-      continue;
-    }
-    const step = line.match(stepLine);
-    if (step) {
-      if (!current) {
-        current = { name: 'Section 1', steps: [] };
-        sections.push(current);
-      }
-      current.steps.push({ count: step[1].replace(/\s+/g, ' ').trim(), description: step[2].trim(), name: step[2].split(',')[0].trim().slice(0, 80), foot: 'Either' });
-    }
-  }
-  if (!sections.length) {
-    sections.push({ name: 'Section 1', steps: lines.slice(1, 33).map((line, index) => ({ count: String(index + 1), description: line, name: line.split(',')[0].trim().slice(0, 80), foot: 'Either' })) });
-  }
-  return {
-    title,
-    choreographer: choreographerMatch ? choreographerMatch[1].trim() : '',
-    country: countryMatch ? countryMatch[1].toUpperCase() : '',
-    level: levelMatch ? levelMatch[1].trim() : 'Beginner',
-    counts: countsMatch ? countsMatch[1].trim() : '32',
-    walls: wallsMatch ? wallsMatch[1].trim() : '4',
-    music: musicMatch ? musicMatch[1].trim() : '',
-    sections,
-    tags: []
-  };
-}
-
-async function structureImportedStepsheetText(text = '', fileName = '') {
-  const fallback = fallbackImportStepsheet(text);
-  const system = 'You are an expert line-dance stepsheet importer. Return strict JSON only. Keys: title, choreographer, country, level, counts, walls, music, sections, tags. sections must be an array of { name, steps }. Each step must have count, name, description, foot. Keep descriptions clear and tidy. Do not include markdown.';
-  const prompt = `File: ${fileName || 'stepsheet.pdf'}\n\nStepsheet text:\n${String(text || '').slice(0, 24000)}`;
-  try {
-    const ai = await runSiteHelperAI({ system, prompt, history: [], preferredModel: 'gemini' });
-    const parsed = parseJsonFromAiText(ai.text);
-    if (!parsed || !Array.isArray(parsed.sections) || !parsed.sections.length) return { dance: fallback, provider: 'fallback', fallback: true };
-    return {
-      dance: {
-        title: String(parsed.title || fallback.title || 'Imported Dance').trim() || 'Imported Dance',
-        choreographer: String(parsed.choreographer || fallback.choreographer || '').trim(),
-        country: String(parsed.country || fallback.country || '').trim(),
-        level: String(parsed.level || fallback.level || 'Beginner').trim() || 'Beginner',
-        counts: String(parsed.counts || fallback.counts || '32').trim() || '32',
-        walls: String(parsed.walls || fallback.walls || '4').trim() || '4',
-        music: String(parsed.music || fallback.music || '').trim(),
-        sections: Array.isArray(parsed.sections) ? parsed.sections : fallback.sections,
-        tags: Array.isArray(parsed.tags) ? parsed.tags : []
-      },
-      provider: ai.provider,
-      fallback: false
-    };
-  } catch (error) {
-    return { dance: fallback, provider: 'fallback', fallback: true, error: String(error && error.message || 'Import AI failed.') };
-  }
 }
 
 function serializeDanceForAi(dance = {}) {
@@ -2229,23 +2160,6 @@ app.delete('/api/admin/site-memory/:id', requireAdmin, async (req, res) => {
   db.siteMemory = (Array.isArray(db.siteMemory) ? db.siteMemory : []).filter(item => String(item?.id || '') !== id);
   await writeDb(db);
   res.json({ ok:true, items: db.siteMemory });
-});
-
-
-app.post('/api/ai/import-stepsheet', async (req, res) => {
-  const pdfBase64 = String(req.body?.pdfBase64 || '').trim();
-  const fileName = String(req.body?.fileName || 'stepsheet.pdf').trim();
-  if (!pdfBase64) return res.status(400).json({ ok:false, error:'Missing PDF file.' });
-  try {
-    const buffer = Buffer.from(pdfBase64, 'base64');
-    const parsedPdf = await pdfParse(buffer);
-    const text = String(parsedPdf && parsedPdf.text || '').trim();
-    if (!text) return res.status(400).json({ ok:false, error:'That PDF did not give back readable text.' });
-    const structured = await structureImportedStepsheetText(text, fileName);
-    res.json({ ok:true, text, ...structured });
-  } catch (error) {
-    res.status(500).json({ ok:false, error: String(error && error.message || 'Could not import that PDF.') });
-  }
 });
 
 app.post('/api/ai/dance-tools', requireGoogleUser, async (req, res) => {
