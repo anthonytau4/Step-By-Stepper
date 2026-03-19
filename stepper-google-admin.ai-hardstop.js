@@ -1060,9 +1060,7 @@
     const signature = buildDanceSignature(entry);
     updateSavedSignature(signature);
     state.lastSyncedSignature = signature;
-    state.savedDancesUiSignature = '';
     renderPages();
-    patchSavedDancesPage(true);
     openBuildWorksheet();
     return true;
   }
@@ -1530,11 +1528,31 @@
       alert('Sign in with Google first so the glossary request can be attached to your account.');
       return false;
     }
+    const safePayload = Object.assign({
+      name:'',
+      counts:'',
+      foot:'',
+      tags:'',
+      description:''
+    }, payload || {});
     try {
+      const page = document.getElementById(SIGNIN_PAGE_ID);
+      if (page) {
+        const nameEl = page.querySelector('[data-stepper-glossary-name="1"]');
+        const countsEl = page.querySelector('[data-stepper-glossary-counts="1"]');
+        const footEl = page.querySelector('[data-stepper-glossary-foot="1"]');
+        const tagsEl = page.querySelector('[data-stepper-glossary-tags="1"]');
+        const descEl = page.querySelector('[data-stepper-glossary-description="1"]');
+        if (nameEl) nameEl.value = safePayload.name || '';
+        if (countsEl) countsEl.value = safePayload.counts || safePayload.count || '';
+        if (footEl) footEl.value = safePayload.foot || '';
+        if (tagsEl) tagsEl.value = safePayload.tags || '';
+        if (descEl) descEl.value = safePayload.description || safePayload.desc || '';
+      }
       const data = await authFetch('/api/glossary/request', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ step: payload })
+        body: JSON.stringify({ step: safePayload })
       });
       alert(data && data.message ? data.message : 'Glossary step request sent to Admin.');
       return true;
@@ -1543,47 +1561,7 @@
       return false;
     }
   }
-
-  window.__stepperSendMenuStepToAdmin = async function(payload){
-    const step = payload && payload.step && typeof payload.step === 'object' ? payload.step : {};
-    const stepName = String(step.name || step.moveName || '').trim();
-    const stepDescription = String(step.description || step.desc || '').trim();
-    const stepCount = String(step.count || '').trim() || '1';
-    const stepFoot = String(step.foot || 'Either').trim() || 'Either';
-    if (!stepName || !stepDescription) {
-      alert('That step needs a name and description before it can be sent to Admin.');
-      return false;
-    }
-    return requestGlossaryStep({
-      requestType: 'new',
-      name: stepName,
-      description: stepDescription,
-      counts: stepCount,
-      foot: stepFoot,
-      tags: 'Sent from step menu'
-    });
-  };
-
-  window.__stepperSendMenuStepToAdmin = async function(payload){
-    const step = payload && payload.step && typeof payload.step === 'object' ? payload.step : {};
-    const stepName = String(step.name || step.moveName || '').trim();
-    const stepDescription = String(step.description || step.desc || '').trim();
-    const stepCount = String(step.count || '').trim() || '1';
-    const stepFoot = String(step.foot || 'Either').trim() || 'Either';
-    if (!stepName || !stepDescription) {
-      alert('That step needs a name and description before it can be sent to Admin.');
-      return false;
-    }
-    return requestGlossaryStep({
-      requestType: 'new',
-      name: stepName,
-      description: stepDescription,
-      counts: stepCount,
-      foot: stepFoot,
-      tags: 'Sent from step menu'
-    });
-  };
-  window.__stepperSendGlossaryStepRequest = requestGlossaryStep;
+  window.__stepperRequestGlossaryStep = requestGlossaryStep;
 
   async function decideGlossaryRequest(id, decision){
     const note = window.prompt(decision === 'approve' ? 'Optional approval note for this glossary step:' : 'Why are you declining this glossary step?', '');
@@ -2359,7 +2337,7 @@
         ${cards}
 
         <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-site-memory="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Helper memory</div><p class="mt-1 text-sm ${theme.subtle}">Add site facts or rules the AI helper should keep using for everyone. This is how the website learns approved things over time.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.siteMemories || []).length))} learned</span></div><div class="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]"><textarea data-stepper-site-memory-input="1" class="stepper-google-input" rows="3" placeholder="Example: Featured dances should feel polished but not over-written. Counts should be generated in 8-count blocks whenever possible."></textarea><button type="button" class="stepper-google-cta ${theme.button}" data-action="add-site-memory">Add memory</button></div><div class="mt-4 grid gap-3">${(state.siteMemories || []).length ? state.siteMemories.slice(0,30).map(item => `<div class="rounded-2xl border p-4 ${theme.soft}" data-stepper-site-memory-id="${escapeHtml(item.id)}"><div class="flex flex-wrap items-start justify-between gap-3"><div><div class="text-sm font-black">${escapeHtml(item.text || '')}</div><p class="mt-1 text-xs ${theme.subtle}">${escapeHtml(item.createdByName || item.createdByEmail || 'Admin')}</p></div><button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="delete-site-memory">Delete</button></div></div>`).join('') : `<p class="text-sm ${theme.subtle}">No saved helper memory yet.</p>`}</div></div>
-        <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-glossary-requests="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Requested dance steps</div><p class="mt-1 text-sm ${theme.subtle}">Admin approves new glossary steps and edit suggestions here. Clear right-footed or left-footed requests can still auto-create the mirrored version.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.glossaryRequests || []).length))} pending</span></div><div class="mt-4 grid gap-4">${(state.glossaryRequests || []).length ? state.glossaryRequests.map(item => `<article class="rounded-2xl border p-4 ${theme.soft}" data-stepper-glossary-request-id="${escapeHtml(item.id)}"><div class="flex flex-wrap items-start justify-between gap-3"><div><div class="text-base font-black">${escapeHtml(item.requestType === 'edit' ? 'Glossary edit suggestion' : (item.name || 'Requested Step'))}</div><p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.ownerName || item.ownerEmail || 'Member')} • ${escapeHtml(item.counts || '1')} • ${escapeHtml(item.foot || 'Either')}</p></div><div class="flex flex-wrap gap-3"><button type="button" class="stepper-google-cta ${theme.button}" data-action="approve-glossary-request">Approve</button><button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="reject-glossary-request">Decline</button></div></div><div class="mt-4 grid gap-3 sm:grid-cols-2"><div class="rounded-2xl border p-4 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">${item.requestType === 'edit' ? 'Current glossary step' : 'Requested step'}</div><p class="mt-3 text-sm font-bold">${escapeHtml((item.requestType === 'edit' && item.original && item.original.name) || item.name || '')}</p><p class="mt-2 text-sm ${theme.subtle}">${escapeHtml((item.requestType === 'edit' && item.original && item.original.description) || item.description || '')}</p>${(item.requestType === 'edit' && item.original && item.original.tags) ? `<p class="mt-2 text-xs font-semibold ${theme.subtle}">Tags: ${escapeHtml(item.original.tags)}</p>` : (item.tags ? `<p class="mt-2 text-xs font-semibold ${theme.subtle}">Tags: ${escapeHtml(item.tags)}</p>` : '')}</div><div class="rounded-2xl border p-4 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">${item.requestType === 'edit' ? 'Suggested replacement' : 'Auto twin preview'}</div>${item.requestType === 'edit' ? `<p class="mt-3 text-sm font-bold">${escapeHtml(item.name || '')}</p><p class="mt-2 text-sm ${theme.subtle}">${escapeHtml(item.description || '')}</p><p class="mt-2 text-xs font-semibold ${theme.subtle}">${escapeHtml(item.foot || '')} • ${escapeHtml(item.counts || '')}</p>${item.tags ? `<p class="mt-2 text-xs font-semibold ${theme.subtle}">Tags: ${escapeHtml(item.tags)}</p>` : ''}` : (item.autoMirror ? `<p class="mt-3 text-sm font-bold">${escapeHtml(item.autoMirror.name || '')}</p><p class="mt-2 text-sm ${theme.subtle}">${escapeHtml(item.autoMirror.description || '')}</p><p class="mt-2 text-xs font-semibold ${theme.subtle}">${escapeHtml(item.autoMirror.foot || '')} • ${escapeHtml(item.autoMirror.counts || '')}</p>` : `<p class="mt-3 text-sm ${theme.subtle}">No forced opposite-foot twin for this request.</p>`)}</div></div></article>`).join('') : `<p class="text-sm ${theme.subtle}">No pending dance step requests.</p>`}</div></div>
+        <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-glossary-requests="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Requested dance steps</div><p class="mt-1 text-sm ${theme.subtle}">Admin approves custom glossary steps here. If a request is clearly right-footed or left-footed, the mirrored version is created automatically too.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.glossaryRequests || []).length))} pending</span></div><div class="mt-4 grid gap-4">${(state.glossaryRequests || []).length ? state.glossaryRequests.map(item => `<article class="rounded-2xl border p-4 ${theme.soft}" data-stepper-glossary-request-id="${escapeHtml(item.id)}"><div class="flex flex-wrap items-start justify-between gap-3"><div><div class="text-base font-black">${escapeHtml(item.name || 'Requested Step')}</div><p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.ownerName || item.ownerEmail || 'Member')} • ${escapeHtml(item.counts || '1')} • ${escapeHtml(item.foot || 'Either')}</p></div><div class="flex flex-wrap gap-3"><button type="button" class="stepper-google-cta ${theme.button}" data-action="approve-glossary-request">Approve</button><button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="reject-glossary-request">Decline</button></div></div><div class="mt-4 grid gap-3 sm:grid-cols-2"><div class="rounded-2xl border p-4 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Requested step</div><p class="mt-3 text-sm font-bold">${escapeHtml(item.name || '')}</p><p class="mt-2 text-sm ${theme.subtle}">${escapeHtml(item.description || '')}</p>${item.tags ? `<p class="mt-2 text-xs font-semibold ${theme.subtle}">Tags: ${escapeHtml(item.tags)}</p>` : ''}</div><div class="rounded-2xl border p-4 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Auto twin preview</div>${item.autoMirror ? `<p class="mt-3 text-sm font-bold">${escapeHtml(item.autoMirror.name || '')}</p><p class="mt-2 text-sm ${theme.subtle}">${escapeHtml(item.autoMirror.description || '')}</p><p class="mt-2 text-xs font-semibold ${theme.subtle}">${escapeHtml(item.autoMirror.foot || '')} • ${escapeHtml(item.autoMirror.counts || '')}</p>` : `<p class="mt-3 text-sm ${theme.subtle}">No forced opposite-foot twin for this request.</p>`}</div></div></article>`).join('') : `<p class="text-sm ${theme.subtle}">No pending dance step requests.</p>`}</div></div>
         <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-approved-glossary="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Approved community glossary</div><p class="mt-1 text-sm ${theme.subtle}">These are the admin-approved custom steps everyone can apply from Glossary+ while building.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.glossaryApproved || []).length))} live</span></div><div class="mt-4 grid gap-3">${(state.glossaryApproved || []).length ? state.glossaryApproved.slice(0, 20).map(item => `<div class="rounded-2xl border p-4 ${theme.soft}"><div class="flex flex-wrap items-start justify-between gap-3"><div><div class="text-base font-black">${escapeHtml(item.name || 'Step')}</div><p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.foot || 'Either')} • ${escapeHtml(item.counts || '1')}</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(item.status || 'approved')}</span></div><p class="mt-3 text-sm ${theme.subtle}">${escapeHtml(item.description || '')}</p></div>`).join('') : `<p class="text-sm ${theme.subtle}">No approved custom glossary steps yet.</p>`}</div></div>
         ${cards}
       </div>
@@ -2371,8 +2349,6 @@
       const submission = (state.submissions || []).find(item => String((item && item.id) || '') === String(submissionId || ''));
       const rejectBtn = card.querySelector('[data-action="reject-submission"]');
       if (rejectBtn) rejectBtn.addEventListener('click', () => rejectSubmission(submissionId));
-      const deleteBtn = card.querySelector('[data-action="delete-submission"]');
-      if (deleteBtn) deleteBtn.addEventListener('click', () => deleteSubmission(submissionId));
       const approveBtn = card.querySelector('[data-action="approve-site"]');
       if (approveBtn) approveBtn.addEventListener('click', () => approveSiteSubmission(submissionId));
       const loadBtn = card.querySelector('[data-action="load-request"]');
@@ -3478,116 +3454,6 @@ Newest user question: ${question}`;
       autoGenerateCountsForWorksheet
     };
   };
-
-
-  const glossaryEditDrafts = new WeakMap();
-  let lastGlossaryContextTarget = null;
-
-  function getStepRowElement(target){
-    let node = target instanceof Element ? target : null;
-    while (node && node !== document.body) {
-      if (node.querySelector && node.querySelector('input[placeholder="Move Name"]') && node.querySelector('input[placeholder="Move details..."]')) return node;
-      node = node.parentElement;
-    }
-    return null;
-  }
-
-  function getStepRowPayload(row){
-    if (!row) return null;
-    const nameEl = row.querySelector('input[placeholder="Move Name"]');
-    const descEl = row.querySelector('input[placeholder="Move details..."]');
-    const countEl = row.querySelector('input[placeholder="1"]');
-    const footEl = row.querySelector('select');
-    const payload = {
-      name: String(nameEl && nameEl.value || '').trim(),
-      description: String(descEl && descEl.value || '').trim(),
-      counts: String(countEl && countEl.value || '').trim() || '1',
-      foot: String(footEl && footEl.value || 'Either').trim() || 'Either'
-    };
-    if (!payload.name || !payload.description) return null;
-    return payload;
-  }
-
-  function rememberGlossaryDraft(row){
-    const payload = getStepRowPayload(row);
-    if (!payload) return;
-    const existing = glossaryEditDrafts.get(row);
-    if (!existing) glossaryEditDrafts.set(row, { original: { ...payload } });
-  }
-
-  function isEditedGlossaryRow(row){
-    const payload = getStepRowPayload(row);
-    const draft = glossaryEditDrafts.get(row);
-    if (!payload || !draft || !draft.original) return false;
-    return ['name','description','counts','foot'].some((key) => String(payload[key] || '').trim() !== String(draft.original[key] || '').trim());
-  }
-
-  async function sendEditedStepToAdmin(row){
-    const current = getStepRowPayload(row);
-    const draft = glossaryEditDrafts.get(row);
-    if (!current || !draft || !draft.original || !isEditedGlossaryRow(row)) {
-      alert('Edit the step first, then right click it to send the change to Admin.');
-      return false;
-    }
-    return requestGlossaryStep({
-      requestType: 'edit',
-      name: current.name,
-      description: current.description,
-      counts: current.counts,
-      foot: current.foot,
-      original: draft.original
-    });
-  }
-
-  function injectGlossaryContextAction(){
-    const menus = Array.from(document.querySelectorAll('div.fixed.inset-0.z-50.print\:hidden, div.fixed.inset-0.z-50'));
-    menus.forEach((overlay) => {
-      const menu = overlay.querySelector('button');
-      if (!menu) return;
-      if (!overlay.textContent || !overlay.textContent.includes('Duplicate (Smart)') || !overlay.textContent.includes('Replace Move')) return;
-      if (overlay.querySelector('[data-action="send-step-admin-external"]')) return;
-      if (!lastGlossaryContextTarget || !isEditedGlossaryRow(lastGlossaryContextTarget)) return;
-      const removeBtn = Array.from(overlay.querySelectorAll('button')).find((btn) => String(btn.textContent || '').trim() === 'Remove');
-      const host = removeBtn && removeBtn.parentElement ? removeBtn.parentElement : overlay.querySelector('div.absolute');
-      if (!host) return;
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.setAttribute('data-action', 'send-step-admin-external');
-      btn.className = removeBtn ? removeBtn.className : 'w-full text-left px-4 py-3';
-      btn.innerHTML = '<span style="display:inline-flex;align-items:center;gap:.7rem;width:100%;"><span style="font-size:18px;line-height:1;">✉</span><span style="font-weight:700;">Send step to admin</span></span>';
-      btn.addEventListener('click', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        sendEditedStepToAdmin(lastGlossaryContextTarget).finally(() => {
-          try { overlay.dispatchEvent(new MouseEvent('click', { bubbles: true })); } catch {}
-        });
-      });
-      const separator = host.ownerDocument.createElement('div');
-      separator.className = 'my-1 h-px bg-black/10 dark:bg-white/10';
-      host.insertBefore(separator, removeBtn || null);
-      host.insertBefore(btn, removeBtn || null);
-    });
-  }
-
-  document.addEventListener('focusin', (event) => {
-    const row = getStepRowElement(event.target);
-    if (row) rememberGlossaryDraft(row);
-  }, true);
-  document.addEventListener('input', (event) => {
-    const row = getStepRowElement(event.target);
-    if (row) rememberGlossaryDraft(row);
-  }, true);
-  document.addEventListener('contextmenu', (event) => {
-    const row = getStepRowElement(event.target);
-    if (row) {
-      rememberGlossaryDraft(row);
-      lastGlossaryContextTarget = row;
-      setTimeout(injectGlossaryContextAction, 20);
-    }
-  }, true);
-  const glossaryMenuObserver = new MutationObserver(() => injectGlossaryContextAction());
-  glossaryMenuObserver.observe(document.documentElement, { childList: true, subtree: true });
-
 
   let __stepperLiveQueueRefreshBusy = false;
   setInterval(() => {
