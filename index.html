@@ -1663,7 +1663,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   }
 
   function renderPdfImportPanel(){
-    const panel = document.getElementById(PDF_IMPORT_PANEL_ID);
+    const panel = ensureSheetPdfHost();
     if (!panel) return;
     const theme = themeClasses();
     panel.className = `rounded-3xl border shadow-sm overflow-hidden ${theme.shell}`;
@@ -1673,8 +1673,8 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       </div>
       <div class="p-6 sm:p-8 space-y-5">
         <div class="rounded-3xl border p-5 sm:p-6 ${theme.soft}">
-          <p class="text-base sm:text-lg font-bold leading-relaxed">Import a stepsheet PDF and Step by Stepper will read the dance, build the title, music, level, counts, walls and sections, then load them straight into your Editor so the Sheet view matches too.</p>
-          <p class="mt-3 text-sm ${theme.subtle}">Go to <strong>Build</strong>, open <strong>PDF Import AI</strong>, choose your PDF, and it will fill the dance in for you. When you are signed in, the smart import also sends any useful glossary ideas for review.</p>
+          <p class="text-base sm:text-lg font-bold leading-relaxed">Import a stepsheet PDF and Step by Stepper will read the dance, build the title, music, level, counts, walls and sections, then load them straight into your dance so the Sheet and Build helper stay matched.</p>
+          <p class="mt-3 text-sm ${theme.subtle}">Go to <strong>Sheet</strong>, open <strong>PDF Import AI</strong>, choose your PDF, and it will fill the dance in for you. When you are signed in, the smart import can also send useful glossary ideas for review.</p>
           <div class="mt-5 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
             <input type="file" accept="application/pdf" data-stepper-pdf-input class="block w-full text-sm">
             <button type="button" data-stepper-pdf-import class="stepper-mini-btn ${theme.accent}" ${pdfImportBusy ? 'disabled' : ''}>${pdfImportBusy ? 'Importing…' : 'Import PDF into Editor'}</button>
@@ -3328,21 +3328,42 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       panel.id = PHR_PANEL_ID;
       stack.appendChild(panel);
     }
-    let pdfPanel = document.getElementById(PDF_IMPORT_PANEL_ID);
-    if (!pdfPanel) {
-      pdfPanel = document.createElement('section');
-      pdfPanel.id = PDF_IMPORT_PANEL_ID;
-      stack.appendChild(pdfPanel);
-    }
     let settingsPanel = document.getElementById(SETTINGS_PANEL_ID);
     if (settingsPanel && settingsPanel.parentNode !== stack) {
       stack.appendChild(settingsPanel);
     }
     if (panel.parentNode !== stack) stack.insertBefore(panel, stack.firstChild || null);
-    if (pdfPanel.parentNode !== stack) {
-      const settingsNode = document.getElementById(SETTINGS_PANEL_ID);
-      if (settingsNode && settingsNode.parentNode === stack) stack.insertBefore(pdfPanel, settingsNode);
-      else stack.appendChild(pdfPanel);
+    return host;
+  }
+
+  function isSheetViewActive(){
+    if (!sheetBtn) return false;
+    if (sheetBtn.getAttribute('aria-pressed') === 'true' || sheetBtn.getAttribute('aria-selected') === 'true' || sheetBtn.getAttribute('data-state') === 'active') return true;
+    const cls = String(sheetBtn.className || '');
+    if (/indigo|orange|active|selected|current/.test(cls) && !/neutral-200|neutral-800/.test(cls)) return true;
+    return document.body.getAttribute('data-stepper-sheet-import-active') === 'true';
+  }
+
+  function ensureSheetPdfHost(){
+    if (!mainEl && !locateUi()) return null;
+    let host = document.getElementById(PDF_IMPORT_PANEL_ID);
+    const active = isSheetViewActive();
+    if (!active) {
+      if (host) host.style.display = 'none';
+      document.body.removeAttribute('data-stepper-sheet-import-active');
+      return host;
+    }
+    document.body.setAttribute('data-stepper-sheet-import-active', 'true');
+    if (!host) {
+      host = document.createElement('section');
+      host.id = PDF_IMPORT_PANEL_ID;
+      host.className = 'max-w-4xl mx-auto px-3 sm:px-4 pb-6 print:hidden';
+    }
+    host.style.display = '';
+    if (footerWrap && footerWrap.parentNode && host.parentNode !== footerWrap.parentNode) {
+      footerWrap.parentNode.insertBefore(host, footerWrap);
+    } else if (mainEl && mainEl.parentNode && host.parentNode !== mainEl.parentNode) {
+      mainEl.parentNode.appendChild(host);
     }
     return host;
   }
@@ -3871,7 +3892,6 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   function renderCustomPanels(){
     ensureInlineHost();
     renderPhrasedPanel();
-    renderPdfImportPanel();
     renderChoreoPanel();
     renderSettingsPanel();
     wireManualCountsAndWallsOverrides();
@@ -4007,6 +4027,23 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     };
     bind('Counts', 'counts', 'autoCounts', deriveCounts);
     bind('Walls', 'walls', 'autoWalls', deriveWalls);
+  }
+
+  function wireSheetPdfImportVisibility(){
+    if (sheetBtn && !sheetBtn.__stepperPdfImportWired) {
+      sheetBtn.__stepperPdfImportWired = true;
+      sheetBtn.addEventListener('click', () => {
+        document.body.setAttribute('data-stepper-sheet-import-active', 'true');
+        window.setTimeout(() => renderPdfImportPanel(), 0);
+      }, true);
+    }
+    if (buildBtn && !buildBtn.__stepperPdfImportWired) {
+      buildBtn.__stepperPdfImportWired = true;
+      buildBtn.addEventListener('click', () => {
+        document.body.removeAttribute('data-stepper-sheet-import-active');
+        window.setTimeout(() => renderPdfImportPanel(), 0);
+      }, true);
+    }
   }
 
   function wirePreviewAutoStats(){
@@ -4193,7 +4230,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     const note = document.createElement('div');
     note.setAttribute('data-stepper-note', 'pdf-import-ai');
     note.className = `rounded-2xl border px-4 py-4 flex gap-3 ${theme.dark ? 'border-neutral-800 bg-neutral-950' : 'border-neutral-200 bg-white'}`;
-    note.innerHTML = `<div class="mt-0.5 shrink-0">${renderWhatsNewBadge(iconUploadCloud())}</div><p class="font-medium leading-relaxed">Added PDF Import AI on the Build page. Open <strong>PDF Import AI</strong>, choose a stepsheet PDF, and it will pull the dance into your Editor so your Sheet view matches too. When you are signed in, it can also send glossary ideas for review.</p>`;
+    note.innerHTML = `<div class="mt-0.5 shrink-0">${renderWhatsNewBadge(iconUploadCloud())}</div><p class="font-medium leading-relaxed">Added PDF Import AI on the Sheet page. Open <strong>PDF Import AI</strong>, choose a stepsheet PDF, and it will load the dance into your sheet and Build helper together. When it spots useful step ideas, it can also send them in for Glossary+ review.</p>`;
     list.insertBefore(note, list.firstChild || null);
   }
 
