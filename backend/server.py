@@ -128,7 +128,7 @@ def parse_pdf_to_steps(pdf_path: str) -> dict:
 
         # Check for section headers like "Section 1:" or "[1-8]" or "Counts 1-8"
         section_match = re.match(
-            r"^(?:section\s*\d+|(?:counts?\s*)?\[?\d+\s*[-–]\s*\d+\]?)\s*[:\-]?\s*(.*)",
+            r"^(?:section\s*\d+)\s*[:\-]?\s*(.*)",
             line,
             re.IGNORECASE,
         )
@@ -200,7 +200,7 @@ def parse_pdf_to_steps(pdf_path: str) -> dict:
     for line in step_lines:
         # Try to parse count and description from patterns like "1-2 Step forward right"
         count_match = re.match(
-            r"^[&]?(\d+(?:\s*[&,+]\s*\d+)*(?:\s*[-–]\s*\d+)?)\s*[:\.\-\)]\s*(.*)",
+            r"^[&]?(\d+(?:\s*[&,+]\s*\d+)*(?:\s*[-–]\s*\d+)?)\s*[:\.\-\)]*\s+(.*)",
             line,
         )
         if count_match:
@@ -256,6 +256,12 @@ def parse_pdf_to_steps(pdf_path: str) -> dict:
         "steps": steps,
         "rawText": full_text.strip(),
     }
+
+
+@app.get("/health")
+@app.get("/healthz")
+async def health_check():
+    return JSONResponse({"status": "healthy"})
 
 
 @app.post("/api/pdf/parse")

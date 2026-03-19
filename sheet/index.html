@@ -1225,6 +1225,8 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   const CHOREO_PANEL_ID = 'stepper-inline-choreography';
   const SETTINGS_PANEL_ID = 'stepper-inline-settings';
   const EXTRA_NOTES = [
+    'New: Import PDF stepsheets! Click the Import PDF button on the Sheet page, drop your PDF, and the dance steps are extracted and loaded into the editor automatically.',
+    'New: the AI site helper now uses the community glossary when building or suggesting dance steps, keeping terminology consistent.',
     'New: Counts and Walls can stay on Auto, and Sheet now shows the detected values instead of printing AUTO.',
     'New: the Editor keeps the glossary tools on the Editor page so they are easier to find while you build.',
     'New: right click an edited step in the Editor and send it straight in as a Glossary+ suggestion.',
@@ -2616,6 +2618,8 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     elegant: 'Georgia, "Times New Roman", serif'
   };
   const EXTRA_NOTES = [
+    'New: Import PDF stepsheets! Click the Import PDF button on the Sheet page, drop your PDF, and the dance steps are extracted and loaded into the editor automatically.',
+    'New: the AI site helper now uses the community glossary when building or suggesting dance steps, keeping terminology consistent.',
     'New: Counts and Walls can stay on Auto, and Sheet now shows the detected values instead of printing AUTO.',
     'New: the Editor keeps the glossary tools on the Editor page so they are easier to find while you build.',
     'New: right click an edited step in the Editor and send it straight in as a Glossary+ suggestion.',
@@ -4268,6 +4272,8 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     elegant: 'Georgia, "Times New Roman", serif'
   };
   const EXTRA_NOTES = [
+    'New: Import PDF stepsheets! Click the Import PDF button on the Sheet page, drop your PDF, and the dance steps are extracted and loaded into the editor automatically.',
+    'New: the AI site helper now uses the community glossary when building or suggesting dance steps, keeping terminology consistent.',
     'New: Counts and Walls can stay on Auto, and Sheet now shows the detected values instead of printing AUTO.',
     'New: the Editor keeps the glossary tools on the Editor page so they are easier to find while you build.',
     'New: right click an edited step in the Editor and send it straight in as a Glossary+ suggestion.',
@@ -5804,8 +5810,14 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
 
 <script src="./stepper-route-paths.js?v=20260319-paths-phrased-1"></script>
 
-<script>window.STEPPER_API_BASE = "https://step-by-stepper.onrender.com";</script>
+<script>
+  // Use the current origin for API calls in preview, production URL otherwise
+  window.STEPPER_API_BASE = window.location.hostname.includes('preview.emergentagent.com')
+    ? window.location.origin
+    : "https://step-by-stepper.onrender.com";
+</script>
 <script src="./stepper-google-admin.ai-hardstop.js?v=20260318-db-lockdown-13"></script>
+<script src="../stepper-pdf-import.js?v=20260319-pdf-import-1"></script>
 
 </body>
 </html>

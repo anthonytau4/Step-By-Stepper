@@ -4,6 +4,10 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Health check endpoints for K8s probes
+app.get('/health', (req, res) => res.json({ status: 'healthy' }));
+app.get('/healthz', (req, res) => res.json({ status: 'healthy' }));
+
 // Serve all static files from /app root
 app.use(express.static('/app', {
   extensions: ['html'],

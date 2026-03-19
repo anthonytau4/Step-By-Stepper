@@ -1303,6 +1303,8 @@ const SITE_HELP_CONTEXT = `You are the Step By Stepper site helper. Keep answers
 Tabs and actions available: Build, Sheet, What's New, My Saved Dances, Featured Choreo, Sign In, and Admin for anthonytau4@gmail.com only.
 Important behaviours: users sign in with Google, Save Changes pushes the current dance to cloud save, Send to host for featuring creates a feature request, Upload to site creates a site-upload request, Featured Choreo shows public featured dances, removing a feature removes it from Featured Choreo, signed-in users can get notifications when admin approves or rejects requests, and Admin reviews custom glossary step requests under Requested dance steps.
 The site can also remember admin-approved helper memory notes, and those learned notes should be treated as true for future helper replies.
+The community glossary contains approved dance steps with names, counts, foot, and descriptions. When a user asks to build a dance or suggests steps, reference the glossary steps to stay consistent with the community's terminology and technique. You may suggest glossary steps by name when they fit the context.
+Users can also import dance steps from a PDF stepsheet using the Import PDF button on the sheet page. The PDF is parsed automatically and steps populate the editor.
 If someone asks where to go, tell them the exact tab or button to use.
 Do not open with generic greetings like "Hi there! What can I help you with today on Step By Stepper?" and do not tell people to ask about any tab or feature. Just answer the actual question.`;
 
@@ -1314,6 +1316,8 @@ function fallbackSiteHelp(prompt, context = {}) {
   if (q.includes('admin')) return 'The Admin tab only appears for anthonytau4@gmail.com after Google sign-in.';
   if (q.includes('sign in') || q.includes('google')) return 'Open the Sign In tab and press Sign in with Google.';
   if (q.includes('saved')) return 'Use My Saved Dances for your saved items, and Save Changes at the top to push the current one to cloud save.';
+  if (q.includes('pdf') || q.includes('import')) return 'On the sheet page, click the Import PDF button at the bottom-right. Drop or select your PDF stepsheet, review the extracted steps, then click Apply to Editor to populate the dance.';
+  if (q.includes('glossary')) return 'The glossary has community-approved dance steps. When the AI builds or suggests steps, it references the glossary so names and counts stay consistent.';
   return 'Use Build to make or edit a dance, Save Changes at the top to keep it, Sign In for Google saving, My Saved Dances for your saved work, and Featured Choreo to browse featured dances.';
 }
 
@@ -2306,7 +2310,8 @@ app.post('/api/chatbot/help', requireGoogleUser, async (req, res) => {
   })).filter(item => item.text);
   try {
     const learnedNotes = (Array.isArray(db.siteMemory) ? db.siteMemory : []).slice(0, 30).map(item => `- ${String(item?.text || '').trim()}`).filter(Boolean).join('\n') || '(none)';
-    const system = `${SITE_HELP_CONTEXT}\nReply like a natural AI helper for the Step By Stepper site. Be specific, warm, and practical. Use the conversation history when it matters, and do not keep repeating the exact same canned answer.\nAdmin-approved helper memory:\n${learnedNotes}`;
+    const glossarySteps = (Array.isArray(db.approvedGlossarySteps) ? db.approvedGlossarySteps : []).slice(0, 80).map(item => `- ${item.name} [${item.foot || 'Either'}] ${item.counts || '1'}: ${item.description || ''}`).filter(Boolean).join('\n') || '(none)';
+    const system = `${SITE_HELP_CONTEXT}\nReply like a natural AI helper for the Step By Stepper site. Be specific, warm, and practical. Use the conversation history when it matters, and do not keep repeating the exact same canned answer.\nAdmin-approved helper memory:\n${learnedNotes}\nCommunity glossary dance steps (use these when building or suggesting dance steps):\n${glossarySteps}`;
     const userPrompt = `Current tab: ${context.currentTab || 'unknown'}
 Signed in: ${context.signedIn ? 'yes' : 'no'}
 Admin: ${context.isAdmin ? 'yes' : 'no'}
