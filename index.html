@@ -550,6 +550,8 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   const transitionGifSrc = window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./stepper_loading_bar_dark_preview.gif') : './stepper_loading_bar_dark_preview.gif';
   const transitionEndFrameSrc = window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./stepper_loading_bar_dark_end.png') : './stepper_loading_bar_dark_end.png';
   const startupSongSrc = window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./startup-song.m4a') : './startup-song.m4a';
+  const loadingSongSrc = window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./loading-screen-song.m4a') : './loading-screen-song.m4a';
+  const SETTINGS_KEY = 'stepper_sound_settings_v1';
   const TRANSITION_MESSAGE_SETS = {
     editor: [
       'Recalculating glossary',
@@ -603,6 +605,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   let warmEndFrame = null;
   let transitionVisual = null;
   let startupAudio = null;
+  let transitionAudio = null;
 
   function ensureOverlay(){
     if (overlay) return overlay;
@@ -1112,6 +1115,49 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     return startupAudio;
   }
 
+  function readSoundSettings(){
+    try {
+      const raw = localStorage.getItem(SETTINGS_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function areTransitionSoundsEnabled(){
+    return readSoundSettings().sfxEnabled !== false;
+  }
+
+  function ensureTransitionAudio(){
+    if (transitionAudio) return transitionAudio;
+    transitionAudio = new Audio(loadingSongSrc);
+    transitionAudio.preload = 'auto';
+    transitionAudio.loop = false;
+    transitionAudio.volume = 1;
+    try { transitionAudio.playsInline = true; } catch {}
+    return transitionAudio;
+  }
+
+  function stopTransitionAudio(){
+    if (!transitionAudio) return;
+    try {
+      transitionAudio.pause();
+      transitionAudio.currentTime = 0;
+    } catch {}
+  }
+
+  function playTransitionAudio(){
+    stopTransitionAudio();
+    if (!areTransitionSoundsEnabled()) return;
+    const audio = ensureTransitionAudio();
+    try {
+      audio.currentTime = 0;
+      const playPromise = audio.play();
+      if (playPromise && typeof playPromise.catch === 'function') playPromise.catch(() => {});
+    } catch {}
+  }
+
   function runStartupSplash(){ return; }
 
   window.__stepperRunFaviconTransition = function(changePage, options){
@@ -1129,6 +1175,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     resetTransitionAnimation();
     createBurstImage();
     applyTransitionStatus(target);
+    playTransitionAudio();
     overlay.hidden = false;
     requestAnimationFrame(() => {
       overlay.classList.add('is-running');
@@ -1146,6 +1193,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       burstHost.innerHTML = '';
       transitionVisual = null;
       clearTransitionStatus();
+      stopTransitionAudio();
       running = false;
     }, TOTAL_MS + 34);
     transitionTimers.push(hideTimer);
@@ -2556,10 +2604,10 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
 
 
 <script src="./stepper-runtime-recovery.js?v=20260320-recovery-4"></script>
-<script src="./stepper-static-startup-fix.js?v=20260320-startup-fix-3"></script>
+<script src="./stepper-static-startup-fix.js?v=20260320-startup-fix-4"></script>
 <script src="./stepper-phrased-tools-fix.js?v=20260319-phrased-fix-1"></script>
 <script src="./stepper-route-paths.js?v=20260320-paths-2"></script>
-<script src="./stepper-editor-phrasing-repair.js?v=20260319-phrasing-repair-1"></script>
+<script src="./stepper-editor-phrasing-repair.js?v=20260320-phrasing-repair-2"></script>
 
 <script>window.STEPPER_API_BASE = "https://step-by-stepper.onrender.com";</script>
 <script src="./stepper-google-admin.ai-hardstop.js?v=20260318-db-lockdown-13"></script>

@@ -326,14 +326,14 @@
       const partId = card.getAttribute('data-stepper-repair-part');
       const labelInput = card.querySelector('[data-field="label"]');
       const titleInput = card.querySelector('[data-field="title"]');
-      if (labelInput) labelInput.addEventListener('input', (event) => {
+      if (labelInput) labelInput.addEventListener('change', (event) => {
         mutateTools((next) => {
           const part = next.parts.find(item => item.id === partId);
           if (part) part.label = String(event.target.value || '').trim() || part.label;
           return next;
         });
       });
-      if (titleInput) titleInput.addEventListener('input', (event) => {
+      if (titleInput) titleInput.addEventListener('change', (event) => {
         mutateTools((next) => {
           const part = next.parts.find(item => item.id === partId);
           if (part) part.title = String(event.target.value || '').trim();
@@ -455,31 +455,82 @@
     });
   }
 
-  function refresh(){
-    try { render(); } catch {}
+  let lastRenderSignature = '';
+
+  function stateSignature(){
+    const data = currentData();
+    const tools = normalizeTools(data);
+    return JSON.stringify({
+      route: routeFromPath(),
+      visible: isEditorSurfaceVisible(),
+      meta: data && data.meta ? data.meta : {},
+      sections: Array.isArray(data && data.sections) ? data.sections.map(section => ({
+        id: section && section.id,
+        name: section && section.name,
+        stepCount: Array.isArray(section && section.steps) ? section.steps.length : 0
+      })) : [],
+      tags: Array.isArray(data && data.tags) ? data.tags.map(tag => ({
+        id: tag && tag.id,
+        name: tag && tag.name,
+        sections: Array.isArray(tag && tag.sections) ? tag.sections.map(section => ({
+          id: section && section.id,
+          name: section && section.name,
+          stepCount: Array.isArray(section && section.steps) ? section.steps.length : 0
+        })) : []
+      })) : [],
+      tools
+    });
+  }
+
+  function refresh(force){
+    const host = document.getElementById(PANEL_ID);
+    const activeEl = document.activeElement;
+    const editingInsidePanel = !!(host && activeEl && host.contains(activeEl) && (activeEl.matches('input, textarea, select') || activeEl.isContentEditable));
+    const signature = stateSignature();
+    const shouldRender = !!force || !host || signature !== lastRenderSignature;
+    if (shouldRender && !editingInsidePanel) {
+      try { render(); } catch {}
+      lastRenderSignature = stateSignature();
+    }
     try { decorateSectionHeaders(); } catch {}
     try { scrubNonEditorMentions(); } catch {}
   }
 
   function boot(){
-    refresh();
+    refresh(true);
     let queued = false;
-    const schedule = () => {
+    const schedule = (force) => {
       if (queued) return;
       queued = true;
       requestAnimationFrame(() => {
         queued = false;
-        refresh();
+        refresh(!!force);
       });
     };
     const observer = new MutationObserver((mutations) => {
-      if (mutations.some(m => m.addedNodes.length || m.removedNodes.length)) schedule();
+      const relevant = mutations.some((mutation) => {
+        const nodes = [mutation.target, ...(mutation.addedNodes || []), ...(mutation.removedNodes || [])];
+        return nodes.some((node) => {
+          const el = node && node.nodeType === 1 ? node : (node && node.parentElement ? node.parentElement : null);
+          if (!el) return false;
+          if (el.closest('#' + PANEL_ID) || el.closest('#' + HOST_ID)) return false;
+          return !!(el.closest('main') || el.id === 'root' || el.closest('#root'));
+        });
+      });
+      if (relevant) schedule(true);
     });
     observer.observe(document.documentElement || document.body, { childList:true, subtree:true });
-    window.addEventListener('storage', schedule);
-    window.addEventListener('popstate', schedule);
-    window.addEventListener('stepperphrasedchange', schedule);
-    setInterval(refresh, 1800);
+    window.addEventListener('storage', () => schedule(false));
+    window.addEventListener('popstate', () => schedule(true));
+    window.addEventListener('stepperphrasedchange', () => schedule(false));
+    document.addEventListener('focusout', () => schedule(false), true);
+    setInterval(() => {
+      const host = document.getElementById(PANEL_ID);
+      const inlineHost = document.getElementById(HOST_ID);
+      const shouldExist = isEditorRoute() && isEditorSurfaceVisible();
+      if (shouldExist && (!host || !inlineHost || inlineHost.hidden)) schedule(true);
+      if (!shouldExist && inlineHost && !inlineHost.hidden) schedule(true);
+    }, 1500);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once:true });
