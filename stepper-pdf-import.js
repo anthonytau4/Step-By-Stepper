@@ -5,8 +5,9 @@
 (function() {
   'use strict';
 
-  const API_BASE = window.STEPPER_API_BASE || '';
-  function getApiBase() { return API_BASE || window.location.origin; }
+  function getApiBase() {
+    return window.STEPPER_API_BASE || window.location.origin;
+  }
 
   let injected = false;
   let parsedData = null;
@@ -283,8 +284,20 @@
     formData.append('file', file);
 
     try {
-      const resp = await fetch(getApiBase() + '/api/pdf/parse', { method: 'POST', body: formData });
-      const data = await resp.json();
+      const endpoint = getApiBase() + '/api/pdf/parse';
+      const resp = await fetch(endpoint, { method: 'POST', body: formData });
+      const contentType = (resp.headers.get('content-type') || '').toLowerCase();
+      const data = contentType.includes('application/json')
+        ? await resp.json()
+        : null;
+
+      if (!data) {
+        const bodyPreview = (await resp.text()).trim().slice(0, 120);
+        const preview = bodyPreview ? ` Received ${bodyPreview}.` : '';
+        setStatus('error', `PDF import hit ${endpoint}, but the server responded with ${contentType || 'non-JSON content'}.${preview}`);
+        return;
+      }
+
       if (!resp.ok || !data.ok) { setStatus('error', data.detail || data.error || 'Failed to parse PDF.'); return; }
 
       parsedData = data;
