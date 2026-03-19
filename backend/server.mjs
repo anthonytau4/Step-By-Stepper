@@ -6,6 +6,7 @@ import { OAuth2Client } from "google-auth-library";
 import { promises as fs } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import pdfParse from "pdf-parse";
 
 dotenv.config();
 
@@ -166,6 +167,130 @@ async function runSiteHelperAI({ system, prompt, history = [], preferredModel = 
   throw lastError || new Error('AI request failed.');
 }
 
+
+function cleanPdfLine(line = '') {
+  return String(line || '').replace(/\s+/g, ' ').trim();
+}
+
+function extractJsonBlock(text = '') {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fenced ? fenced[1].trim() : raw;
+  const start = candidate.indexOf('{');
+  const end = candidate.lastIndexOf('}');
+  if (start === -1 || end === -1 || end <= start) return null;
+  try { return JSON.parse(candidate.slice(start, end + 1)); } catch { return null; }
+}
+
+function fallbackParseStepsheetText(text = '') {
+  const lines = String(text || '').split(/\r?\n/).map(cleanPdfLine).filter(Boolean);
+  const meta = { title: '', choreographer: '', country: '', music: '', level: '', counts: '', walls: '', type: 'regular' };
+  if (lines.length) meta.title = lines[0];
+  const sections = [];
+  let current = null;
+  let stepIndex = 0;
+  for (const line of lines) {
+    const low = line.toLowerCase();
+    if (!meta.counts) {
+      const m = line.match(/\bcount\s*:?\s*(\d+)/i);
+      if (m) meta.counts = m[1];
+    }
+    if (!meta.walls) {
+      const m = line.match(/\bwall\s*:?\s*(\d+)/i);
+      if (m) meta.walls = m[1];
+    }
+    if (!meta.level) {
+      const m = line.match(/\blevel\s*:?\s*([A-Za-z ]+)/i);
+      if (m) meta.level = cleanPdfLine(m[1]);
+    }
+    if (!meta.music) {
+      const m = line.match(/\bmusic\s*:?\s*(.+)$/i);
+      if (m) meta.music = cleanPdfLine(m[1]);
+    }
+    if (!meta.choreographer) {
+      const m = line.match(/\bchoreographer\s*:?\s*(.+)$/i);
+      if (m) meta.choreographer = cleanPdfLine(m[1]);
+    }
+    if (/^(section|part)\b/i.test(line)) {
+      current = { id: `section_${sections.length + 1}`, name: line, steps: [] };
+      sections.push(current);
+      continue;
+    }
+    const stepMatch = line.match(/^([0-9][0-9&a-zA-Z\-\/+ ]{0,12})\s+(.+)$/);
+    if (stepMatch) {
+      if (!current) {
+        current = { id: `section_${sections.length + 1}`, name: `Section ${sections.length + 1}`, steps: [] };
+        sections.push(current);
+      }
+      const count = cleanPdfLine(stepMatch[1]);
+      const rest = cleanPdfLine(stepMatch[2]);
+      let name = rest;
+      let description = '';
+      const sep = rest.indexOf(':');
+      if (sep > 0) {
+        name = cleanPdfLine(rest.slice(0, sep));
+        description = cleanPdfLine(rest.slice(sep + 1));
+      }
+      current.steps.push({ id: `step_${++stepIndex}`, type: 'step', count, name, description, foot: '', weight: true });
+    }
+  }
+  if (!sections.length) sections.push({ id: 'section_1', name: 'Section 1', steps: [] });
+  return { meta, sections, tags: [] };
+}
+
+async function buildImportedDanceFromPdfBase64(pdfBase64 = '', filename = '') {
+  const buffer = Buffer.from(String(pdfBase64 || ''), 'base64');
+  if (!buffer.length) {
+    const error = new Error('No PDF data was uploaded.');
+    error.status = 400;
+    throw error;
+  }
+  const parsed = await pdfParse(buffer);
+  const text = String(parsed?.text || '').trim();
+  if (!text) {
+    const error = new Error('The PDF did not contain readable text.');
+    error.status = 400;
+    throw error;
+  }
+  let structured = null;
+  try {
+    const system = 'You turn line-dance stepsheet PDF text into clean JSON for an editor. Return JSON only.';
+    const prompt = [
+      'Extract the dance into JSON with this exact shape:',
+      '{',
+      '  "meta": {"title":"","choreographer":"","country":"","music":"","level":"","counts":"","walls":"","type":"regular"},',
+      '  "sections": [{"name":"Section 1","steps":[{"count":"1&2","name":"Step name","description":"Step wording","foot":"L"}]}],',
+      '  "tags": []',
+      '}',
+      'Use plain strings. Do not invent tags if none exist. Keep step descriptions short and editor-ready.',
+      `Filename: ${filename}`,
+      'PDF text:',
+      text.slice(0, 40000)
+    ].join('\n');
+    const ai = await runSiteHelperAI({ system, prompt, history: [], preferredModel: 'gemini' });
+    structured = extractJsonBlock(ai?.text || '');
+  } catch {}
+  if (!structured || !structured.meta || !Array.isArray(structured.sections)) {
+    structured = fallbackParseStepsheetText(text);
+  }
+  const meta = Object.assign({ title: '', choreographer: '', country: '', music: '', level: '', counts: '', walls: '', type: 'regular' }, structured.meta || {});
+  const sections = (structured.sections || []).map((section, sectionIndex) => ({
+    id: `section_${sectionIndex + 1}`,
+    name: cleanPdfLine(section?.name || `Section ${sectionIndex + 1}`),
+    steps: Array.isArray(section?.steps) ? section.steps.map((step, stepIndex) => ({
+      id: `step_${sectionIndex + 1}_${stepIndex + 1}`,
+      type: 'step',
+      count: cleanPdfLine(step?.count || ''),
+      name: cleanPdfLine(step?.name || ''),
+      description: cleanPdfLine(step?.description || ''),
+      foot: cleanPdfLine(step?.foot || ''),
+      weight: true
+    })) : []
+  }));
+  return { meta, sections: sections.length ? sections : [{ id: 'section_1', name: 'Section 1', steps: [] }], tags: [], isDarkMode: false };
+}
+
 function getUserMembership(bucket, profile = null) {
   const current = bucket && bucket.membership && typeof bucket.membership === 'object' ? bucket.membership : {};
   const admin = isAdminProfile(profile || bucket?.profile, null) || String(bucket?.role || '').trim().toLowerCase() === 'admin';
@@ -324,7 +449,7 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
-app.use(express.json({ limit: "4mb" }));
+app.use(express.json({ limit: "12mb" }));
 
 function emptyDb() {
   return {
@@ -2160,6 +2285,18 @@ app.delete('/api/admin/site-memory/:id', requireAdmin, async (req, res) => {
   db.siteMemory = (Array.isArray(db.siteMemory) ? db.siteMemory : []).filter(item => String(item?.id || '') !== id);
   await writeDb(db);
   res.json({ ok:true, items: db.siteMemory });
+});
+
+
+app.post('/api/ai/import-stepsheet', async (req, res) => {
+  try {
+    const pdfBase64 = String(req.body?.pdfBase64 || '').trim();
+    const filename = String(req.body?.filename || 'stepsheet.pdf').trim();
+    const data = await buildImportedDanceFromPdfBase64(pdfBase64, filename);
+    return res.json({ ok: true, data });
+  } catch (error) {
+    return res.status(error.status || 500).json({ ok: false, error: error.message || 'Could not import that PDF yet.' });
+  }
 });
 
 app.post('/api/ai/dance-tools', requireGoogleUser, async (req, res) => {
