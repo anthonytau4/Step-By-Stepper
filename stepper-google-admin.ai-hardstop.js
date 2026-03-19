@@ -47,7 +47,6 @@
     glossaryRequests: [],
     siteMemories: [],
     aiDance: { busy: false, mode: 'judge', prompt: '', result: null },
-    glossaryDraft: { name:'', counts:'', foot:'', tags:'', description:'' },
     communityGlossaryOpen: false,
     subscription: { isPremium: false, plan: 'free', status: 'free', source: 'unknown' },
     savedDancesUiSignature: '',
@@ -81,91 +80,12 @@
     }
   };
 
-  let pendingRenderPagesTimer = null;
-  let lastUserTypingAt = 0;
-  let lastUserClickAt = 0;
-  function isEditableTarget(node){
-    return !!(node && (node.closest('input, textarea, select, [contenteditable="true"], [contenteditable=""], [contenteditable]')));
-  }
-  function isUserActivelyEditing(){
-    const active = document.activeElement;
-    if (isEditableTarget(active)) return true;
-    return Date.now() - lastUserTypingAt < 2000;
-  }
-  function scheduleRenderPages(delay = 2000, force = false){
-    if (pendingRenderPagesTimer) clearTimeout(pendingRenderPagesTimer);
-    pendingRenderPagesTimer = setTimeout(() => {
-      pendingRenderPagesTimer = null;
-      renderPages(force);
-    }, Math.max(0, delay));
-  }
-  document.addEventListener('input', (event) => {
-    if (isEditableTarget(event.target)) lastUserTypingAt = Date.now();
-  }, true);
-  document.addEventListener('keydown', (event) => {
-    if (isEditableTarget(event.target)) lastUserTypingAt = Date.now();
-  }, true);
-  document.addEventListener('focusin', (event) => {
-    if (isEditableTarget(event.target)) lastUserTypingAt = Date.now();
-  }, true);
-  document.addEventListener('click', () => {
-    lastUserClickAt = Date.now();
-  }, true);
-
-
   function normalizeEmail(value){
     return String(value || '').trim().toLowerCase();
   }
 
   function normalizeApiBase(value){
     return String(value || '').trim().replace(/\/+$/, '');
-  }
-
-  function isEditableElement(node){
-    return !!(node && node.matches && node.matches('input, textarea, select, [contenteditable="true"], [contenteditable=""]'));
-  }
-
-  function shouldFreezeRender(container){
-    const active = document.activeElement;
-    return !!(active && container && container.contains(active) && isEditableElement(active));
-  }
-
-  function captureFocusSnapshot(container){
-    const active = document.activeElement;
-    if (!(active && container && container.contains(active) && isEditableElement(active))) return null;
-    const selector = active.getAttribute('data-preserve-focus-selector') || active.getAttribute('data-preserve-focus') || active.getAttribute('data-part-field') || active.getAttribute('data-part-section') || active.getAttribute('data-seq-select') || active.getAttribute('data-stepper-ai-prompt') || active.getAttribute('data-stepper-glossary-name') || active.getAttribute('data-stepper-glossary-counts') || active.getAttribute('data-stepper-glossary-foot') || active.getAttribute('data-stepper-glossary-tags') || active.getAttribute('data-stepper-glossary-description') || active.name || active.id || '';
-    return {
-      tag: active.tagName,
-      selector,
-      value: 'value' in active ? active.value : '',
-      selectionStart: typeof active.selectionStart === 'number' ? active.selectionStart : null,
-      selectionEnd: typeof active.selectionEnd === 'number' ? active.selectionEnd : null,
-      preserveAttr: active.getAttribute('data-preserve-focus-selector') ? 'data-preserve-focus-selector' : (active.getAttribute('data-preserve-focus') ? 'data-preserve-focus' : null)
-    };
-  }
-
-  function restoreFocusSnapshot(container, snapshot){
-    if (!(container && snapshot)) return;
-    let node = null;
-    if (snapshot.preserveAttr && snapshot.selector) {
-      node = container.querySelector('[' + snapshot.preserveAttr + '="' + cssEscape(snapshot.selector) + '"]');
-    }
-    if (!node && snapshot.selector) {
-      node = container.querySelector('[data-part-field="' + cssEscape(snapshot.selector) + '"], [data-part-section="' + cssEscape(snapshot.selector) + '"], [data-seq-select], [data-stepper-ai-prompt="' + cssEscape(snapshot.selector) + '"], [data-stepper-glossary-name="' + cssEscape(snapshot.selector) + '"], [data-stepper-glossary-counts="' + cssEscape(snapshot.selector) + '"], [data-stepper-glossary-foot="' + cssEscape(snapshot.selector) + '"], [data-stepper-glossary-tags="' + cssEscape(snapshot.selector) + '"], [data-stepper-glossary-description="' + cssEscape(snapshot.selector) + '"]');
-    }
-    if (!node && snapshot.tag) node = container.querySelector(snapshot.tag.toLowerCase());
-    if (!(node && isEditableElement(node))) return;
-    node.focus({ preventScroll:true });
-    if ('value' in node && typeof snapshot.value === 'string' && node.value !== snapshot.value) node.value = snapshot.value;
-    if (typeof snapshot.selectionStart === 'number' && typeof node.setSelectionRange === 'function') {
-      try { node.setSelectionRange(snapshot.selectionStart, snapshot.selectionEnd == null ? snapshot.selectionStart : snapshot.selectionEnd); } catch (_) {}
-    }
-  }
-
-  function cssEscape(value){
-    const str = String(value || '');
-    if (window.CSS && typeof window.CSS.escape === 'function') return window.CSS.escape(str);
-    return str.replace(/[\0-\x1f\x7f"\\]/g, '\$&');
   }
 
   function readApiBase(){
@@ -338,7 +258,7 @@
     data.meta.counts = String(totalCounts);
     writeAppData(data);
     updateSavedSignature('');
-    renderPages(true);
+    renderPages();
     openBuildWorksheet();
     return { totalCounts, sections: sectionCounter };
   }
@@ -729,10 +649,10 @@
     hideNativeExtraHost();
     if (state.ui.mainEl) state.ui.mainEl.style.display = '';
     if (state.ui.footerWrap) state.ui.footerWrap.style.display = ''; // keep native layout stable; extra pages render inline without blanking the app
-    renderPages();
+    renderPages(true);
     updateTabButtons();
     refreshLiveQueues().then(() => {
-      if (state.activePage) renderPages();
+      if (state.activePage) __stepperScheduleFullRender(2000);
     }).catch(() => {});
   }
 
@@ -1995,11 +1915,9 @@
     });
   }
 
-  function renderSignInPage(force){
+  function renderSignInPage(){
     const page = document.getElementById(SIGNIN_PAGE_ID);
     if (!page) return;
-    if (!force && shouldFreezeRender(page)) return;
-    const focusSnapshot = captureFocusSnapshot(page);
     const theme = themeClasses();
     const session = state.session;
     const profile = session && session.profile ? session.profile : null;
@@ -2069,12 +1987,12 @@
               </div>
             </div>
             <div class="mt-4 grid gap-4 sm:grid-cols-2">
-              <input data-stepper-glossary-name="1" class="stepper-google-input" placeholder="Step name" value="${escapeHtml(state.glossaryDraft.name || '')}" />
-              <input data-stepper-glossary-counts="1" class="stepper-google-input" placeholder="Counts, e.g. 1&2" value="${escapeHtml(state.glossaryDraft.counts || '')}" />
-              <input data-stepper-glossary-foot="1" class="stepper-google-input" placeholder="Foot: Right, Left, or Either" value="${escapeHtml(state.glossaryDraft.foot || '')}" />
-              <input data-stepper-glossary-tags="1" class="stepper-google-input" placeholder="Tags or aliases (optional)" value="${escapeHtml(state.glossaryDraft.tags || '')}" />
+              <input data-stepper-glossary-name="1" class="stepper-google-input" placeholder="Step name" />
+              <input data-stepper-glossary-counts="1" class="stepper-google-input" placeholder="Counts, e.g. 1&2" />
+              <input data-stepper-glossary-foot="1" class="stepper-google-input" placeholder="Foot: Right, Left, or Either" />
+              <input data-stepper-glossary-tags="1" class="stepper-google-input" placeholder="Tags or aliases (optional)" />
             </div>
-            <div class="mt-4 ${theme.panel} rounded-3xl border p-4"><textarea data-stepper-glossary-description="1" class="stepper-google-input" rows="4" placeholder="Describe the step clearly so Admin can preview it.">${escapeHtml(state.glossaryDraft.description || '')}</textarea></div>
+            <div class="mt-4 ${theme.panel} rounded-3xl border p-4"><textarea data-stepper-glossary-description="1" class="stepper-google-input" rows="4" placeholder="Describe the step clearly so Admin can preview it."></textarea></div>
             <div class="mt-4 flex flex-wrap gap-3"><button type="button" data-stepper-action="request-glossary-step" class="stepper-google-cta ${theme.button}">Send glossary step request</button></div>
           </div>
           <div class="mx-auto max-w-3xl rounded-3xl border p-5 sm:p-6 ${theme.soft}">
@@ -2151,16 +2069,7 @@
     const applyNeedsSignInBtn = page.querySelector('[data-stepper-action="apply-moderator-needs-signin"]');
     if (applyNeedsSignInBtn) applyNeedsSignInBtn.addEventListener('click', () => { alert('Sign in with Google first, then press Apply for moderator.'); });
     const aiPrompt = page.querySelector('[data-stepper-ai-prompt="1"]');
-    if (aiPrompt) {
-      aiPrompt.setAttribute('data-preserve-focus-selector', 'ai-prompt');
-      aiPrompt.addEventListener('input', () => { state.aiDance.prompt = aiPrompt.value; });
-    }
-    [['[data-stepper-glossary-name="1"]','name'],['[data-stepper-glossary-counts="1"]','counts'],['[data-stepper-glossary-foot="1"]','foot'],['[data-stepper-glossary-tags="1"]','tags'],['[data-stepper-glossary-description="1"]','description']].forEach(([selector,key]) => {
-      const field = page.querySelector(selector);
-      if (!field) return;
-      field.setAttribute('data-preserve-focus-selector', selector);
-      field.addEventListener('input', () => { state.glossaryDraft[key] = field.value; });
-    });
+    if (aiPrompt) aiPrompt.addEventListener('input', () => { state.aiDance.prompt = aiPrompt.value; });
     const aiJudgeBtn = page.querySelector('[data-stepper-action="ai-judge"]');
     if (aiJudgeBtn) aiJudgeBtn.addEventListener('click', () => { state.aiDance.mode = 'judge'; runAiDanceTool('judge'); });
     const aiAddBtn = page.querySelector('[data-stepper-action="ai-add"]');
@@ -2186,7 +2095,6 @@
       };
       requestGlossaryStep(payload).then((ok)=>{
         if (ok) {
-          state.glossaryDraft = { name:'', counts:'', foot:'', tags:'', description:'' };
           ['[data-stepper-glossary-name="1"]','[data-stepper-glossary-counts="1"]','[data-stepper-glossary-foot="1"]','[data-stepper-glossary-tags="1"]','[data-stepper-glossary-description="1"]'].forEach(sel => {
             const el = page.querySelector(sel);
             if (el) el.value = '';
@@ -2195,7 +2103,6 @@
       });
     });
 
-    restoreFocusSnapshot(page, focusSnapshot);
     renderGoogleButton();
     renderPresenceOnly();
   }
@@ -2572,11 +2479,7 @@
     observer.observe(page, { childList: true, subtree: true, characterData: true });
   }
 
-  function renderPages(force = false){
-    if (!force && isUserActivelyEditing()) {
-      scheduleRenderPages(2000, false);
-      return;
-    }
+  function renderPages(){
     locateUi();
     ensureHost();
     renderSignInPage();
@@ -2642,6 +2545,9 @@
     updateTabButtons();
     renderPresenceOnly();
     renderSuspensionBanner();
+    patchFeaturedPageCopy();
+    const __savedPage = document.getElementById('stepper-saved-dances-page');
+    if (__savedPage && ((__savedPage.offsetParent || __savedPage.getClientRects().length) && getComputedStyle(__savedPage).display !== 'none' && getComputedStyle(__savedPage).visibility !== 'hidden')) patchSavedDancesPage();
     renderSaveButton();
   }, 2200);
 
@@ -2672,7 +2578,7 @@
   window.addEventListener('storage', () => {
     if (state.session && state.session.credential) syncCurrentDanceToBackend(false);
     state.savedDancesUiSignature = '';
-    scheduleRenderPages(2000, false);
+    __stepperScheduleFullRender(2000);
   });
 
   async function refreshSubscription(){
@@ -3506,7 +3412,53 @@ Newest user question: ${question}`;
   }
 
   const __origRenderPages = renderPages;
-  renderPages = function(){
+  let __stepperFullRenderTimer = null;
+  let __stepperLastRenderedPage = null;
+
+  function __stepperActiveEditable(){
+    const el = document.activeElement;
+    if (!el) return null;
+    const editable = !!(el.isContentEditable || (typeof el.matches === 'function' && el.matches('textarea, select, input:not([type=button]):not([type=submit]):not([type=checkbox]):not([type=radio]):not([type=range])')));
+    if (!editable) return null;
+    return el.closest(`#${SIGNIN_PAGE_ID}, #${SUBSCRIPTION_PAGE_ID}, #${ADMIN_PAGE_ID}, #${MODERATOR_PAGE_ID}`) ? el : null;
+  }
+
+  function __stepperLightRefresh(){
+    locateUi();
+    ensureHost();
+    syncPageVisibility();
+    renderPresenceOnly();
+    renderSuspensionBanner();
+    patchFeaturedPageCopy();
+    updateAdminTabVisibility();
+    updateTabButtons();
+    renderQuickActions();
+    renderSaveButton();
+    renderFeatureBadge();
+    renderSiteHelper();
+    showNotificationToasts();
+  }
+
+  function __stepperScheduleFullRender(delay){
+    clearTimeout(__stepperFullRenderTimer);
+    __stepperFullRenderTimer = setTimeout(() => {
+      if (__stepperActiveEditable()) {
+        __stepperScheduleFullRender(2000);
+        return;
+      }
+      renderPages(true);
+    }, Math.max(0, Number(delay) || 0));
+  }
+
+  renderPages = function(force){
+    const pageChanged = __stepperLastRenderedPage !== (state.activePage || null);
+    if (!force && __stepperActiveEditable() && !pageChanged) {
+      __stepperLightRefresh();
+      __stepperScheduleFullRender(2000);
+      return;
+    }
+    clearTimeout(__stepperFullRenderTimer);
+    __stepperLastRenderedPage = state.activePage || null;
     __origRenderPages();
     ensureHost();
     renderModeratorPage();
@@ -3533,7 +3485,7 @@ Newest user question: ${question}`;
     if (__stepperLiveQueueRefreshBusy || !(state.session && state.session.credential)) return;
     __stepperLiveQueueRefreshBusy = true;
     refreshLiveQueues().then(() => {
-      if (state.activePage === 'admin' || state.activePage === 'moderator' || state.activePage === 'signin' || state.activePage === 'subscription') renderPages();
+      if (state.activePage === 'admin' || state.activePage === 'moderator' || state.activePage === 'signin' || state.activePage === 'subscription') __stepperScheduleFullRender(2000);
     }).catch(() => {}).finally(() => { __stepperLiveQueueRefreshBusy = false; });
   }, LIVE_QUEUE_SYNC_INTERVAL_MS);
 
