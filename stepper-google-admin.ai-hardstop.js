@@ -1543,6 +1543,46 @@
       return false;
     }
   }
+
+  window.__stepperSendMenuStepToAdmin = async function(payload){
+    const step = payload && payload.step && typeof payload.step === 'object' ? payload.step : {};
+    const stepName = String(step.name || step.moveName || '').trim();
+    const stepDescription = String(step.description || step.desc || '').trim();
+    const stepCount = String(step.count || '').trim() || '1';
+    const stepFoot = String(step.foot || 'Either').trim() || 'Either';
+    if (!stepName || !stepDescription) {
+      alert('That step needs a name and description before it can be sent to Admin.');
+      return false;
+    }
+    return requestGlossaryStep({
+      requestType: 'new',
+      name: stepName,
+      description: stepDescription,
+      counts: stepCount,
+      foot: stepFoot,
+      tags: 'Sent from step menu'
+    });
+  };
+
+  window.__stepperSendMenuStepToAdmin = async function(payload){
+    const step = payload && payload.step && typeof payload.step === 'object' ? payload.step : {};
+    const stepName = String(step.name || step.moveName || '').trim();
+    const stepDescription = String(step.description || step.desc || '').trim();
+    const stepCount = String(step.count || '').trim() || '1';
+    const stepFoot = String(step.foot || 'Either').trim() || 'Either';
+    if (!stepName || !stepDescription) {
+      alert('That step needs a name and description before it can be sent to Admin.');
+      return false;
+    }
+    return requestGlossaryStep({
+      requestType: 'new',
+      name: stepName,
+      description: stepDescription,
+      counts: stepCount,
+      foot: stepFoot,
+      tags: 'Sent from step menu'
+    });
+  };
   window.__stepperSendGlossaryStepRequest = requestGlossaryStep;
 
   async function decideGlossaryRequest(id, decision){
