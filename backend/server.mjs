@@ -6,7 +6,6 @@ import { OAuth2Client } from "google-auth-library";
 import { promises as fs } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { MongoClient } from "mongodb";
 
 dotenv.config();
 
@@ -27,19 +26,10 @@ const dataDir = process.env.DATA_DIR
 const dbPath = path.join(dataDir, "stepper-db.json");
 const dbBackupPath = `${dbPath}.bak`;
 const dbTempPath = `${dbPath}.tmp`;
-const mongoUri = String(process.env.MONGODB_URI || process.env.MONGO_URI || process.env.MONGO_URL || "").trim();
-const mongoDbName = String(process.env.MONGODB_DB_NAME || process.env.MONGODB_DB || "step_by_stepper").trim() || "step_by_stepper";
-const mongoCollectionName = String(process.env.MONGODB_COLLECTION || "app_state").trim() || "app_state";
-let mongoClientInstance = null;
-let mongoCollection = null;
-let mongoAvailable = false;
-let mongoFailureReason = '';
-let writeQueue = Promise.resolve();
 console.log('[Stepper] RENDER_DISK_MOUNT_PATH =', process.env.RENDER_DISK_MOUNT_PATH || '(not set)');
 console.log('[Stepper] DATA_DIR =', process.env.DATA_DIR || '(not set)');
 console.log('[Stepper] resolved dataDir =', dataDir);
 console.log('[Stepper] resolved dbPath =', dbPath);
-console.log('[Stepper] storage mode =', mongoUri ? `mongodb (${mongoDbName}/${mongoCollectionName})` : 'json-file');
 const openaiClient = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
@@ -320,56 +310,20 @@ function parseAllowedOrigins(value) {
 }
 
 const allowedOrigins = parseAllowedOrigins(process.env.ALLOWED_ORIGIN || "*");
-
-function isAllowedOrigin(origin) {
-  if (!origin) return true;
-  if (allowedOrigins === "*") return true;
-  const safe = safeOrigin(origin) || String(origin || '').trim();
-  return Array.isArray(allowedOrigins) && allowedOrigins.includes(safe);
-}
-
-function applyCorsHeaders(req, res) {
-  const requestOrigin = safeOrigin(req.headers.origin);
-  const allowOrigin = requestOrigin && isAllowedOrigin(requestOrigin)
-    ? requestOrigin
-    : (allowedOrigins === "*" ? "*" : "");
-  if (allowOrigin) {
-    res.setHeader('Access-Control-Allow-Origin', allowOrigin);
-    res.setHeader('Vary', 'Origin');
-  }
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD');
-  const requestedHeaders = String(req.headers['access-control-request-headers'] || '').trim();
-  res.setHeader(
-    'Access-Control-Allow-Headers',
-    requestedHeaders || 'Content-Type, Authorization, X-Stepper-Google-Token, X-Google-Credential, X-Requested-With'
-  );
-  res.setHeader('Access-Control-Expose-Headers', 'Content-Type, Authorization');
-  res.setHeader('Access-Control-Max-Age', '86400');
-}
-
 const corsOptions = {
   origin(origin, callback) {
-    if (isAllowedOrigin(origin)) {
+    if (allowedOrigins === "*" || !origin || allowedOrigins.includes(origin)) {
       callback(null, true);
       return;
     }
-    callback(null, false);
+    callback(new Error("Origin not allowed by Step-By-Stepper backend."));
   },
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Stepper-Google-Token", "X-Google-Credential", "X-Requested-With"],
-  exposedHeaders: ["Content-Type", "Authorization"],
-  optionsSuccessStatus: 204,
-  preflightContinue: false
+  allowedHeaders: ["Content-Type", "Authorization", "X-Stepper-Google-Token", "X-Google-Credential"],
+  optionsSuccessStatus: 204
 };
-app.use((req, res, next) => {
-  applyCorsHeaders(req, res);
-  if (req.method === 'OPTIONS') {
-    return res.status(204).end();
-  }
-  next();
-});
 app.use(cors(corsOptions));
-app.options('*', (_req, res) => res.status(204).end());
+app.options('*', cors(corsOptions));
 app.use(express.json({ limit: "4mb" }));
 
 function emptyDb() {
@@ -389,62 +343,6 @@ function emptyDb() {
     securityAlerts: [],
     staffChat: []
   };
-}
-
-async function initMongo() {
-  if (!mongoUri) return false;
-  if (mongoAvailable && mongoCollection) return true;
-  try {
-    if (!mongoClientInstance) {
-      mongoClientInstance = new MongoClient(mongoUri, {
-        serverSelectionTimeoutMS: 8000,
-        connectTimeoutMS: 8000,
-        retryWrites: true
-      });
-    }
-    await mongoClientInstance.connect();
-    mongoCollection = mongoClientInstance.db(mongoDbName).collection(mongoCollectionName);
-    mongoAvailable = true;
-    mongoFailureReason = '';
-    return true;
-  } catch (error) {
-    mongoAvailable = false;
-    mongoCollection = null;
-    mongoFailureReason = String(error?.message || error || 'MongoDB unavailable.');
-    console.warn('[Stepper] MongoDB unavailable; falling back to JSON storage.', mongoFailureReason);
-    return false;
-  }
-}
-
-function normalizeDbShape(parsed) {
-  if (!parsed || typeof parsed !== "object") throw new Error("Database state did not contain an object.");
-  if (!parsed.users || typeof parsed.users !== "object") parsed.users = {};
-  if (!Array.isArray(parsed.featuredChoreo)) parsed.featuredChoreo = [];
-  if (!Array.isArray(parsed.danceRegistry)) parsed.danceRegistry = [];
-  if (!Array.isArray(parsed.submissions)) parsed.submissions = [];
-  if (!Array.isArray(parsed.moderatorApplications)) parsed.moderatorApplications = [];
-  if (!Array.isArray(parsed.moderatorRegistry)) parsed.moderatorRegistry = [];
-  if (!Array.isArray(parsed.adminRegistry)) parsed.adminRegistry = [];
-  if (!Array.isArray(parsed.pendingModeratorInvites)) parsed.pendingModeratorInvites = [];
-  if (!Array.isArray(parsed.pendingSuspensions)) parsed.pendingSuspensions = [];
-  if (!Array.isArray(parsed.glossaryRequests)) parsed.glossaryRequests = [];
-  if (!Array.isArray(parsed.approvedGlossarySteps)) parsed.approvedGlossarySteps = [];
-  if (!Array.isArray(parsed.siteMemory)) parsed.siteMemory = [];
-  if (!Array.isArray(parsed.securityAlerts)) parsed.securityAlerts = [];
-  if (!Array.isArray(parsed.staffChat)) parsed.staffChat = [];
-  return parsed;
-}
-
-async function readDbFromMongo() {
-  const ok = await initMongo();
-  if (!ok || !mongoCollection) throw new Error(mongoFailureReason || 'MongoDB unavailable.');
-  const doc = await mongoCollection.findOne({ _id: 'app_state' });
-  if (!doc || !doc.state || typeof doc.state !== 'object') {
-    const blank = emptyDb();
-    await mongoCollection.updateOne({ _id: 'app_state' }, { $set: { state: blank, updatedAt: new Date().toISOString() } }, { upsert: true });
-    return blank;
-  }
-  return normalizeDbShape(doc.state);
 }
 
 async function ensureDb() {
@@ -469,7 +367,22 @@ async function ensureDb() {
 async function readDbFromPath(targetPath) {
   const raw = await fs.readFile(targetPath, "utf8");
   const parsed = JSON.parse(raw);
-  return normalizeDbShape(parsed);
+  if (!parsed || typeof parsed !== "object") throw new Error("Database file did not contain an object.");
+  if (!parsed.users || typeof parsed.users !== "object") parsed.users = {};
+  if (!Array.isArray(parsed.featuredChoreo)) parsed.featuredChoreo = [];
+  if (!Array.isArray(parsed.danceRegistry)) parsed.danceRegistry = [];
+  if (!Array.isArray(parsed.submissions)) parsed.submissions = [];
+  if (!Array.isArray(parsed.moderatorApplications)) parsed.moderatorApplications = [];
+  if (!Array.isArray(parsed.moderatorRegistry)) parsed.moderatorRegistry = [];
+  if (!Array.isArray(parsed.adminRegistry)) parsed.adminRegistry = [];
+  if (!Array.isArray(parsed.pendingModeratorInvites)) parsed.pendingModeratorInvites = [];
+  if (!Array.isArray(parsed.pendingSuspensions)) parsed.pendingSuspensions = [];
+  if (!Array.isArray(parsed.glossaryRequests)) parsed.glossaryRequests = [];
+  if (!Array.isArray(parsed.approvedGlossarySteps)) parsed.approvedGlossarySteps = [];
+  if (!Array.isArray(parsed.siteMemory)) parsed.siteMemory = [];
+  if (!Array.isArray(parsed.securityAlerts)) parsed.securityAlerts = [];
+  if (!Array.isArray(parsed.staffChat)) parsed.staffChat = [];
+  return parsed;
 }
 
 function syncModeratorRegistry(db) {
@@ -506,16 +419,6 @@ function syncModeratorRegistry(db) {
 }
 
 async function readDb() {
-  if (mongoUri) {
-    try {
-      const parsed = await readDbFromMongo();
-      return syncAndPruneDb(parsed);
-    } catch (error) {
-      mongoAvailable = false;
-      mongoFailureReason = String(error?.message || error || 'MongoDB unavailable.');
-      console.warn('[Stepper] MongoDB init skipped; using JSON storage fallback.');
-    }
-  }
   await ensureDb();
   try {
     const parsed = await readDbFromPath(dbPath);
@@ -582,45 +485,31 @@ function syncAdminRegistry(db) {
   return db;
 }
 
+let writeDbQueue = Promise.resolve();
+
 async function writeDb(payload) {
-  const normalized = syncAdminRegistry(syncModeratorRegistry(syncAndPruneDb(payload)));
-  if (mongoUri) {
-    try {
-      const ok = await initMongo();
-      if (ok && mongoCollection) {
-        await mongoCollection.updateOne(
-          { _id: 'app_state' },
-          { $set: { state: normalized, updatedAt: new Date().toISOString() } },
-          { upsert: true }
-        );
-        mongoAvailable = true;
-        mongoFailureReason = '';
-        return;
-      }
-    } catch (error) {
-      mongoAvailable = false;
-      mongoFailureReason = String(error?.message || error || 'MongoDB unavailable.');
-      console.warn('[Stepper] MongoDB write failed; using JSON storage fallback.', mongoFailureReason);
-    }
-  }
-  await ensureDb();
-  const data = JSON.stringify(normalized, null, 2);
-  writeQueue = writeQueue.then(async () => {
-    const uniqueTempPath = `${dbPath}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
+  const prepared = syncAdminRegistry(syncModeratorRegistry(syncAndPruneDb(payload)));
+  writeDbQueue = writeDbQueue.then(async () => {
+    await ensureDb();
+    const data = JSON.stringify(prepared, null, 2);
+    const tempPath = `${dbPath}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
     try {
       try {
         await fs.copyFile(dbPath, dbBackupPath);
       } catch {}
-      await fs.writeFile(uniqueTempPath, data, 'utf8');
-      await fs.rename(uniqueTempPath, dbPath);
+      await fs.writeFile(tempPath, data, 'utf8');
+      await fs.rename(tempPath, dbPath);
       try {
         await fs.copyFile(dbPath, dbBackupPath);
       } catch {}
     } finally {
-      try { await fs.unlink(uniqueTempPath); } catch {}
+      try { await fs.unlink(tempPath); } catch {}
     }
+  }).catch((error) => {
+    console.error('[Stepper] queued DB write failed', error);
+    throw error;
   });
-  return writeQueue;
+  return writeDbQueue;
 }
 
 
@@ -1640,16 +1529,6 @@ app.post("/api/admin/submissions/:id/reject", requireAdmin, async (req, res) => 
   res.json({ ok: true, removedId: id, item });
 });
 
-app.delete("/api/admin/submissions/:id", requireAdmin, async (req, res) => {
-  const db = await readDb();
-  const id = String(req.params.id || "").trim();
-  const item = (Array.isArray(db.submissions) ? db.submissions : []).find(row => row && row.id === id);
-  if (!item) return res.status(404).json({ ok: false, error: 'Submission not found.' });
-  db.submissions = (Array.isArray(db.submissions) ? db.submissions : []).filter(row => row && row.id !== id);
-  await writeDb(db);
-  res.json({ ok: true, removedId: id, item });
-});
-
 app.post("/api/admin/submissions/:id/approve-site", requireAdmin, async (req, res) => {
   const db = await readDb();
   const id = String(req.params.id || "").trim();
@@ -2188,30 +2067,27 @@ app.post('/api/glossary/request', requireGoogleUser, async (req, res) => {
   const name = String(raw.name || '').trim();
   const description = String(raw.description || raw.desc || '').trim();
   if (!name || !description) return res.status(400).json({ ok:false, error:'Step name and description are required.' });
+  const requestType = String(raw.requestType || '').trim().toLowerCase() === 'edit' ? 'edit' : 'new';
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);
   touchUser(db, req.stepperUser, key);
-  const requestType = String(raw.requestType || '').trim() === 'edit' ? 'edit' : 'new';
-  const original = raw.original && typeof raw.original === 'object' ? raw.original : {};
   const item = {
     id: createId('glossary_request'),
     ownerKey: key,
     ownerEmail: req.stepperUser.email,
     ownerName: req.stepperUser.name,
     requestType,
+    originalStepId: String(raw.originalStepId || '').trim().slice(0, 120),
+    originalName: String(raw.originalName || '').trim().slice(0, 120),
+    originalDescription: String(raw.originalDescription || '').trim().slice(0, 1200),
+    originalCounts: String(raw.originalCounts || '').trim().slice(0, 40),
+    originalFoot: String(raw.originalFoot || '').trim().slice(0, 24),
+    originalTags: String(raw.originalTags || '').trim().slice(0, 240),
     name: name.slice(0, 120),
     description: description.slice(0, 1200),
     counts: String(raw.counts || raw.count || '1').trim().slice(0, 40) || '1',
     foot: String(raw.foot || 'Either').trim().slice(0, 24) || 'Either',
     tags: String(raw.tags || '').trim().slice(0, 240),
-    original: requestType === 'edit' ? {
-      sourceId: String(original.sourceId || '').trim().slice(0, 120),
-      name: String(original.name || '').trim().slice(0, 120),
-      description: String(original.description || original.desc || '').trim().slice(0, 1200),
-      counts: String(original.counts || original.count || '').trim().slice(0, 40),
-      foot: String(original.foot || '').trim().slice(0, 24),
-      tags: String(original.tags || '').trim().slice(0, 240)
-    } : null,
     autoMirror: requestType === 'new' ? buildGlossaryTwin(raw) : null,
     status: 'pending',
     createdAt: new Date().toISOString(),
@@ -2236,32 +2112,27 @@ app.post('/api/admin/glossary-requests/:id/approve', requireAdmin, async (req, r
   item.status = 'approved';
   item.updatedAt = new Date().toISOString();
   item.adminNote = String(req.body?.note || '').trim().slice(0, 600);
-  const additions = [];
-  if (String(item.requestType || 'new') === 'edit' && item.original && item.original.name) {
-    const approved = normalizeGlossaryStepPayload(item, { email:item.ownerEmail, name:item.ownerName });
-    approved.status = 'approved';
-    approved.sourceRequestId = item.id;
-    let replaced = false;
-    db.approvedGlossarySteps = (Array.isArray(db.approvedGlossarySteps) ? db.approvedGlossarySteps : []).map((row) => {
-      const byId = item.original.sourceId && String(row?.id || '') === String(item.original.sourceId || '');
-      const byShape = !item.original.sourceId && String(row?.name || '').trim().toLowerCase() === String(item.original.name || '').trim().toLowerCase() && String(row?.foot || '').trim().toLowerCase() === String(item.original.foot || '').trim().toLowerCase();
-      if (byId || byShape) {
-        replaced = true;
-        return { ...row, ...approved, id: String(row?.id || approved.id || '').trim() || approved.id, sourceRequestId: item.id, updatedAt: new Date().toISOString() };
-      }
-      return row;
-    });
-    if (!replaced) {
-      db.approvedGlossarySteps = [approved, ...(Array.isArray(db.approvedGlossarySteps) ? db.approvedGlossarySteps : [])];
-      additions.push(approved);
-    } else {
-      additions.push(approved);
-    }
+  let additions = [];
+  let updatedStep = null;
+  if (String(item.requestType || '') === 'edit') {
+    const approvedList = Array.isArray(db.approvedGlossarySteps) ? db.approvedGlossarySteps : [];
+    const existing = approvedList.find((step) => String(step?.id || '') === String(item.originalStepId || ''))
+      || approvedList.find((step) => String(step?.name || '').trim().toLowerCase() === String(item.originalName || '').trim().toLowerCase());
+    if (!existing) return res.status(404).json({ ok:false, error:'The original glossary step could not be found for this edit suggestion.' });
+    existing.name = String(item.name || existing.name || '').trim().slice(0, 120);
+    existing.description = String(item.description || existing.description || '').trim().slice(0, 1200);
+    existing.counts = String(item.counts || existing.counts || '1').trim().slice(0, 40) || '1';
+    existing.foot = String(item.foot || existing.foot || 'Either').trim().slice(0, 24) || 'Either';
+    existing.tags = String(item.tags || existing.tags || '').trim().slice(0, 240);
+    existing.updatedAt = new Date().toISOString();
+    existing.updatedBy = { email: req.stepperUser.email, name: req.stepperUser.name };
+    existing.sourceRequestId = item.id;
+    updatedStep = existing;
   } else {
     const approved = normalizeGlossaryStepPayload(item, { email:item.ownerEmail, name:item.ownerName });
     approved.status = 'approved';
     approved.sourceRequestId = item.id;
-    additions.push(approved);
+    additions = [approved];
     if (item.autoMirror) {
       const twin = normalizeGlossaryStepPayload({ ...item.autoMirror, counts:item.autoMirror.counts || item.counts, tags:item.autoMirror.tags || item.tags }, { email:item.ownerEmail, name:item.ownerName });
       twin.status = 'approved';
@@ -2271,9 +2142,13 @@ app.post('/api/admin/glossary-requests/:id/approve', requireAdmin, async (req, r
     }
     db.approvedGlossarySteps = [...additions, ...(Array.isArray(db.approvedGlossarySteps) ? db.approvedGlossarySteps : [])].slice(0, 4000);
   }
-  notifyUser(db, item.ownerKey, { kind:'glossary-approved', title:'Glossary step approved', message: String(item.requestType || 'new') === 'edit' ? 'Admin approved your glossary edit suggestion.' : (item.autoMirror ? 'Admin approved your glossary step and created the opposite-foot twin too.' : 'Admin approved your glossary step.') });
+  pushNotification(db, { userKey: item.ownerKey, email: item.ownerEmail }, {
+    kind: 'glossary-approved',
+    title: String(item.requestType || '') === 'edit' ? 'Glossary edit approved' : 'Glossary step approved',
+    message: String(item.requestType || '') === 'edit' ? 'Admin approved your glossary edit suggestion.' : (item.autoMirror ? 'Admin approved your glossary step and created the opposite-foot twin too.' : 'Admin approved your glossary step.')
+  });
   await writeDb(db);
-  res.json({ ok:true, item, added:additions });
+  res.json({ ok:true, item, added:additions, updatedStep });
 });
 
 app.post('/api/admin/glossary-requests/:id/reject', requireAdmin, async (req, res) => {
@@ -2284,7 +2159,7 @@ app.post('/api/admin/glossary-requests/:id/reject', requireAdmin, async (req, re
   item.status = 'rejected';
   item.updatedAt = new Date().toISOString();
   item.adminNote = String(req.body?.note || '').trim().slice(0, 600);
-  notifyUser(db, item.ownerKey, { kind:'glossary-rejected', title:'Glossary step declined', message: item.adminNote ? `Admin declined your glossary step request: ${item.adminNote}` : 'Admin declined your glossary step request this time.' });
+  pushNotification(db, { userKey: item.ownerKey, email: item.ownerEmail }, { kind:'glossary-rejected', title:'Glossary step declined', message: item.adminNote ? `Admin declined your glossary step request: ${item.adminNote}` : 'Admin declined your glossary step request this time.' });
   await writeDb(db);
   res.json({ ok:true, item });
 });
