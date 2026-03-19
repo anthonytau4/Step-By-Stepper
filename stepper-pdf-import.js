@@ -5,8 +5,92 @@
 (function() {
   'use strict';
 
-  const API_BASE = window.STEPPER_API_BASE || '';
-  function getApiBase() { return API_BASE || window.location.origin; }
+  const API_BASE_KEY = 'stepper_api_base_v1';
+  const DEFAULT_BACKEND_BASE = 'https://step-by-stepper.onrender.com';
+  const ALT_BACKEND_BASE = 'https://api.step-by-stepper.com';
+
+  function normalizeApiBase(value) {
+    return String(value || '').trim().replace(/\/+$/, '');
+  }
+
+  function rememberApiBase(value) {
+    const normalized = normalizeApiBase(value);
+    if (!normalized) return;
+    window.STEPPER_API_BASE = normalized;
+    try { localStorage.setItem(API_BASE_KEY, normalized); } catch (_) {}
+  }
+
+  function getApiBaseCandidates(preferred) {
+    const candidates = [];
+    const push = (value) => {
+      const normalized = normalizeApiBase(value);
+      if (!normalized || candidates.includes(normalized)) return;
+      candidates.push(normalized);
+    };
+    const currentOrigin = (location.protocol === 'http:' || location.protocol === 'https:')
+      ? normalizeApiBase(location.origin)
+      : '';
+
+    push(preferred);
+    push(window.STEPPER_API_BASE);
+    try { push(localStorage.getItem(API_BASE_KEY)); } catch (_) {}
+    if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+      push('http://localhost:3000');
+      push(currentOrigin);
+      return candidates;
+    }
+    push(DEFAULT_BACKEND_BASE);
+    push(ALT_BACKEND_BASE);
+    if (currentOrigin && !/step-by-stepper\.com$/i.test(location.hostname)) push(currentOrigin);
+    return candidates;
+  }
+
+  async function requestPdfParse(formData) {
+    const retryableStatuses = new Set([0, 404, 405, 502, 503, 504]);
+    const candidates = getApiBaseCandidates(window.STEPPER_API_BASE);
+    let lastError = null;
+
+    for (const base of candidates) {
+      const endpoint = base + '/api/pdf/parse';
+      try {
+        const resp = await fetch(endpoint, {
+          method: 'POST',
+          body: formData,
+          headers: { Accept: 'application/json' }
+        });
+        const contentType = (resp.headers.get('content-type') || '').toLowerCase();
+        const isJson = contentType.includes('application/json');
+        const data = isJson ? await resp.json().catch(() => null) : null;
+
+        if (resp.ok && data && data.ok) {
+          rememberApiBase(base);
+          return { endpoint, data };
+        }
+
+        const bodyPreview = data
+          ? ''
+          : (await resp.text().catch(() => '')).trim().replace(/\s+/g, ' ').slice(0, 120);
+        const message = data && (data.detail || data.error)
+          ? (data.detail || data.error)
+          : `PDF import hit ${endpoint}, but the server responded with ${contentType || 'non-JSON content'}${bodyPreview ? `. Received ${bodyPreview}.` : '.'}`;
+        const error = new Error(message);
+        error.status = resp.status;
+        error.endpoint = endpoint;
+        error.retryable = !isJson || retryableStatuses.has(Number(resp.status));
+        lastError = error;
+        if (error.retryable && base !== candidates[candidates.length - 1]) continue;
+        throw error;
+      } catch (err) {
+        lastError = err;
+        const status = Number(err && err.status || 0);
+        const retryable = Boolean(err && err.retryable) || !status || retryableStatuses.has(status) || /Failed to fetch|NetworkError|Load failed/i.test(String(err && err.message || ''));
+        if (retryable && base !== candidates[candidates.length - 1]) continue;
+        throw err;
+      }
+    }
+
+    throw lastError || new Error('Could not reach the PDF import backend.');
+  }
 
   let injected = false;
   let parsedData = null;
@@ -283,9 +367,8 @@
     formData.append('file', file);
 
     try {
-      const resp = await fetch(getApiBase() + '/api/pdf/parse', { method: 'POST', body: formData });
-      const data = await resp.json();
-      if (!resp.ok || !data.ok) { setStatus('error', data.detail || data.error || 'Failed to parse PDF.'); return; }
+      const result = await requestPdfParse(formData);
+      const data = result.data;
 
       parsedData = data;
       const n = (data.steps || []).length;
@@ -293,7 +376,9 @@
       renderResults(data);
       document.getElementById('stepper-pdf-apply').style.display = 'inline-block';
     } catch (err) {
-      setStatus('error', 'Network error: ' + (err.message || 'Could not reach the server.'));
+      const message = err && err.message ? err.message : 'Could not reach the server.';
+      const isNetworkError = !err || !err.status;
+      setStatus('error', isNetworkError ? ('Network error: ' + message) : message);
     }
   }
 
