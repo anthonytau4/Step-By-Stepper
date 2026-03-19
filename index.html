@@ -608,6 +608,9 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   let transitionAudio = null;
   let transitionAudioPrimed = false;
   let transitionAudioSeeded = false;
+  let transitionAudioUnlocked = false;
+  let transitionAudioClockStartedAt = 0;
+  let transitionAudioSeedTime = 0;
 
   function ensureOverlay(){
     if (overlay) return overlay;
@@ -1136,9 +1139,10 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     transitionAudio = new Audio(loadingSongSrc);
     transitionAudio.preload = 'auto';
     transitionAudio.loop = true;
-    transitionAudio.volume = 0;
-    transitionAudio.muted = true;
+    transitionAudio.volume = 1;
+    transitionAudio.muted = false;
     try { transitionAudio.playsInline = true; } catch {}
+    try { transitionAudio.load(); } catch {}
     return transitionAudio;
   }
 
@@ -1150,7 +1154,8 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
         const duration = Number(audio.duration);
         if (!Number.isFinite(duration) || duration <= 1.2) return false;
         const safeDuration = Math.max(0, duration - 0.35);
-        audio.currentTime = safeDuration > 0 ? Math.random() * safeDuration : 0;
+        transitionAudioSeedTime = safeDuration > 0 ? Math.random() * safeDuration : 0;
+        transitionAudioClockStartedAt = Date.now();
         transitionAudioSeeded = true;
         return true;
       } catch {
@@ -1166,12 +1171,44 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     return audio;
   }
 
+  function getTransitionPlaybackPosition(){
+    const audio = ensureTransitionAudio();
+    const duration = Number(audio.duration);
+    if (!Number.isFinite(duration) || duration <= 0.25) return 0;
+    if (!transitionAudioSeeded) seedTransitionAudioFromRandom();
+    const startedAt = transitionAudioClockStartedAt || Date.now();
+    const elapsedSec = Math.max(0, (Date.now() - startedAt) / 1000);
+    const base = Number.isFinite(transitionAudioSeedTime) ? transitionAudioSeedTime : 0;
+    return ((base + elapsedSec) % duration + duration) % duration;
+  }
+
   function muteTransitionAudio(){
     if (!transitionAudio) return;
     try {
+      transitionAudio.pause();
       transitionAudio.muted = true;
       transitionAudio.volume = 0;
     } catch {}
+  }
+
+  function unlockTransitionAudio(){
+    const audio = ensureTransitionAudio();
+    if (transitionAudioUnlocked) return audio;
+    try {
+      audio.muted = true;
+      audio.volume = 0;
+      const playPromise = audio.play();
+      if (playPromise && typeof playPromise.then === 'function') {
+        playPromise.then(() => {
+          try {
+            audio.pause();
+            audio.currentTime = 0;
+          } catch {}
+          transitionAudioUnlocked = true;
+        }).catch(() => {});
+      }
+    } catch {}
+    return audio;
   }
 
   function primeTransitionAudioBackground(options){
@@ -1180,19 +1217,19 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       transitionAudio = audio;
       transitionAudioPrimed = false;
       transitionAudioSeeded = false;
+      transitionAudioUnlocked = false;
+      transitionAudioClockStartedAt = 0;
+      transitionAudioSeedTime = 0;
       audio.preload = 'auto';
       audio.loop = true;
-      audio.volume = 0;
-      audio.muted = true;
+      audio.volume = 1;
+      audio.muted = false;
       try { audio.playsInline = true; } catch {}
+      try { audio.load(); } catch {}
     }
     if (!transitionAudioPrimed || (options && options.randomize)) seedTransitionAudioFromRandom(!!(options && options.randomize));
-    muteTransitionAudio();
     transitionAudioPrimed = true;
-    try {
-      const playPromise = audio.play();
-      if (playPromise && typeof playPromise.catch === 'function') playPromise.catch(() => {});
-    } catch {}
+    if (options && options.unlock) unlockTransitionAudio();
     return audio;
   }
 
@@ -1203,10 +1240,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   function syncTransitionAudioMute(){
     if (!transitionAudio) return;
     if (running && areTransitionSoundsEnabled()) {
-      try {
-        transitionAudio.muted = false;
-        transitionAudio.volume = 1;
-      } catch {}
+      playTransitionAudio();
       return;
     }
     muteTransitionAudio();
@@ -1219,6 +1253,10 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       return;
     }
     try {
+      const position = getTransitionPlaybackPosition();
+      if (Number.isFinite(position) && position >= 0) audio.currentTime = position;
+    } catch {}
+    try {
       audio.muted = false;
       audio.volume = 1;
       const playPromise = audio.play();
@@ -1227,7 +1265,9 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   }
 
   window.__stepperPrimeLoadingAudio = function(options){
-    return primeTransitionAudioBackground(options || { randomize: true });
+    const config = options || { randomize: true };
+    if (config && typeof config === 'object' && !('unlock' in config)) config.unlock = true;
+    return primeTransitionAudioBackground(config);
   };
   window.__stepperStopLoadingAudio = stopTransitionAudio;
   window.__stepperSyncLoadingAudioMute = syncTransitionAudioMute;
@@ -2678,8 +2718,8 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
 
 
 
-<script src="./stepper-runtime-recovery.js?v=20260320-recovery-5"></script>
-<script src="./stepper-static-startup-fix.js?v=20260320-startup-fix-5"></script>
+<script src="./stepper-runtime-recovery.js?v=20260320-recovery-6"></script>
+<script src="./stepper-static-startup-fix.js?v=20260320-startup-fix-6"></script>
 <script src="./stepper-phrased-tools-fix.js?v=20260319-phrased-fix-1"></script>
 <script src="./stepper-route-paths.js?v=20260320-paths-2"></script>
 <script src="./stepper-editor-phrasing-repair.js?v=20260320-phrasing-repair-2"></script>

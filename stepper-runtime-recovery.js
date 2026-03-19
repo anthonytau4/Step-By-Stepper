@@ -23,6 +23,9 @@
   let audioStopTimer = 0;
   let loadingAudioPrimed = false;
   let loadingAudioSeeded = false;
+  let loadingAudioUnlocked = false;
+  let loadingAudioClockStartedAt = 0;
+  let loadingAudioSeedTime = 0;
 
 
   function readSettings(){
@@ -40,15 +43,16 @@
   }
 
   function ensureLoadingAudio(){
-    if (typeof window.__stepperPrimeLoadingAudio === 'function') return window.__stepperPrimeLoadingAudio();
+    if (typeof window.__stepperPrimeLoadingAudio === 'function') return window.__stepperPrimeLoadingAudio({ randomize: false, unlock: false });
     if (loadingAudio) return loadingAudio;
     loadingAudio = document.createElement('audio');
     loadingAudio.preload = 'auto';
     loadingAudio.src = loadingSongSrc;
     loadingAudio.loop = true;
-    loadingAudio.volume = 0;
-    loadingAudio.muted = true;
+    loadingAudio.volume = 1;
+    loadingAudio.muted = false;
     try { loadingAudio.playsInline = true; } catch {}
+    try { loadingAudio.load(); } catch {}
     return loadingAudio;
   }
 
@@ -60,7 +64,8 @@
         const duration = Number(audio.duration);
         if (!Number.isFinite(duration) || duration <= 1.2) return false;
         const safeDuration = Math.max(0, duration - 0.35);
-        audio.currentTime = safeDuration > 0 ? Math.random() * safeDuration : 0;
+        loadingAudioSeedTime = safeDuration > 0 ? Math.random() * safeDuration : 0;
+        loadingAudioClockStartedAt = Date.now();
         loadingAudioSeeded = true;
         return true;
       } catch {
@@ -74,6 +79,37 @@
     return audio;
   }
 
+  function getLoadingPlaybackPosition(){
+    const audio = ensureLoadingAudio();
+    const duration = Number(audio.duration);
+    if (!Number.isFinite(duration) || duration <= 0.25) return 0;
+    if (!loadingAudioSeeded) seedLoadingAudio();
+    const startedAt = loadingAudioClockStartedAt || Date.now();
+    const elapsedSec = Math.max(0, (Date.now() - startedAt) / 1000);
+    const base = Number.isFinite(loadingAudioSeedTime) ? loadingAudioSeedTime : 0;
+    return ((base + elapsedSec) % duration + duration) % duration;
+  }
+
+  function unlockLoadingAudio(){
+    const audio = ensureLoadingAudio();
+    if (loadingAudioUnlocked) return audio;
+    try {
+      audio.muted = true;
+      audio.volume = 0;
+      const playPromise = audio.play();
+      if (playPromise && typeof playPromise.then === 'function') {
+        playPromise.then(() => {
+          try {
+            audio.pause();
+            audio.currentTime = 0;
+          } catch {}
+          loadingAudioUnlocked = true;
+        }).catch(() => {});
+      }
+    } catch {}
+    return audio;
+  }
+
   function muteLoadingAudio(){
     if (typeof window.__stepperStopLoadingAudio === 'function') {
       window.__stepperStopLoadingAudio();
@@ -81,6 +117,7 @@
     }
     if (!loadingAudio) return;
     try {
+      loadingAudio.pause();
       loadingAudio.muted = true;
       loadingAudio.volume = 0;
     } catch {}
@@ -96,7 +133,7 @@
 
   function playLoadingAudio(durationMs){
     if (typeof window.__stepperPrimeLoadingAudio === 'function') {
-      window.__stepperPrimeLoadingAudio();
+      window.__stepperPrimeLoadingAudio({ randomize: false, unlock: false });
       if (soundsEnabled() && typeof window.__stepperSyncLoadingAudioMute === 'function') window.__stepperSyncLoadingAudioMute();
       audioStopTimer = window.setTimeout(stopLoadingAudio, Math.max(400, Number(durationMs) || 1400));
       return;
@@ -106,6 +143,11 @@
       seedLoadingAudio(true);
       loadingAudioPrimed = true;
     }
+    unlockLoadingAudio();
+    try {
+      const position = getLoadingPlaybackPosition();
+      if (Number.isFinite(position) && position >= 0) audio.currentTime = position;
+    } catch {}
     try {
       audio.muted = !soundsEnabled();
       audio.volume = soundsEnabled() ? 1 : 0;
