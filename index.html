@@ -3919,11 +3919,16 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     overlay.id = OVERLAY_ID;
     overlay.hidden = true;
     overlay.style.cssText = 'position:fixed;inset:0;z-index:2147483646;background:rgba(6,8,14,.82);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;padding:20px;';
-    overlay.innerHTML = '<div style="width:min(92vw,420px);border-radius:28px;padding:28px 24px;background:linear-gradient(180deg,#10131c,#0a0c12);border:1px solid rgba(255,255,255,.08);box-shadow:0 30px 80px rgba(0,0,0,.45);text-align:center;color:#fff"><div style="width:58px;height:58px;margin:0 auto 16px;border-radius:999px;border:4px solid rgba(255,255,255,.14);border-top-color:#f97316;animation:stepperPdfSpin 1s linear infinite"></div><div id="stepper-pdf-import-status" style="font-weight:900;letter-spacing:.08em;text-transform:uppercase;font-size:12px;opacity:.78;margin-bottom:8px">Importing PDF</div><div id="stepper-pdf-import-copy" style="font-size:15px;line-height:1.45;color:rgba(255,255,255,.88)">Reading your stepsheet and building it into the editor…</div></div>';
+    overlay.innerHTML = '<div style="position:relative;width:min(92vw,420px);border-radius:28px;padding:28px 24px;background:linear-gradient(180deg,#10131c,#0a0c12);border:1px solid rgba(255,255,255,.08);box-shadow:0 30px 80px rgba(0,0,0,.45);text-align:center;color:#fff"><button id="stepper-pdf-import-close" type="button" aria-label="Close import message" style="position:absolute;top:14px;right:14px;width:40px;height:40px;border-radius:999px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.08);color:#fff;font-size:22px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center">×</button><div style="width:58px;height:58px;margin:0 auto 16px;border-radius:999px;border:4px solid rgba(255,255,255,.14);border-top-color:#f97316;animation:stepperPdfSpin 1s linear infinite"></div><div id="stepper-pdf-import-status" style="font-weight:900;letter-spacing:.08em;text-transform:uppercase;font-size:12px;opacity:.78;margin-bottom:8px">Importing PDF</div><div id="stepper-pdf-import-copy" style="font-size:15px;line-height:1.45;color:rgba(255,255,255,.88)">Reading your stepsheet and building it into the editor…</div></div>';
     document.body.appendChild(overlay);
     const style = document.createElement('style');
     style.textContent = '@keyframes stepperPdfSpin{to{transform:rotate(360deg)}}';
     document.head.appendChild(style);
+    const closeBtn = overlay.querySelector('#stepper-pdf-import-close');
+    if (closeBtn) closeBtn.addEventListener('click', () => setOverlay(false));
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) setOverlay(false);
+    });
     return overlay;
   }
 
