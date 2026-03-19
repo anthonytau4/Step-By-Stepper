@@ -320,20 +320,56 @@ function parseAllowedOrigins(value) {
 }
 
 const allowedOrigins = parseAllowedOrigins(process.env.ALLOWED_ORIGIN || "*");
+
+function isAllowedOrigin(origin) {
+  if (!origin) return true;
+  if (allowedOrigins === "*") return true;
+  const safe = safeOrigin(origin) || String(origin || '').trim();
+  return Array.isArray(allowedOrigins) && allowedOrigins.includes(safe);
+}
+
+function applyCorsHeaders(req, res) {
+  const requestOrigin = safeOrigin(req.headers.origin);
+  const allowOrigin = requestOrigin && isAllowedOrigin(requestOrigin)
+    ? requestOrigin
+    : (allowedOrigins === "*" ? "*" : "");
+  if (allowOrigin) {
+    res.setHeader('Access-Control-Allow-Origin', allowOrigin);
+    res.setHeader('Vary', 'Origin');
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD');
+  const requestedHeaders = String(req.headers['access-control-request-headers'] || '').trim();
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    requestedHeaders || 'Content-Type, Authorization, X-Stepper-Google-Token, X-Google-Credential, X-Requested-With'
+  );
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Max-Age', '86400');
+}
+
 const corsOptions = {
   origin(origin, callback) {
-    if (allowedOrigins === "*" || !origin || allowedOrigins.includes(origin)) {
+    if (isAllowedOrigin(origin)) {
       callback(null, true);
       return;
     }
-    callback(new Error("Origin not allowed by Step-By-Stepper backend."));
+    callback(null, false);
   },
-  methods: ["GET", "POST", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Stepper-Google-Token", "X-Google-Credential"],
-  optionsSuccessStatus: 204
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Stepper-Google-Token", "X-Google-Credential", "X-Requested-With"],
+  exposedHeaders: ["Content-Type", "Authorization"],
+  optionsSuccessStatus: 204,
+  preflightContinue: false
 };
+app.use((req, res, next) => {
+  applyCorsHeaders(req, res);
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+  next();
+});
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
+app.options('*', (_req, res) => res.status(204).end());
 app.use(express.json({ limit: "4mb" }));
 
 function emptyDb() {
