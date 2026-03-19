@@ -3,9 +3,11 @@
   window.__stepperRuntimeRecoveryInstalled = true;
 
   const ROUTE_STORAGE_KEY = 'stepperRouteBootstrap';
+  const SETTINGS_KEY = 'stepper_sound_settings_v1';
   const overlayId = 'stepper-runtime-recovery-overlay';
   const transitionGifSrc = window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./stepper_loading_bar_dark_preview.gif') : './stepper_loading_bar_dark_preview.gif';
   const transitionEndFrameSrc = window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./stepper_loading_bar_dark_end.png') : './stepper_loading_bar_dark_end.png';
+  const loadingSongSrc = window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./loading-screen-song.m4a') : './loading-screen-song.m4a';
   const TRANSITION_LABELS = {
     editor: 'Editor',
     preview: 'Sheet',
@@ -17,6 +19,58 @@
   let labelEl = null;
   let visualEl = null;
   let teardownTimer = 0;
+  let loadingAudio = null;
+  let audioStopTimer = 0;
+
+
+  function readSettings(){
+    try {
+      const raw = localStorage.getItem(SETTINGS_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function soundsEnabled(){
+    return readSettings().sfxEnabled !== false;
+  }
+
+  function ensureLoadingAudio(){
+    if (loadingAudio) return loadingAudio;
+    loadingAudio = document.createElement('audio');
+    loadingAudio.preload = 'auto';
+    loadingAudio.src = loadingSongSrc;
+    loadingAudio.loop = false;
+    loadingAudio.volume = 1;
+    try { loadingAudio.playsInline = true; } catch {}
+    return loadingAudio;
+  }
+
+  function stopLoadingAudio(){
+    if (audioStopTimer) {
+      window.clearTimeout(audioStopTimer);
+      audioStopTimer = 0;
+    }
+    if (!loadingAudio) return;
+    try {
+      loadingAudio.pause();
+      loadingAudio.currentTime = 0;
+    } catch {}
+  }
+
+  function playLoadingAudio(durationMs){
+    stopLoadingAudio();
+    if (!soundsEnabled()) return;
+    const audio = ensureLoadingAudio();
+    try {
+      audio.currentTime = 0;
+      const playPromise = audio.play();
+      if (playPromise && typeof playPromise.catch === 'function') playPromise.catch(() => {});
+    } catch {}
+    audioStopTimer = window.setTimeout(stopLoadingAudio, Math.max(400, Number(durationMs) || 1400));
+  }
 
   function ensureOverlay(){
     if (overlay && overlay.isConnected) return overlay;
@@ -49,6 +103,7 @@
     const target = options && options.target ? String(options.target) : 'editor';
     const label = TRANSITION_LABELS[target] || 'Loading';
     if (teardownTimer) window.clearTimeout(teardownTimer);
+    playLoadingAudio(1420);
     host.hidden = false;
     if (labelEl) labelEl.textContent = 'Loading ' + label;
     if (visualEl) {
@@ -61,6 +116,7 @@
     }, 190);
     teardownTimer = window.setTimeout(() => {
       if (visualEl) visualEl.src = transitionEndFrameSrc;
+      stopLoadingAudio();
       host.classList.remove('is-visible');
       window.setTimeout(() => {
         host.hidden = true;

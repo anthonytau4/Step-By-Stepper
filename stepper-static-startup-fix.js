@@ -3,9 +3,27 @@
   window.__stepperStaticStartupInstalled = true;
   const STARTUP_MIN_MS = 3600;
   const STARTUP_FADE_MS = 340;
+  const SETTINGS_KEY = 'stepper_sound_settings_v1';
+  const STARTUP_AUDIO_SOURCES = [
+    (window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./loading-screen-song.m4a') : './loading-screen-song.m4a'),
+    (window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./startup-song.m4a') : './startup-song.m4a'),
+    (window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./startup-song.mp3') : './startup-song.mp3')
+  ];
+  function readSettings(){
+    try {
+      const raw = localStorage.getItem(SETTINGS_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  function areSoundsEnabled(){
+    return readSettings().sfxEnabled !== false;
+  }
   function buildStartupAudio(){
     if (window.createAudioElement) {
-      const audio = window.createAudioElement([(window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./startup-song.mp3') : './startup-song.mp3'),(window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./startup-song.m4a') : './startup-song.m4a')]);
+      const audio = window.createAudioElement(STARTUP_AUDIO_SOURCES);
       audio.loop = false;
       audio.volume = 1;
       return audio;
@@ -13,7 +31,7 @@
     const audio = document.createElement('audio');
     audio.preload = 'auto';
     try { audio.playsInline = true; } catch {}
-    [[(window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./startup-song.mp3') : './startup-song.mp3'),'audio/mpeg'],[(window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./startup-song.m4a') : './startup-song.m4a'),'audio/mp4']].forEach(([src,type]) => {
+    STARTUP_AUDIO_SOURCES.map((src) => [src, src.endsWith('.mp3') ? 'audio/mpeg' : 'audio/mp4']).forEach(([src,type]) => {
       const source = document.createElement('source');
       source.src = src;
       source.type = type;
@@ -52,8 +70,10 @@
       try {
         audio.pause();
         audio.currentTime = 0;
-        const playPromise = audio.play();
-        if (playPromise && typeof playPromise.catch === 'function') playPromise.catch(() => {});
+        if (areSoundsEnabled()) {
+          const playPromise = audio.play();
+          if (playPromise && typeof playPromise.catch === 'function') playPromise.catch(() => {});
+        }
       } catch {}
       queueLeave();
     }
