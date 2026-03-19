@@ -1224,22 +1224,24 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   const CHOREO_PANEL_ID = 'stepper-inline-choreography';
   const SETTINGS_PANEL_ID = 'stepper-inline-settings';
   const EXTRA_NOTES = [
-    'New: tab switches now use a single loading pass with smoother pacing, awkward hold beats, and a proper finish right as the loading bar lands.',
-    'New: tab changes now run destination-based loading states, so Editor, Sheet, Whats New, Featured Choreo, and My Saved Dances each show their own status pass during the switch.',
-    'New Featured choreography! Check it out in the Featured Choreography tab!',
-    'New: Counts and Walls can stay on Auto now, and the Sheet view shows the real detected numbers instead of printing AUTO.',
-    'New: counts now auto-sync from the built step content, and tags are left out of that total on purpose.',
-    'New: phrased dance tools now support editable Parts, a Sequence tab, and tag-aware phrased building inspired by CopperKnob-style A/B/C + Tag sheets.',
-    'New: right-click a section header to add that section straight into a new Part, and the labels start at A, B, C but stay editable.',
-    'New: Settings now gives you three quick font style buttons, and each one previews its look before you press it.',
-    'New: Android dark-mode buttons and black UI strips now keep white text, the B / I / U controls wrap selected text instantly, and page switches now start right when the transition animation kicks off.',
-    'Fix: Thinking Music no longer restarts itself every few seconds like a broken jukebox.',
-    'Fix: the title screen now fits short phone screens properly instead of dropping below the viewport.',
-    'Fix: the page switch GIF now loads properly on Android without the blank image nonsense.',
-    'New: Settings and Choreography now sit right above the editor instead of being shoved into extra page-strip tabs.',
-    'New: Choreography shows the dances you build with the app on this device, so the saved work is easier to reach.',
-    'New: Settings still includes SFX and Thinking Music toggles, now tucked into the editor where they belong.',
-    'Fix: Choreography and Settings now show there from startup as well, instead of waiting around like fools.'
+    'New: Google sign-in and backend connection handling have been tightened up for production so auth and admin tools behave more reliably across devices.',
+    'New: backend data now persists server-side for admin, moderator, host, glossary, and submission flows instead of leaning on disposable browser-only state.',
+    'New: MongoDB support is now wired in for live backend storage when configured, with JSON fallback still available for local/dev recovery.',
+    'New: moderator, admin, host-send, glossary, and queue data now survive backend wakeups more cleanly through the persistent storage path.',
+    'New: host and site submissions are now stored in backend history so they do not just disappear after they are reviewed.',
+    'Fix: fetch failure handling now returns a proper backend-reachability message instead of dumping raw browser Failed to fetch errors into the UI.',
+    'Fix: production API base handling has been tightened up so devices are less likely to drift onto stale or broken backend targets.',
+    'Fix: auto-refresh rendering has been dialled back so pages do not keep remounting while background refreshes are running.',
+    'Fix: text entry is now protected more broadly across admin and editor-side boxes so typed draft content is less likely to be blown away by rerenders.',
+    'New: Glossary+ now supports edit suggestions for existing glossary steps, sending the proposed replacement to Admin for review instead of changing live data immediately.',
+    'New: glossary edit suggestions can carry updated step names, descriptions, counts, foot notes, and tags for an existing approved entry.',
+    'Change: the glossary request/editor tools now live on the Editor page instead of being scattered across other pages.',
+    'New: Counts and Walls can stay on Auto, and Sheet now shows the detected values instead of printing AUTO.',
+    'New: phrased dance tools support editable Parts, a Sequence tab, and tag-aware phrased building for A/B/C plus Tag-style layouts.',
+    'New: right-clicking a section header can drop that section straight into a new Part, with editable labels from the start.',
+    'New: Settings and Choreography now sit above the editor, keeping the main build tools closer to where the work happens.',
+    'New: Choreography surfaces dances built on this device so in-progress work is easier to reach.',
+    'Fix: Thinking Music no longer keeps restarting itself, the title screen fits short phone screens better, and the page-switch GIF behaves properly on Android.'
   ];
 
 
@@ -2568,22 +2570,24 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     elegant: 'Georgia, "Times New Roman", serif'
   };
   const EXTRA_NOTES = [
-    'New: tab switches now use a single loading pass with smoother pacing, awkward hold beats, and a proper finish right as the loading bar lands.',
-    'New: tab changes now run destination-based loading states, so Editor, Sheet, Whats New, Featured Choreo, and My Saved Dances each show their own status pass during the switch.',
-    'New Featured choreography! Check it out in the Featured Choreography tab!',
-    'New: Counts and Walls can stay on Auto now, and the Sheet view shows the real detected numbers instead of printing AUTO.',
-    'New: counts now auto-sync from the built step content, and tags are left out of that total on purpose.',
-    'New: phrased dance tools now support editable Parts, a Sequence tab, and tag-aware phrased building inspired by CopperKnob-style A/B/C + Tag sheets.',
-    'New: right-click a section header to add that section straight into a new Part, and the labels start at A, B, C but stay editable.',
-    'New: Settings now gives you three quick font style buttons, and each one previews its look before you press it.',
-    'New: Android dark-mode buttons and black UI strips now keep white text, the B / I / U controls wrap selected text instantly, and page switches now start right when the transition animation kicks off.',
-    'Fix: Thinking Music no longer restarts itself every few seconds like a broken jukebox.',
-    'Fix: the title screen now fits short phone screens properly instead of dropping below the viewport.',
-    'Fix: the page switch GIF now loads properly on Android without the blank image nonsense.',
-    'New: Settings and Choreography now sit right above the editor instead of being shoved into extra page-strip tabs.',
-    'New: Choreography shows the dances you build with the app on this device, so the saved work is easier to reach.',
-    'New: Settings still includes SFX and Thinking Music toggles, now tucked into the editor where they belong.',
-    'Fix: Choreography and Settings now show there from startup as well, instead of waiting around like fools.'
+    'New: Google sign-in and backend connection handling have been tightened up for production so auth and admin tools behave more reliably across devices.',
+    'New: backend data now persists server-side for admin, moderator, host, glossary, and submission flows instead of leaning on disposable browser-only state.',
+    'New: MongoDB support is now wired in for live backend storage when configured, with JSON fallback still available for local/dev recovery.',
+    'New: moderator, admin, host-send, glossary, and queue data now survive backend wakeups more cleanly through the persistent storage path.',
+    'New: host and site submissions are now stored in backend history so they do not just disappear after they are reviewed.',
+    'Fix: fetch failure handling now returns a proper backend-reachability message instead of dumping raw browser Failed to fetch errors into the UI.',
+    'Fix: production API base handling has been tightened up so devices are less likely to drift onto stale or broken backend targets.',
+    'Fix: auto-refresh rendering has been dialled back so pages do not keep remounting while background refreshes are running.',
+    'Fix: text entry is now protected more broadly across admin and editor-side boxes so typed draft content is less likely to be blown away by rerenders.',
+    'New: Glossary+ now supports edit suggestions for existing glossary steps, sending the proposed replacement to Admin for review instead of changing live data immediately.',
+    'New: glossary edit suggestions can carry updated step names, descriptions, counts, foot notes, and tags for an existing approved entry.',
+    'Change: the glossary request/editor tools now live on the Editor page instead of being scattered across other pages.',
+    'New: Counts and Walls can stay on Auto, and Sheet now shows the detected values instead of printing AUTO.',
+    'New: phrased dance tools support editable Parts, a Sequence tab, and tag-aware phrased building for A/B/C plus Tag-style layouts.',
+    'New: right-clicking a section header can drop that section straight into a new Part, with editable labels from the start.',
+    'New: Settings and Choreography now sit above the editor, keeping the main build tools closer to where the work happens.',
+    'New: Choreography surfaces dances built on this device so in-progress work is easier to reach.',
+    'Fix: Thinking Music no longer keeps restarting itself, the title screen fits short phone screens better, and the page-switch GIF behaves properly on Android.'
   ];
 
 
