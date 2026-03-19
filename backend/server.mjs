@@ -318,13 +318,13 @@ const corsOptions = {
     }
     callback(new Error("Origin not allowed by Step-By-Stepper backend."));
   },
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
+  methods: ["GET", "POST", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Stepper-Google-Token", "X-Google-Credential"],
   optionsSuccessStatus: 204
 };
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
-app.use(express.json({ limit: "4mb" }));
+app.use(express.json({ limit: "12mb" }));
 
 function emptyDb() {
   return {
@@ -381,40 +381,8 @@ async function readDbFromPath(targetPath) {
   if (!Array.isArray(parsed.approvedGlossarySteps)) parsed.approvedGlossarySteps = [];
   if (!Array.isArray(parsed.siteMemory)) parsed.siteMemory = [];
   if (!Array.isArray(parsed.securityAlerts)) parsed.securityAlerts = [];
-
-  if (Array.isArray(parsed.submissions)) {
-    parsed.submissions = parsed.submissions.map((item) => {
-      if (!item || typeof item !== 'object') return item;
-      const votes = Array.isArray(item.moderatorVotes) ? item.moderatorVotes : [];
-      item.moderatorVotes = votes
-        .map((vote) => ({
-          email: normalizeEmail(vote?.email),
-          name: String(vote?.name || vote?.email || '').trim(),
-          decision: String(vote?.decision || '').trim().toLowerCase() === 'disapprove' ? 'disapprove' : 'approve',
-          note: String(vote?.note || '').trim().slice(0, 800),
-          at: String(vote?.at || vote?.moderatorApprovedAt || item?.updatedAt || item?.createdAt || '').trim() || new Date().toISOString()
-        }))
-        .filter((vote) => vote.email);
-      return item;
-    });
-  }
+  if (!Array.isArray(parsed.staffChat)) parsed.staffChat = [];
   return parsed;
-}
-
-function summarizeModeratorVotes(item) {
-  const votes = Array.isArray(item?.moderatorVotes) ? item.moderatorVotes : [];
-  let approve = 0;
-  let disapprove = 0;
-  for (const vote of votes) {
-    if (String(vote?.decision || '').trim().toLowerCase() === 'disapprove') disapprove += 1;
-    else approve += 1;
-  }
-  return {
-    approve,
-    disapprove,
-    total: approve + disapprove,
-    text: `${approve} moderators approve and ${disapprove} disapprove`
-  };
 }
 
 function syncModeratorRegistry(db) {
@@ -517,31 +485,21 @@ function syncAdminRegistry(db) {
   return db;
 }
 
-let writeDbQueue = Promise.resolve();
-
 async function writeDb(payload) {
-  const prepared = syncAdminRegistry(syncModeratorRegistry(syncAndPruneDb(payload)));
-  writeDbQueue = writeDbQueue.then(async () => {
-    await ensureDb();
-    const data = JSON.stringify(prepared, null, 2);
-    const tempPath = `${dbPath}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
+  await ensureDb();
+  const data = JSON.stringify(syncAdminRegistry(syncModeratorRegistry(syncAndPruneDb(payload))), null, 2);
+  try {
     try {
-      try {
-        await fs.copyFile(dbPath, dbBackupPath);
-      } catch {}
-      await fs.writeFile(tempPath, data, 'utf8');
-      await fs.rename(tempPath, dbPath);
-      try {
-        await fs.copyFile(dbPath, dbBackupPath);
-      } catch {}
-    } finally {
-      try { await fs.unlink(tempPath); } catch {}
-    }
-  }).catch((error) => {
-    console.error('[Stepper] queued DB write failed', error);
-    throw error;
-  });
-  return writeDbQueue;
+      await fs.copyFile(dbPath, dbBackupPath);
+    } catch {}
+    await fs.writeFile(dbTempPath, data, 'utf8');
+    await fs.rename(dbTempPath, dbPath);
+    try {
+      await fs.copyFile(dbPath, dbBackupPath);
+    } catch {}
+  } finally {
+    try { await fs.unlink(dbTempPath); } catch {}
+  }
 }
 
 
@@ -1249,6 +1207,118 @@ function parseJsonFromAiText(text) {
 }
 
 
+function normalizeImportText(raw = '') {
+  return String(raw || '')
+    .replace(/\r/g, '\n')
+    .replace(/[\u2013\u2014]/g, '-')
+    .replace(/\u00a0/g, ' ')
+    .replace(/\t/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ ]{2,}/g, ' ')
+    .trim();
+}
+
+function parseImportedCountLine(line = '') {
+  const match = String(line || '').match(/^((?:\d+[&a-zA-Z]?\s*(?:[-,]\s*\d+[&a-zA-Z]?)*|[&a-zA-Z](?:\s*[&,/-]\s*[&a-zA-Z\d]+)*))\s*:\s*(.+)$/);
+  if (!match) return null;
+  return { count: match[1].replace(/\s+/g, ' ').trim(), text: match[2].trim() };
+}
+
+function guessImportedStepName(desc = '') {
+  const text = String(desc || '').replace(/^[\d&.,\- ]+:/, '').trim();
+  if (!text) return '';
+  const firstChunk = text.split(/[.;]/)[0].trim();
+  const words = firstChunk.split(/\s+/).filter(Boolean).slice(0, 5);
+  return words.join(' ').replace(/(^.|\s+.)/g, (m) => m.toUpperCase());
+}
+
+function fallbackImportStepsheet(text = '', currentMeta = {}) {
+  const normalized = normalizeImportText(text);
+  const lines = normalized.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  const meta = Object.assign({ title:'', choreographer:'', country:'', level:'Beginner', counts:'32', walls:'4', music:'', type:'8-count', startFoot:'Right' }, currentMeta || {});
+  const metaMatchers = [
+    { key:'counts', regex:/^Count\s*:?\s*(\d+)/i },
+    { key:'walls', regex:/^Wall\s*:?\s*(\d+)/i },
+    { key:'level', regex:/^Level\s*:?\s*(.+)$/i },
+    { key:'music', regex:/^Music\s*:?\s*(.+)$/i },
+    { key:'choreographer', regex:/^Choreographer\s*:?\s*(.+)$/i },
+    { key:'country', regex:/^Country\s*:?\s*(.+)$/i },
+    { key:'type', regex:/^Type\s*:?\s*(.+)$/i },
+    { key:'startFoot', regex:/^Start\s*Foot\s*:?\s*(.+)$/i }
+  ];
+  const blocks = [];
+  let current = null;
+  let foundTitle = false;
+  const flush = () => {
+    if (current && (current.title || current.lines.length)) blocks.push(current);
+    current = null;
+  };
+  for (const line of lines) {
+    const sectionMatch = line.match(/^(Section\s*\d+|Sec\.?\s*\d+|Part\s*[A-Z\d]+|Tag\s*\d*|Bridge\s*\d*)\s*[:.-]\s*(.*)$/i);
+    if (sectionMatch) {
+      flush();
+      current = { kind:/^(Tag|Bridge)/i.test(sectionMatch[1] || '') ? 'tag' : 'section', title:String(sectionMatch[2] || '').trim(), lines:[] };
+      continue;
+    }
+    let matchedMeta = false;
+    for (const entry of metaMatchers) {
+      const match = line.match(entry.regex);
+      if (match) {
+        meta[entry.key] = String(match[1] || '').trim();
+        matchedMeta = true;
+        break;
+      }
+    }
+    if (matchedMeta) continue;
+    if (!foundTitle && !/^(Count|Wall|Level|Music|Choreographer|Country|Type|Start Foot)\b/i.test(line)) {
+      meta.title = line.replace(/^[-\u2013\u2014•\s]+/, '').trim();
+      foundTitle = !!meta.title;
+      continue;
+    }
+    if (!current) current = { kind:'section', title:'', lines:[] };
+    current.lines.push(line);
+  }
+  flush();
+  let stepSeed = /left/i.test(String(meta.startFoot || '')) ? 'L' : 'R';
+  const makeStep = (source, idx) => {
+    const parsed = parseImportedCountLine(source);
+    const description = parsed ? parsed.text : String(source || '').trim();
+    const count = parsed ? parsed.count : '';
+    const step = {
+      name: guessImportedStepName(description) || `Imported Step ${idx + 1}`,
+      description,
+      count,
+      foot: stepSeed,
+      weight: true
+    };
+    stepSeed = stepSeed === 'R' ? 'L' : 'R';
+    return step;
+  };
+  const sections = [];
+  const tags = [];
+  for (const [blockIndex, block] of blocks.entries()) {
+    const steps = (block.lines || []).filter(Boolean).map((line, idx) => makeStep(line, idx));
+    if (!steps.length) continue;
+    if (block.kind === 'tag') {
+      tags.push({ name: String(block.title || `Tag ${tags.length + 1}`).trim(), sections:[{ name:'', steps }] });
+    } else {
+      sections.push({ name: String(block.title || `Section ${sections.length + 1}`).trim(), steps });
+    }
+  }
+  if (!sections.length) {
+    sections.push({ name:'Imported Section', steps:[makeStep(normalized || 'Imported Step', 0)] });
+  }
+  return {
+    meta: Object.assign({}, meta, {
+      counts: String(meta.counts || '32').trim() || '32',
+      walls: String(meta.walls || '4').trim() || '4'
+    }),
+    sections,
+    tags,
+    glossarySuggestions: []
+  };
+}
+
 function buildFallbackCountLines(dance) {
   const sections = Array.isArray(dance?.snapshot?.data?.sections) ? dance.snapshot.data.sections : [];
   const lines = [];
@@ -1532,7 +1602,6 @@ app.get("/api/admin/submissions", requireAdmin, async (_req, res) => {
         previewSections: sanitizePreviewSections(item?.previewSections).length ? sanitizePreviewSections(item?.previewSections) : (source ? buildPreviewSections(source) : []),
         jsonPayload: String(item?.jsonPayload || source?.jsonPayload || '').trim() || buildStoredJsonPayload(source || item || {}),
         isFeatured: featuredIds.has(String(source?.registryId || item?.registryId || '')),
-        moderatorVoteSummary: summarizeModeratorVotes(item),
         source
       };
     })
@@ -1978,7 +2047,6 @@ app.get('/api/moderator/submissions', requireModerator, async (_req, res) => {
         snapshot: item?.snapshot || source?.snapshot || null,
         previewSections: sanitizePreviewSections(item?.previewSections).length ? sanitizePreviewSections(item?.previewSections) : (source ? buildPreviewSections(source) : []),
         jsonPayload: String(item?.jsonPayload || source?.jsonPayload || '').trim() || buildStoredJsonPayload(source || item || {}),
-        moderatorVoteSummary: summarizeModeratorVotes(item),
         source
       };
     })
@@ -1998,31 +2066,17 @@ app.post('/api/moderator/submissions/:id/approve', requireModerator, async (req,
   if (!item) return res.status(404).json({ ok: false, error: 'Submission not found.' });
   const decision = String(req.body?.decision || 'approve').trim().toLowerCase() === 'disapprove' ? 'disapprove' : 'approve';
   const note = String(req.body?.note || '').trim().slice(0, 800);
-  const reviewerEmail = normalizeEmail(req.stepperUser?.email);
-  const reviewerName = String(req.stepperUser?.name || req.stepperUser?.email || '').trim();
-  const reviewedAt = new Date().toISOString();
-  if (!Array.isArray(item.moderatorVotes)) item.moderatorVotes = [];
-  item.moderatorVotes = item.moderatorVotes.filter(vote => normalizeEmail(vote?.email) !== reviewerEmail);
-  item.moderatorVotes.push({
-    email: reviewerEmail,
-    name: reviewerName,
-    decision,
-    note,
-    at: reviewedAt
-  });
-  const summary = summarizeModeratorVotes(item);
   item.moderatorApproved = decision === 'approve';
   item.moderatorReviewStatus = decision === 'approve' ? 'approved' : 'disapproved';
-  item.moderatorApprovedAt = reviewedAt;
+  item.moderatorApprovedAt = new Date().toISOString();
   item.moderatorApprovedBy = {
-    email: reviewerEmail,
-    name: reviewerName
+    email: String(req.stepperUser?.email || '').trim(),
+    name: String(req.stepperUser?.name || req.stepperUser?.email || '').trim()
   };
   item.moderatorNote = note;
-  item.moderatorVoteSummary = summary;
-  item.updatedAt = reviewedAt;
+  item.updatedAt = new Date().toISOString();
   await writeDb(db);
-  res.json({ ok: true, item, moderatorVoteSummary: summary });
+  res.json({ ok: true, item });
 });
 
 app.get('/api/subscription/status', requireGoogleUser, async (req, res) => {
@@ -2115,7 +2169,6 @@ app.post('/api/glossary/request', requireGoogleUser, async (req, res) => {
   const name = String(raw.name || '').trim();
   const description = String(raw.description || raw.desc || '').trim();
   if (!name || !description) return res.status(400).json({ ok:false, error:'Step name and description are required.' });
-  const requestType = String(raw.requestType || '').trim().toLowerCase() === 'edit' ? 'edit' : 'new';
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);
   touchUser(db, req.stepperUser, key);
@@ -2124,26 +2177,19 @@ app.post('/api/glossary/request', requireGoogleUser, async (req, res) => {
     ownerKey: key,
     ownerEmail: req.stepperUser.email,
     ownerName: req.stepperUser.name,
-    requestType,
-    originalStepId: String(raw.originalStepId || '').trim().slice(0, 120),
-    originalName: String(raw.originalName || '').trim().slice(0, 120),
-    originalDescription: String(raw.originalDescription || '').trim().slice(0, 1200),
-    originalCounts: String(raw.originalCounts || '').trim().slice(0, 40),
-    originalFoot: String(raw.originalFoot || '').trim().slice(0, 24),
-    originalTags: String(raw.originalTags || '').trim().slice(0, 240),
     name: name.slice(0, 120),
     description: description.slice(0, 1200),
     counts: String(raw.counts || raw.count || '1').trim().slice(0, 40) || '1',
     foot: String(raw.foot || 'Either').trim().slice(0, 24) || 'Either',
     tags: String(raw.tags || '').trim().slice(0, 240),
-    autoMirror: requestType === 'new' ? buildGlossaryTwin(raw) : null,
+    autoMirror: buildGlossaryTwin(raw),
     status: 'pending',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
   db.glossaryRequests = [item, ...(Array.isArray(db.glossaryRequests) ? db.glossaryRequests : [])].slice(0, 1000);
   await writeDb(db);
-  res.json({ ok:true, item, message: requestType === 'edit' ? 'Glossary edit suggestion sent to Admin.' : 'Glossary step request sent to Admin.' });
+  res.json({ ok:true, item, message:'Glossary step request sent to Admin.' });
 });
 
 app.get('/api/admin/glossary-requests', requireAdmin, async (_req, res) => {
@@ -2160,43 +2206,21 @@ app.post('/api/admin/glossary-requests/:id/approve', requireAdmin, async (req, r
   item.status = 'approved';
   item.updatedAt = new Date().toISOString();
   item.adminNote = String(req.body?.note || '').trim().slice(0, 600);
-  let additions = [];
-  let updatedStep = null;
-  if (String(item.requestType || '') === 'edit') {
-    const approvedList = Array.isArray(db.approvedGlossarySteps) ? db.approvedGlossarySteps : [];
-    const existing = approvedList.find((step) => String(step?.id || '') === String(item.originalStepId || ''))
-      || approvedList.find((step) => String(step?.name || '').trim().toLowerCase() === String(item.originalName || '').trim().toLowerCase());
-    if (!existing) return res.status(404).json({ ok:false, error:'The original glossary step could not be found for this edit suggestion.' });
-    existing.name = String(item.name || existing.name || '').trim().slice(0, 120);
-    existing.description = String(item.description || existing.description || '').trim().slice(0, 1200);
-    existing.counts = String(item.counts || existing.counts || '1').trim().slice(0, 40) || '1';
-    existing.foot = String(item.foot || existing.foot || 'Either').trim().slice(0, 24) || 'Either';
-    existing.tags = String(item.tags || existing.tags || '').trim().slice(0, 240);
-    existing.updatedAt = new Date().toISOString();
-    existing.updatedBy = { email: req.stepperUser.email, name: req.stepperUser.name };
-    existing.sourceRequestId = item.id;
-    updatedStep = existing;
-  } else {
-    const approved = normalizeGlossaryStepPayload(item, { email:item.ownerEmail, name:item.ownerName });
-    approved.status = 'approved';
-    approved.sourceRequestId = item.id;
-    additions = [approved];
-    if (item.autoMirror) {
-      const twin = normalizeGlossaryStepPayload({ ...item.autoMirror, counts:item.autoMirror.counts || item.counts, tags:item.autoMirror.tags || item.tags }, { email:item.ownerEmail, name:item.ownerName });
-      twin.status = 'approved';
-      twin.sourceRequestId = item.id;
-      twin.isAutoMirror = true;
-      additions.push(twin);
-    }
-    db.approvedGlossarySteps = [...additions, ...(Array.isArray(db.approvedGlossarySteps) ? db.approvedGlossarySteps : [])].slice(0, 4000);
+  const approved = normalizeGlossaryStepPayload(item, { email:item.ownerEmail, name:item.ownerName });
+  approved.status = 'approved';
+  approved.sourceRequestId = item.id;
+  const additions = [approved];
+  if (item.autoMirror) {
+    const twin = normalizeGlossaryStepPayload({ ...item.autoMirror, counts:item.autoMirror.counts || item.counts, tags:item.autoMirror.tags || item.tags }, { email:item.ownerEmail, name:item.ownerName });
+    twin.status = 'approved';
+    twin.sourceRequestId = item.id;
+    twin.isAutoMirror = true;
+    additions.push(twin);
   }
-  pushNotification(db, { userKey: item.ownerKey, email: item.ownerEmail }, {
-    kind: 'glossary-approved',
-    title: String(item.requestType || '') === 'edit' ? 'Glossary edit approved' : 'Glossary step approved',
-    message: String(item.requestType || '') === 'edit' ? 'Admin approved your glossary edit suggestion.' : (item.autoMirror ? 'Admin approved your glossary step and created the opposite-foot twin too.' : 'Admin approved your glossary step.')
-  });
+  db.approvedGlossarySteps = [...additions, ...(Array.isArray(db.approvedGlossarySteps) ? db.approvedGlossarySteps : [])].slice(0, 4000);
+  notifyUser(db, item.ownerKey, { kind:'glossary-approved', title:'Glossary step approved', message: item.autoMirror ? 'Admin approved your glossary step and created the opposite-foot twin too.' : 'Admin approved your glossary step.' });
   await writeDb(db);
-  res.json({ ok:true, item, added:additions, updatedStep });
+  res.json({ ok:true, item, added:additions });
 });
 
 app.post('/api/admin/glossary-requests/:id/reject', requireAdmin, async (req, res) => {
@@ -2207,7 +2231,7 @@ app.post('/api/admin/glossary-requests/:id/reject', requireAdmin, async (req, re
   item.status = 'rejected';
   item.updatedAt = new Date().toISOString();
   item.adminNote = String(req.body?.note || '').trim().slice(0, 600);
-  pushNotification(db, { userKey: item.ownerKey, email: item.ownerEmail }, { kind:'glossary-rejected', title:'Glossary step declined', message: item.adminNote ? `Admin declined your glossary step request: ${item.adminNote}` : 'Admin declined your glossary step request this time.' });
+  notifyUser(db, item.ownerKey, { kind:'glossary-rejected', title:'Glossary step declined', message: item.adminNote ? `Admin declined your glossary step request: ${item.adminNote}` : 'Admin declined your glossary step request this time.' });
   await writeDb(db);
   res.json({ ok:true, item });
 });
@@ -2282,6 +2306,70 @@ ${approved.map(item => `- ${item.name} [${item.foot}] ${item.counts}: ${item.des
   } catch (error) {
     const fallback = fallbackDanceTool(mode, dance, prompt);
     res.json({ ok:true, provider:'fallback', ...fallback, fallback:true, error: error.message || 'AI dance tool failed.' });
+  }
+});
+
+app.post('/api/ai/import-stepsheet', requireGoogleUser, async (req, res) => {
+  const text = normalizeImportText(req.body?.text || '');
+  const fileName = String(req.body?.fileName || '').trim();
+  const currentMeta = req.body?.currentMeta && typeof req.body.currentMeta === 'object' ? req.body.currentMeta : {};
+  if (!text) return res.status(400).json({ ok:false, error:'Missing PDF text.' });
+  const db = await readDb();
+  const approved = (Array.isArray(db.approvedGlossarySteps) ? db.approvedGlossarySteps : []).slice(0, 200).map((item) => ({
+    name: String(item?.name || '').trim(),
+    description: String(item?.description || '').trim(),
+    counts: String(item?.counts || '').trim(),
+    foot: String(item?.foot || '').trim(),
+    tags: String(item?.tags || '').trim()
+  })).filter((item) => item.name || item.description);
+  const system = 'You are a line-dance stepsheet import assistant. Convert extracted PDF text into strict JSON for the Step By Stepper editor. Return only JSON with keys summary, meta, sections, tags, glossarySuggestions. meta must include title, choreographer, country, level, counts, walls, music, type, startFoot. sections is an array of {name, steps}. Each step must include name, description, count, foot, weight. tags is an array of {name, sections:[{name, steps}]}. glossarySuggestions is an array of useful glossary ideas found in the PDF but missing or worth adding. Keep it clean, practical, and do not invent impossible content.';
+  const prompt = `File name: ${fileName || '(unknown PDF)'}\n\nCurrent worksheet meta:\n${JSON.stringify(currentMeta || {}, null, 2)}\n\nApproved glossary sample:\n${approved.slice(0, 80).map((item) => `- ${item.name} [${item.foot}] ${item.counts}: ${item.description}`).join('\n') || '(none)'}\n\nExtracted PDF text:\n${text.slice(0, 28000)}`;
+  try {
+    const ai = await runSiteHelperAI({ system, prompt, history: [], preferredModel: 'gemini' });
+    const parsed = parseJsonFromAiText(ai.text);
+    if (!parsed || !Array.isArray(parsed.sections)) {
+      const fallback = fallbackImportStepsheet(text, currentMeta);
+      return res.json({ ok:true, provider: ai.provider, fallback:true, summary:'I imported the PDF with the built-in parser because the AI response was not clean enough.', ...fallback });
+    }
+    const meta = Object.assign({}, currentMeta || {}, parsed.meta && typeof parsed.meta === 'object' ? parsed.meta : {});
+    const safeSections = Array.isArray(parsed.sections) ? parsed.sections.map((section, sectionIndex) => ({
+      name: String(section?.name || `Section ${sectionIndex + 1}`).trim(),
+      steps: (Array.isArray(section?.steps) ? section.steps : []).map((step, stepIndex) => ({
+        name: String(step?.name || '').trim() || guessImportedStepName(step?.description || '') || `Imported Step ${stepIndex + 1}`,
+        description: String(step?.description || step?.desc || '').trim(),
+        count: String(step?.count || step?.counts || '').trim(),
+        foot: String(step?.foot || '').trim() || 'Either',
+        weight: step?.weight !== false
+      })).filter((step) => step.name || step.description)
+    })).filter((section) => section.steps.length) : [];
+    const safeTags = Array.isArray(parsed.tags) ? parsed.tags.map((tag, tagIndex) => ({
+      name: String(tag?.name || `Tag ${tagIndex + 1}`).trim(),
+      sections: (Array.isArray(tag?.sections) ? tag.sections : []).map((section, sectionIndex) => ({
+        name: String(section?.name || '').trim(),
+        steps: (Array.isArray(section?.steps) ? section.steps : []).map((step, stepIndex) => ({
+          name: String(step?.name || '').trim() || guessImportedStepName(step?.description || '') || `Imported Step ${stepIndex + 1}`,
+          description: String(step?.description || step?.desc || '').trim(),
+          count: String(step?.count || step?.counts || '').trim(),
+          foot: String(step?.foot || '').trim() || 'Either',
+          weight: step?.weight !== false
+        })).filter((step) => step.name || step.description)
+      })).filter((section) => section.steps.length)
+    })).filter((tag) => tag.sections.length) : [];
+    const glossarySuggestions = Array.isArray(parsed.glossarySuggestions) ? parsed.glossarySuggestions.map((item) => ({
+      name: String(item?.name || '').trim(),
+      description: String(item?.description || item?.desc || '').trim(),
+      counts: String(item?.counts || item?.count || '').trim() || '1',
+      foot: String(item?.foot || '').trim() || 'Either',
+      tags: String(item?.tags || 'PDF Import AI suggestion').trim()
+    })).filter((item) => item.name || item.description) : [];
+    if (!safeSections.length) {
+      const fallback = fallbackImportStepsheet(text, currentMeta);
+      return res.json({ ok:true, provider: ai.provider, fallback:true, summary:'I imported the PDF with the built-in parser because the section layout came back empty.', ...fallback });
+    }
+    res.json({ ok:true, provider: ai.provider, summary: String(parsed.summary || '').trim() || 'PDF imported into the editor.', meta, sections: safeSections, tags: safeTags, glossarySuggestions });
+  } catch (error) {
+    const fallback = fallbackImportStepsheet(text, currentMeta);
+    res.json({ ok:true, provider:'fallback', fallback:true, summary:'I imported the PDF with the built-in parser because the AI helper was unavailable.', error: error.message || 'PDF import AI failed.', ...fallback });
   }
 });
 

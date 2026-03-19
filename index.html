@@ -1529,6 +1529,96 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     trySyncFieldByText('Music', data.meta.music || '');
   }
 
+  function getStepperBridge(){
+    return window.StepByStepperGlobals && typeof window.StepByStepperGlobals === 'object' ? window.StepByStepperGlobals : {};
+  }
+
+  function sanitizeImportedName(value, fallback){
+    const text = String(value || '').trim();
+    return text || fallback || 'Imported Step';
+  }
+
+  function normalizeImportedStep(step, fallbackIndex){
+    const description = String(step && (step.description || step.desc || '') || '').trim();
+    const name = sanitizeImportedName(step && step.name, guessStepNameFromDescription(description) || `Imported Step ${fallbackIndex + 1}`);
+    return {
+      id: 'pdf-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+      type: 'step',
+      count: String(step && (step.count || step.counts || '') || '').trim(),
+      name,
+      description,
+      foot: String(step && step.foot || '').trim() || 'R',
+      weight: step && Object.prototype.hasOwnProperty.call(step, 'weight') ? !!step.weight : true,
+      showNote: false,
+      note: ''
+    };
+  }
+
+  function buildImportedDataFromBackendPayload(payload, current){
+    const base = current && typeof current === 'object' ? current : { meta:{}, sections:[], tags:[] };
+    const meta = Object.assign({}, base.meta || {}, payload && payload.meta && typeof payload.meta === 'object' ? payload.meta : {});
+    const sourceSections = Array.isArray(payload && payload.sections) ? payload.sections : [];
+    const sourceTags = Array.isArray(payload && payload.tags) ? payload.tags : [];
+    const sections = sourceSections.length ? sourceSections.map((section, sectionIndex) => ({
+      id: String(section && section.id || '') || ('sec-' + Date.now() + '-' + sectionIndex + '-' + Math.random().toString(36).slice(2, 7)),
+      name: String(section && section.name || `Section ${sectionIndex + 1}`).trim(),
+      steps: (Array.isArray(section && section.steps) ? section.steps : []).map((step, stepIndex) => normalizeImportedStep(step, stepIndex)).filter(item => item.name || item.description)
+    })).filter(section => section.steps.length) : (base.sections || []);
+    const tags = sourceTags.map((tag, tagIndex) => ({
+      id: String(tag && tag.id || '') || ('tag-' + Date.now() + '-' + tagIndex + '-' + Math.random().toString(36).slice(2, 7)),
+      name: String(tag && tag.name || `Tag ${tagIndex + 1}`).trim(),
+      sections: (Array.isArray(tag && tag.sections) ? tag.sections : []).map((section, sectionIndex) => ({
+        id: String(section && section.id || '') || ('tagsec-' + Date.now() + '-' + sectionIndex + '-' + Math.random().toString(36).slice(2, 7)),
+        name: String(section && section.name || '').trim(),
+        steps: (Array.isArray(section && section.steps) ? section.steps : []).map((step, stepIndex) => normalizeImportedStep(step, stepIndex)).filter(item => item.name || item.description)
+      })).filter(section => section.steps.length)
+    })).filter(tag => tag.sections.length);
+    return { meta, sections, tags, isDarkMode: !!(base && base.isDarkMode) };
+  }
+
+  async function stageGlossarySuggestions(suggestions){
+    const bridge = getStepperBridge();
+    if (!bridge || typeof bridge.authFetch !== 'function' || !Array.isArray(suggestions) || !suggestions.length) return { sent:0, failed:0 };
+    let sent = 0;
+    let failed = 0;
+    for (const suggestion of suggestions.slice(0, 12)) {
+      const step = {
+        name: String(suggestion && suggestion.name || '').trim(),
+        description: String(suggestion && (suggestion.description || suggestion.desc || '') || '').trim(),
+        counts: String(suggestion && (suggestion.counts || suggestion.count || '') || '').trim() || '1',
+        foot: String(suggestion && suggestion.foot || '').trim() || 'Either',
+        tags: String(suggestion && suggestion.tags || 'PDF Import AI suggestion').trim()
+      };
+      if (!step.name && !step.description) continue;
+      try {
+        await bridge.authFetch('/api/glossary/request', {
+          method:'POST',
+          headers:{ 'Content-Type':'application/json' },
+          body: JSON.stringify({ step })
+        });
+        sent += 1;
+      } catch (error) {
+        failed += 1;
+      }
+    }
+    return { sent, failed };
+  }
+
+  async function importPdfWithBackendAi(file, text, current){
+    const bridge = getStepperBridge();
+    if (!bridge || typeof bridge.authFetch !== 'function') return null;
+    const data = await bridge.authFetch('/api/ai/import-stepsheet', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({
+        fileName: file && file.name ? String(file.name) : '',
+        text,
+        currentMeta: current && current.meta ? current.meta : {}
+      })
+    });
+    return data;
+  }
+
   async function importPdfIntoEditor(file){
     if (!file) return;
     if (pdfImportBusy) return;
@@ -1537,11 +1627,32 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       const current = readAppData() || { meta:{}, sections:[], tags:[] };
       const text = await extractTextFromPdf(file);
       if (!text) throw new Error('The PDF did not give me readable text.');
-      const parsed = parsePdfStepsheet(text, current);
-      const nextData = { meta:Object.assign({}, current.meta || {}, parsed.meta || {}), sections: parsed.sections || [], tags: parsed.tags || [], isDarkMode: !!(current && current.isDarkMode) };
-      writeAppData(nextData);
-      patchLiveFieldsFromImportedData(nextData);
-      alert(`PDF imported. ${nextData.sections.length} section${nextData.sections.length === 1 ? '' : 's'} loaded into the editor. The page will refresh so Build and Sheet match.`);
+      let imported = null;
+      let glossaryResult = { sent:0, failed:0 };
+      let importSummary = '';
+      try {
+        const aiResult = await importPdfWithBackendAi(file, text, current);
+        if (aiResult && aiResult.ok !== false) {
+          imported = buildImportedDataFromBackendPayload(aiResult, current);
+          glossaryResult = await stageGlossarySuggestions(aiResult.glossarySuggestions || []);
+          importSummary = String(aiResult.summary || '').trim();
+        }
+      } catch (error) {
+        imported = null;
+      }
+      if (!imported) {
+        const parsed = parsePdfStepsheet(text, current);
+        imported = { meta:Object.assign({}, current.meta || {}, parsed.meta || {}), sections: parsed.sections || [], tags: parsed.tags || [], isDarkMode: !!(current && current.isDarkMode) };
+      }
+      writeAppData(imported);
+      patchLiveFieldsFromImportedData(imported);
+      const bridge = getStepperBridge();
+      if (bridge && typeof bridge.syncCurrentDanceToBackend === 'function') {
+        try { await bridge.syncCurrentDanceToBackend(true); } catch {}
+      }
+      const sectionCount = Array.isArray(imported.sections) ? imported.sections.length : 0;
+      const glossaryMessage = glossaryResult.sent ? ` ${glossaryResult.sent} glossary suggestion${glossaryResult.sent === 1 ? '' : 's'} sent for review.` : '';
+      alert(`${importSummary || 'PDF imported.'} ${sectionCount} section${sectionCount === 1 ? '' : 's'} loaded into the editor so Build and Sheet stay matched.${glossaryMessage}`.trim());
       window.setTimeout(() => { window.location.reload(); }, 120);
     } catch (error) {
       alert(error && error.message ? error.message : 'PDF import failed.');
@@ -1562,8 +1673,8 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       </div>
       <div class="p-6 sm:p-8 space-y-5">
         <div class="rounded-3xl border p-5 sm:p-6 ${theme.soft}">
-          <p class="text-base sm:text-lg font-bold leading-relaxed">Import a stepsheet PDF and Step by Stepper will read the title, music, level, counts, walls and sections, then load them straight into your Editor so the Sheet view matches too.</p>
-          <p class="mt-3 text-sm ${theme.subtle}">Go to <strong>Build</strong>, open <strong>PDF Import AI</strong>, choose your PDF, then let it fill the dance in for you.</p>
+          <p class="text-base sm:text-lg font-bold leading-relaxed">Import a stepsheet PDF and Step by Stepper will read the dance, build the title, music, level, counts, walls and sections, then load them straight into your Editor so the Sheet view matches too.</p>
+          <p class="mt-3 text-sm ${theme.subtle}">Go to <strong>Build</strong>, open <strong>PDF Import AI</strong>, choose your PDF, and it will fill the dance in for you. When you are signed in, the smart import also sends any useful glossary ideas for review.</p>
           <div class="mt-5 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
             <input type="file" accept="application/pdf" data-stepper-pdf-input class="block w-full text-sm">
             <button type="button" data-stepper-pdf-import class="stepper-mini-btn ${theme.accent}" ${pdfImportBusy ? 'disabled' : ''}>${pdfImportBusy ? 'Importing…' : 'Import PDF into Editor'}</button>
@@ -3204,27 +3315,33 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   function ensureInlineHost(){
     const host = document.getElementById('stepper-editor-inline-host');
     if (!host) return null;
-    let stack = host.querySelector('div.space-y-5');
+    let stack = document.getElementById('stepper-inline-tools-stack');
     if (!stack) {
       stack = document.createElement('div');
-      stack.className = 'space-y-5';
-      while (host.firstChild) stack.appendChild(host.firstChild);
+      stack.id = 'stepper-inline-tools-stack';
+      stack.className = 'space-y-5 mt-5';
       host.appendChild(stack);
     }
     let panel = document.getElementById(PHR_PANEL_ID);
     if (!panel) {
       panel = document.createElement('section');
       panel.id = PHR_PANEL_ID;
-      const settingsPanel = document.getElementById('stepper-inline-settings');
-      if (settingsPanel && settingsPanel.parentNode === stack) stack.insertBefore(panel, settingsPanel);
-      else stack.appendChild(panel);
+      stack.appendChild(panel);
     }
     let pdfPanel = document.getElementById(PDF_IMPORT_PANEL_ID);
     if (!pdfPanel) {
       pdfPanel = document.createElement('section');
       pdfPanel.id = PDF_IMPORT_PANEL_ID;
-      const settingsPanel = document.getElementById('stepper-inline-settings');
-      if (settingsPanel && settingsPanel.parentNode === stack) stack.insertBefore(pdfPanel, settingsPanel);
+      stack.appendChild(pdfPanel);
+    }
+    let settingsPanel = document.getElementById(SETTINGS_PANEL_ID);
+    if (settingsPanel && settingsPanel.parentNode !== stack) {
+      stack.appendChild(settingsPanel);
+    }
+    if (panel.parentNode !== stack) stack.insertBefore(panel, stack.firstChild || null);
+    if (pdfPanel.parentNode !== stack) {
+      const settingsNode = document.getElementById(SETTINGS_PANEL_ID);
+      if (settingsNode && settingsNode.parentNode === stack) stack.insertBefore(pdfPanel, settingsNode);
       else stack.appendChild(pdfPanel);
     }
     return host;
@@ -4076,7 +4193,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     const note = document.createElement('div');
     note.setAttribute('data-stepper-note', 'pdf-import-ai');
     note.className = `rounded-2xl border px-4 py-4 flex gap-3 ${theme.dark ? 'border-neutral-800 bg-neutral-950' : 'border-neutral-200 bg-white'}`;
-    note.innerHTML = `<div class="mt-0.5 shrink-0">${renderWhatsNewBadge(iconUploadCloud())}</div><p class="font-medium leading-relaxed">Added PDF Import AI on the Build page. Open <strong>PDF Import AI</strong>, choose a stepsheet PDF, and it will pull the dance into your Editor so your Sheet view matches too.</p>`;
+    note.innerHTML = `<div class="mt-0.5 shrink-0">${renderWhatsNewBadge(iconUploadCloud())}</div><p class="font-medium leading-relaxed">Added PDF Import AI on the Build page. Open <strong>PDF Import AI</strong>, choose a stepsheet PDF, and it will pull the dance into your Editor so your Sheet view matches too. When you are signed in, it can also send glossary ideas for review.</p>`;
     list.insertBefore(note, list.firstChild || null);
   }
 

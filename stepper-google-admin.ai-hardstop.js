@@ -77,55 +77,8 @@
       admin: false,
       feature: false,
       sync: false
-    },
-    renderTimer: null
-  };
-
-  function isTextEntryElement(node){
-    if (!node || node.nodeType !== 1) return false;
-    if (node.isContentEditable) return true;
-    const tag = String(node.tagName || '').toUpperCase();
-    if (tag === 'TEXTAREA') return true;
-    if (tag !== 'INPUT') return false;
-    const type = String(node.getAttribute('type') || 'text').toLowerCase();
-    return !['button','submit','reset','checkbox','radio','range','file','color','hidden','image'].includes(type);
-  }
-
-  function getTextEntryValue(node){
-    if (!node || node.nodeType !== 1) return '';
-    if (node.isContentEditable) return String(node.textContent || '').trim();
-    if ('value' in node) return String(node.value || '').trim();
-    return '';
-  }
-
-  function adminDraftExists(){
-    const host = document.getElementById(HOST_ID);
-    if (!host) return false;
-    const fields = host.querySelectorAll('input, textarea, [contenteditable="true"], [contenteditable="plaintext-only"]');
-    for (const field of fields) {
-      if (getTextEntryValue(field)) return true;
     }
-    return false;
-  }
-
-  function shouldDeferAdminAutoRender(){
-    const active = document.activeElement;
-    if (isTextEntryElement(active) && getTextEntryValue(active)) return true;
-    return adminDraftExists();
-  }
-
-  function scheduleRenderPages(delay){
-    const wait = Number.isFinite(delay) ? Math.max(0, delay) : 2000;
-    if (state.renderTimer) clearTimeout(state.renderTimer);
-    state.renderTimer = setTimeout(() => {
-      state.renderTimer = null;
-      if (shouldDeferAdminAutoRender()) {
-        scheduleRenderPages(wait);
-        return;
-      }
-      renderPages(true);
-    }, wait);
-  }
+  };
 
   function normalizeEmail(value){
     return String(value || '').trim().toLowerCase();
@@ -305,7 +258,7 @@
     data.meta.counts = String(totalCounts);
     writeAppData(data);
     updateSavedSignature('');
-    renderPages(true);
+    renderPages();
     openBuildWorksheet();
     return { totalCounts, sections: sectionCounter };
   }
@@ -696,10 +649,10 @@
     hideNativeExtraHost();
     if (state.ui.mainEl) state.ui.mainEl.style.display = '';
     if (state.ui.footerWrap) state.ui.footerWrap.style.display = ''; // keep native layout stable; extra pages render inline without blanking the app
-    renderPages(true);
+    renderPages();
     updateTabButtons();
     refreshLiveQueues().then(() => {
-      if (state.activePage) scheduleRenderPages(2000);
+      if (state.activePage) renderPages();
     }).catch(() => {});
   }
 
@@ -1107,9 +1060,7 @@
     const signature = buildDanceSignature(entry);
     updateSavedSignature(signature);
     state.lastSyncedSignature = signature;
-    state.savedDancesUiSignature = '';
     renderPages();
-    void refreshCloudSaves().then(() => { state.savedDancesUiSignature = ''; renderPages(); }).catch(() => {});
     openBuildWorksheet();
     return true;
   }
@@ -1204,8 +1155,6 @@
       state.lastSyncedSignature = signature;
       updateSavedSignature(signature);
       if (data && Array.isArray(data.items)) state.cloudSaves = data.items;
-      state.savedDancesUiSignature = '';
-      renderPages();
       return true;
     } catch {
       return false;
@@ -1467,17 +1416,6 @@
     }
   }
 
-  async function deleteSubmissionRequest(submissionId){
-    if (!window.confirm('Delete this request from the queue?')) return;
-    try {
-      await authFetch(`/api/admin/submissions/${encodeURIComponent(submissionId)}/reject`, { method: 'POST' });
-      await refreshSubmissions();
-      renderPages();
-    } catch (error) {
-      alert(error.message || 'Could not delete that request.');
-    }
-  }
-
 
   function ensureSaveHost(){
     let host = document.getElementById('stepper-google-save-host');
@@ -1602,28 +1540,6 @@
       alert(error.message || 'Could not send that glossary step request.');
       return false;
     }
-  }
-
-  async function requestGlossaryEditSuggestion(payload){
-    const originalName = String(payload && payload.originalName || '').trim();
-    const approvedList = Array.isArray(state.glossaryApproved) ? state.glossaryApproved : [];
-    const existing = approvedList.find((item) => String(item && item.id || '').trim() === String(payload && payload.originalStepId || '').trim())
-      || approvedList.find((item) => String(item && item.name || '').trim().toLowerCase() === originalName.toLowerCase());
-    const merged = {
-      ...(payload || {}),
-      requestType: 'edit',
-      originalStepId: String(payload && payload.originalStepId || (existing && existing.id) || '').trim(),
-      originalName: originalName || String(existing && existing.name || '').trim(),
-      originalDescription: String(payload && payload.originalDescription || (existing && existing.description) || '').trim(),
-      originalCounts: String(payload && payload.originalCounts || (existing && existing.counts) || '').trim(),
-      originalFoot: String(payload && payload.originalFoot || (existing && existing.foot) || '').trim(),
-      originalTags: String(payload && payload.originalTags || (existing && existing.tags) || '').trim()
-    };
-    if (!merged.originalName) {
-      alert('The original glossary step could not be matched yet. Open Glossary+ once so the latest glossary list loads, then try again.');
-      return false;
-    }
-    return requestGlossaryStep(merged);
   }
 
   async function decideGlossaryRequest(id, decision){
@@ -2400,7 +2316,7 @@
         ${cards}
 
         <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-site-memory="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Helper memory</div><p class="mt-1 text-sm ${theme.subtle}">Add site facts or rules the AI helper should keep using for everyone. This is how the website learns approved things over time.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.siteMemories || []).length))} learned</span></div><div class="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]"><textarea data-stepper-site-memory-input="1" class="stepper-google-input" rows="3" placeholder="Example: Featured dances should feel polished but not over-written. Counts should be generated in 8-count blocks whenever possible."></textarea><button type="button" class="stepper-google-cta ${theme.button}" data-action="add-site-memory">Add memory</button></div><div class="mt-4 grid gap-3">${(state.siteMemories || []).length ? state.siteMemories.slice(0,30).map(item => `<div class="rounded-2xl border p-4 ${theme.soft}" data-stepper-site-memory-id="${escapeHtml(item.id)}"><div class="flex flex-wrap items-start justify-between gap-3"><div><div class="text-sm font-black">${escapeHtml(item.text || '')}</div><p class="mt-1 text-xs ${theme.subtle}">${escapeHtml(item.createdByName || item.createdByEmail || 'Admin')}</p></div><button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="delete-site-memory">Delete</button></div></div>`).join('') : `<p class="text-sm ${theme.subtle}">No saved helper memory yet.</p>`}</div></div>
-        <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-glossary-requests="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Requested dance steps</div><p class="mt-1 text-sm ${theme.subtle}">Admin approves custom glossary steps here. If a request is clearly right-footed or left-footed, the mirrored version is created automatically too.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.glossaryRequests || []).length))} pending</span></div><div class="mt-4 grid gap-4">${(state.glossaryRequests || []).length ? state.glossaryRequests.map(item => `<article class="rounded-2xl border p-4 ${theme.soft}" data-stepper-glossary-request-id="${escapeHtml(item.id)}"><div class="flex flex-wrap items-start justify-between gap-3"><div><div class="text-base font-black">${escapeHtml(item.name || 'Requested Step')}</div><p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.ownerName || item.ownerEmail || 'Member')} • ${escapeHtml(item.counts || '1')} • ${escapeHtml(item.foot || 'Either')}</p></div><div class="flex flex-wrap gap-3"><button type="button" class="stepper-google-cta ${theme.button}" data-action="approve-glossary-request">Approve</button><button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="reject-glossary-request">Decline</button></div></div><div class="mt-4 grid gap-3 sm:grid-cols-2"><div class="rounded-2xl border p-4 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">${item.requestType === 'edit' ? 'Current glossary step' : 'Requested step'}</div><p class="mt-3 text-sm font-bold">${escapeHtml(item.requestType === 'edit' ? (item.originalName || '') : (item.name || ''))}</p><p class="mt-2 text-sm ${theme.subtle}">${escapeHtml(item.requestType === 'edit' ? (item.originalDescription || '') : (item.description || ''))}</p><p class="mt-2 text-xs font-semibold ${theme.subtle}">${escapeHtml(item.requestType === 'edit' ? (item.originalFoot || item.foot || '') : (item.foot || ''))} • ${escapeHtml(item.requestType === 'edit' ? (item.originalCounts || item.counts || '') : (item.counts || ''))}</p>${(item.requestType === 'edit' ? item.originalTags : item.tags) ? `<p class="mt-2 text-xs font-semibold ${theme.subtle}">Tags: ${escapeHtml(item.requestType === 'edit' ? item.originalTags : item.tags)}</p>` : ''}</div><div class="rounded-2xl border p-4 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">${item.requestType === 'edit' ? 'Suggested replacement' : 'Auto twin preview'}</div>${item.requestType === 'edit' ? `<p class="mt-3 text-sm font-bold">${escapeHtml(item.name || '')}</p><p class="mt-2 text-sm ${theme.subtle}">${escapeHtml(item.description || '')}</p><p class="mt-2 text-xs font-semibold ${theme.subtle}">${escapeHtml(item.foot || '')} • ${escapeHtml(item.counts || '')}</p>${item.tags ? `<p class="mt-2 text-xs font-semibold ${theme.subtle}">Tags: ${escapeHtml(item.tags)}</p>` : ''}` : (item.autoMirror ? `<p class="mt-3 text-sm font-bold">${escapeHtml(item.autoMirror.name || '')}</p><p class="mt-2 text-sm ${theme.subtle}">${escapeHtml(item.autoMirror.description || '')}</p><p class="mt-2 text-xs font-semibold ${theme.subtle}">${escapeHtml(item.autoMirror.foot || '')} • ${escapeHtml(item.autoMirror.counts || '')}</p>` : `<p class="mt-3 text-sm ${theme.subtle}">No forced opposite-foot twin for this request.</p>`)}</div></div></article>`).join('') : `<p class="text-sm ${theme.subtle}">No pending dance step requests.</p>`}</div></div>
+        <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-glossary-requests="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Requested dance steps</div><p class="mt-1 text-sm ${theme.subtle}">Admin approves custom glossary steps here. If a request is clearly right-footed or left-footed, the mirrored version is created automatically too.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.glossaryRequests || []).length))} pending</span></div><div class="mt-4 grid gap-4">${(state.glossaryRequests || []).length ? state.glossaryRequests.map(item => `<article class="rounded-2xl border p-4 ${theme.soft}" data-stepper-glossary-request-id="${escapeHtml(item.id)}"><div class="flex flex-wrap items-start justify-between gap-3"><div><div class="text-base font-black">${escapeHtml(item.name || 'Requested Step')}</div><p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.ownerName || item.ownerEmail || 'Member')} • ${escapeHtml(item.counts || '1')} • ${escapeHtml(item.foot || 'Either')}</p></div><div class="flex flex-wrap gap-3"><button type="button" class="stepper-google-cta ${theme.button}" data-action="approve-glossary-request">Approve</button><button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="reject-glossary-request">Decline</button></div></div><div class="mt-4 grid gap-3 sm:grid-cols-2"><div class="rounded-2xl border p-4 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Requested step</div><p class="mt-3 text-sm font-bold">${escapeHtml(item.name || '')}</p><p class="mt-2 text-sm ${theme.subtle}">${escapeHtml(item.description || '')}</p>${item.tags ? `<p class="mt-2 text-xs font-semibold ${theme.subtle}">Tags: ${escapeHtml(item.tags)}</p>` : ''}</div><div class="rounded-2xl border p-4 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Auto twin preview</div>${item.autoMirror ? `<p class="mt-3 text-sm font-bold">${escapeHtml(item.autoMirror.name || '')}</p><p class="mt-2 text-sm ${theme.subtle}">${escapeHtml(item.autoMirror.description || '')}</p><p class="mt-2 text-xs font-semibold ${theme.subtle}">${escapeHtml(item.autoMirror.foot || '')} • ${escapeHtml(item.autoMirror.counts || '')}</p>` : `<p class="mt-3 text-sm ${theme.subtle}">No forced opposite-foot twin for this request.</p>`}</div></div></article>`).join('') : `<p class="text-sm ${theme.subtle}">No pending dance step requests.</p>`}</div></div>
         <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-approved-glossary="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Approved community glossary</div><p class="mt-1 text-sm ${theme.subtle}">These are the admin-approved custom steps everyone can apply from Glossary+ while building.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.glossaryApproved || []).length))} live</span></div><div class="mt-4 grid gap-3">${(state.glossaryApproved || []).length ? state.glossaryApproved.slice(0, 20).map(item => `<div class="rounded-2xl border p-4 ${theme.soft}"><div class="flex flex-wrap items-start justify-between gap-3"><div><div class="text-base font-black">${escapeHtml(item.name || 'Step')}</div><p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.foot || 'Either')} • ${escapeHtml(item.counts || '1')}</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(item.status || 'approved')}</span></div><p class="mt-3 text-sm ${theme.subtle}">${escapeHtml(item.description || '')}</p></div>`).join('') : `<p class="text-sm ${theme.subtle}">No approved custom glossary steps yet.</p>`}</div></div>
         ${cards}
       </div>
@@ -2414,8 +2330,6 @@
       if (rejectBtn) rejectBtn.addEventListener('click', () => rejectSubmission(submissionId));
       const approveBtn = card.querySelector('[data-action="approve-site"]');
       if (approveBtn) approveBtn.addEventListener('click', () => approveSiteSubmission(submissionId));
-      const deleteBtn = card.querySelector('[data-action="delete-submission"]');
-      if (deleteBtn) deleteBtn.addEventListener('click', () => deleteSubmissionRequest(submissionId));
       const loadBtn = card.querySelector('[data-action="load-request"]');
       if (loadBtn) loadBtn.addEventListener('click', () => { if (submission) loadDanceIntoWorksheet(submission); });
       card.querySelectorAll('[data-action="feature-request"]').forEach(button => {
@@ -2565,11 +2479,7 @@
     observer.observe(page, { childList: true, subtree: true, characterData: true });
   }
 
-  function renderPages(force){
-    if (!force && shouldDeferAdminAutoRender()) {
-      scheduleRenderPages(2000);
-      return false;
-    }
+  function renderPages(){
     locateUi();
     ensureHost();
     renderSignInPage();
@@ -2587,7 +2497,6 @@
     renderFeatureBadge();
     renderSiteHelper();
     showNotificationToasts();
-    return true;
   }
 
   async function prime(){
@@ -2628,10 +2537,6 @@
   }
 
   setInterval(() => {
-    if (shouldDeferAdminAutoRender()) {
-      scheduleRenderPages(2000);
-      return;
-    }
     if (!locateUi()) return;
     ensureHost();
     wireStartupBackendBase();
@@ -2673,7 +2578,7 @@
   window.addEventListener('storage', () => {
     if (state.session && state.session.credential) syncCurrentDanceToBackend(false);
     state.savedDancesUiSignature = '';
-    scheduleRenderPages(2000);
+    renderPages();
   });
 
   async function refreshSubscription(){
@@ -2955,11 +2860,9 @@
     try {
       const data = await authFetch('/api/moderator/submissions');
       state.moderatorQueue = Array.isArray(data.items) ? data.items : [];
-      state.__moderatorDirty = true;
       return state.moderatorQueue;
     } catch {
       state.moderatorQueue = [];
-      state.__moderatorDirty = true;
       return [];
     }
   }
@@ -3164,7 +3067,7 @@
       });
       await refreshModeratorQueue();
       if (isAdminSession()) await refreshSubmissions();
-      renderPages(true);
+      renderPages();
     } catch (error) {
       alert(error.message || 'Could not send moderator review.');
     }
@@ -3255,7 +3158,6 @@
             <div class="flex flex-wrap items-center gap-3"><h3 class="text-lg font-black tracking-tight">${escapeHtml(item.title || 'Untitled Dance')}</h3><span class="stepper-google-pill ${theme.orange}">${escapeHtml(item.requestType || 'request')}</span>${item.priority ? `<span class="stepper-google-pill ${theme.orange}">Priority</span>` : ''}</div>
             <p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.ownerName || item.ownerEmail || 'Member')} • ${escapeHtml(item.ownerEmail || '')}</p>
             <p class="mt-2 text-sm ${theme.subtle}">Leave a note when you approve or disapprove so admin can see exactly what you put on it.</p>
-            <p class="mt-2 text-sm font-semibold ${theme.subtle}">${escapeHtml((item.moderatorVoteSummary && item.moderatorVoteSummary.text) || '0 moderators approve and 0 disapprove')}</p>
           </div>
         </div>
         <div class="mt-4 ${theme.panel} rounded-2xl border p-4">
@@ -3332,10 +3234,8 @@
       }
       const badges = card.querySelector('[data-moderator-badges="1"]');
       if (badges) {
-        const summaryText = (item.moderatorVoteSummary && item.moderatorVoteSummary.text) || '0 moderators approve and 0 disapprove';
-        if (String(item.moderatorReviewStatus || '') === 'approved') badges.innerHTML = `<span class="stepper-google-pill ${theme.orange}" style="background:#fef3c7;color:#92400e;border:1px solid #f59e0b;">Moderator approved</span><span class="stepper-google-pill ${theme.orange}">${escapeHtml(summaryText)}</span>`;
-        else if (String(item.moderatorReviewStatus || '') === 'disapproved') badges.innerHTML = `<span class="stepper-google-pill ${theme.orange}" style="background:#fee2e2;color:#991b1b;border:1px solid #ef4444;">Moderator disapproved</span><span class="stepper-google-pill ${theme.orange}">${escapeHtml(summaryText)}</span>`;
-        else if ((item.moderatorVoteSummary && item.moderatorVoteSummary.total)) badges.innerHTML = `<span class="stepper-google-pill ${theme.orange}">${escapeHtml(summaryText)}</span>`;
+        if (String(item.moderatorReviewStatus || '') === 'approved') badges.innerHTML = `<span class="stepper-google-pill ${theme.orange}" style="background:#fef3c7;color:#92400e;border:1px solid #f59e0b;">Moderator approved</span>`;
+        else if (String(item.moderatorReviewStatus || '') === 'disapproved') badges.innerHTML = `<span class="stepper-google-pill ${theme.orange}" style="background:#fee2e2;color:#991b1b;border:1px solid #ef4444;">Moderator disapproved</span>`;
         else badges.innerHTML = '';
       }
       if (item.moderatorNote && !card.querySelector('[data-moderator-note-view="1"]')) {
@@ -3512,20 +3412,14 @@ Newest user question: ${question}`;
   }
 
   const __origRenderPages = renderPages;
-  renderPages = function(force){
-    const forced = !!force;
-    const previousPage = state.__lastRenderedPage || '';
-    __origRenderPages(forced);
+  renderPages = function(){
+    __origRenderPages();
     ensureHost();
-    if (state.activePage === 'moderator' && (forced || previousPage !== 'moderator' || state.__moderatorDirty)) {
-      renderModeratorPage();
-      state.__moderatorDirty = false;
-    }
+    renderModeratorPage();
     decorateSubscriptionPage();
     decorateAdminPage();
     renderCommunityGlossary();
     setVisibility(document.getElementById(MODERATOR_PAGE_ID), state.activePage === 'moderator');
-    state.__lastRenderedPage = state.activePage;
     window.StepByStepperGlobals = {
       buildCurrentDanceEntry,
       normalizeStoredEntry,
@@ -3537,8 +3431,10 @@ Newest user question: ${question}`;
       isAdminSession,
       applyStepToCurrentWorksheet,
       autoGenerateCountsForWorksheet,
+      authFetch,
       requestGlossaryStep,
-      requestGlossaryEditSuggestion
+      syncCurrentDanceToBackend,
+      saveChangesNow
     };
   };
 
@@ -3547,7 +3443,7 @@ Newest user question: ${question}`;
     if (__stepperLiveQueueRefreshBusy || !(state.session && state.session.credential)) return;
     __stepperLiveQueueRefreshBusy = true;
     refreshLiveQueues().then(() => {
-      if (state.activePage === 'admin' || state.activePage === 'signin' || state.activePage === 'subscription') renderPages();
+      if (state.activePage === 'admin' || state.activePage === 'moderator' || state.activePage === 'signin' || state.activePage === 'subscription') renderPages();
     }).catch(() => {}).finally(() => { __stepperLiveQueueRefreshBusy = false; });
   }, LIVE_QUEUE_SYNC_INTERVAL_MS);
 
