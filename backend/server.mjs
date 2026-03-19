@@ -4,9 +4,9 @@ import dotenv from "dotenv";
 import OpenAI from "openai";
 import { OAuth2Client } from "google-auth-library";
 import { promises as fs } from "fs";
-import { MongoClient } from "mongodb";
 import path from "path";
 import { fileURLToPath } from "url";
+import { MongoClient } from "mongodb";
 
 dotenv.config();
 
@@ -27,19 +27,19 @@ const dataDir = process.env.DATA_DIR
 const dbPath = path.join(dataDir, "stepper-db.json");
 const dbBackupPath = `${dbPath}.bak`;
 const dbTempPath = `${dbPath}.tmp`;
-const mongoUri = String(process.env.MONGODB_URI || process.env.MONGO_URL || '').trim();
-const mongoDbName = String(process.env.MONGODB_DB_NAME || process.env.MONGODB_DB || 'step_by_stepper').trim() || 'step_by_stepper';
-const mongoCollectionName = String(process.env.MONGODB_COLLECTION || 'app_state').trim() || 'app_state';
-const mongoConfigured = !!mongoUri;
-let mongoAvailable = mongoConfigured;
-let mongoClient = null;
+const mongoUri = String(process.env.MONGODB_URI || process.env.MONGO_URI || process.env.MONGO_URL || "").trim();
+const mongoDbName = String(process.env.MONGODB_DB_NAME || process.env.MONGODB_DB || "step_by_stepper").trim() || "step_by_stepper";
+const mongoCollectionName = String(process.env.MONGODB_COLLECTION || "app_state").trim() || "app_state";
+let mongoClientInstance = null;
 let mongoCollection = null;
+let mongoAvailable = false;
 let mongoFailureReason = '';
+let writeQueue = Promise.resolve();
 console.log('[Stepper] RENDER_DISK_MOUNT_PATH =', process.env.RENDER_DISK_MOUNT_PATH || '(not set)');
 console.log('[Stepper] DATA_DIR =', process.env.DATA_DIR || '(not set)');
 console.log('[Stepper] resolved dataDir =', dataDir);
 console.log('[Stepper] resolved dbPath =', dbPath);
-console.log('[Stepper] storage mode =', mongoConfigured ? `mongodb (${mongoDbName}/${mongoCollectionName})` : 'json-file');
+console.log('[Stepper] storage mode =', mongoUri ? `mongodb (${mongoDbName}/${mongoCollectionName})` : 'json-file');
 const openaiClient = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
@@ -336,63 +336,12 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json({ limit: "4mb" }));
 
-async function ensureMongo() {
-  if (!mongoConfigured || !mongoAvailable) return null;
-  if (mongoCollection) return mongoCollection;
-  try {
-    if (!mongoClient) {
-      mongoClient = new MongoClient(mongoUri, {
-        maxPoolSize: 10,
-        minPoolSize: 0,
-        serverSelectionTimeoutMS: 10000
-      });
-      await mongoClient.connect();
-    }
-    const db = mongoClient.db(mongoDbName);
-    mongoCollection = db.collection(mongoCollectionName);
-    await mongoCollection.createIndex({ updatedAt: -1 });
-    mongoFailureReason = '';
-    return mongoCollection;
-  } catch (error) {
-    mongoFailureReason = String(error?.message || error || 'Unknown MongoDB error');
-    mongoAvailable = false;
-    mongoCollection = null;
-    try {
-      if (mongoClient) await mongoClient.close();
-    } catch {}
-    mongoClient = null;
-    console.error('[Stepper] MongoDB unavailable; falling back to JSON storage.', mongoFailureReason);
-    return null;
-  }
-}
-
-function normalizeDbShape(parsed) {
-  if (!parsed || typeof parsed !== "object") throw new Error("Database payload did not contain an object.");
-  if (!parsed.users || typeof parsed.users !== "object") parsed.users = {};
-  if (!Array.isArray(parsed.featuredChoreo)) parsed.featuredChoreo = [];
-  if (!Array.isArray(parsed.danceRegistry)) parsed.danceRegistry = [];
-  if (!Array.isArray(parsed.submissions)) parsed.submissions = [];
-  if (!Array.isArray(parsed.submissionHistory)) parsed.submissionHistory = [];
-  if (!Array.isArray(parsed.moderatorApplications)) parsed.moderatorApplications = [];
-  if (!Array.isArray(parsed.moderatorRegistry)) parsed.moderatorRegistry = [];
-  if (!Array.isArray(parsed.adminRegistry)) parsed.adminRegistry = [];
-  if (!Array.isArray(parsed.pendingModeratorInvites)) parsed.pendingModeratorInvites = [];
-  if (!Array.isArray(parsed.pendingSuspensions)) parsed.pendingSuspensions = [];
-  if (!Array.isArray(parsed.glossaryRequests)) parsed.glossaryRequests = [];
-  if (!Array.isArray(parsed.approvedGlossarySteps)) parsed.approvedGlossarySteps = [];
-  if (!Array.isArray(parsed.siteMemory)) parsed.siteMemory = [];
-  if (!Array.isArray(parsed.securityAlerts)) parsed.securityAlerts = [];
-  if (!Array.isArray(parsed.staffChat)) parsed.staffChat = [];
-  return parsed;
-}
-
 function emptyDb() {
   return {
     users: {},
     featuredChoreo: [],
     danceRegistry: [],
     submissions: [],
-    submissionHistory: [],
     moderatorApplications: [],
     moderatorRegistry: [],
     adminRegistry: [],
@@ -406,32 +355,63 @@ function emptyDb() {
   };
 }
 
-async function ensureDb() {
-  if (mongoAvailable) {
-    const collection = await ensureMongo();
-    if (!collection) {
-      console.warn('[Stepper] MongoDB init skipped; using JSON storage fallback.');
-    } else {
-    const existing = await collection.findOne({ _id: 'main' }, { projection: { _id: 1 } });
-    if (!existing) {
-      const initial = syncAdminRegistry(syncModeratorRegistry(syncAndPruneDb(emptyDb())));
-      await collection.updateOne(
-        { _id: 'main' },
-        {
-          $setOnInsert: {
-            _id: 'main',
-            state: initial,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            storage: 'mongodb'
-          }
-        },
-        { upsert: true }
-      );
+async function initMongo() {
+  if (!mongoUri) return false;
+  if (mongoAvailable && mongoCollection) return true;
+  try {
+    if (!mongoClientInstance) {
+      mongoClientInstance = new MongoClient(mongoUri, {
+        serverSelectionTimeoutMS: 8000,
+        connectTimeoutMS: 8000,
+        retryWrites: true
+      });
     }
-      return;
-    }
+    await mongoClientInstance.connect();
+    mongoCollection = mongoClientInstance.db(mongoDbName).collection(mongoCollectionName);
+    mongoAvailable = true;
+    mongoFailureReason = '';
+    return true;
+  } catch (error) {
+    mongoAvailable = false;
+    mongoCollection = null;
+    mongoFailureReason = String(error?.message || error || 'MongoDB unavailable.');
+    console.warn('[Stepper] MongoDB unavailable; falling back to JSON storage.', mongoFailureReason);
+    return false;
   }
+}
+
+function normalizeDbShape(parsed) {
+  if (!parsed || typeof parsed !== "object") throw new Error("Database state did not contain an object.");
+  if (!parsed.users || typeof parsed.users !== "object") parsed.users = {};
+  if (!Array.isArray(parsed.featuredChoreo)) parsed.featuredChoreo = [];
+  if (!Array.isArray(parsed.danceRegistry)) parsed.danceRegistry = [];
+  if (!Array.isArray(parsed.submissions)) parsed.submissions = [];
+  if (!Array.isArray(parsed.moderatorApplications)) parsed.moderatorApplications = [];
+  if (!Array.isArray(parsed.moderatorRegistry)) parsed.moderatorRegistry = [];
+  if (!Array.isArray(parsed.adminRegistry)) parsed.adminRegistry = [];
+  if (!Array.isArray(parsed.pendingModeratorInvites)) parsed.pendingModeratorInvites = [];
+  if (!Array.isArray(parsed.pendingSuspensions)) parsed.pendingSuspensions = [];
+  if (!Array.isArray(parsed.glossaryRequests)) parsed.glossaryRequests = [];
+  if (!Array.isArray(parsed.approvedGlossarySteps)) parsed.approvedGlossarySteps = [];
+  if (!Array.isArray(parsed.siteMemory)) parsed.siteMemory = [];
+  if (!Array.isArray(parsed.securityAlerts)) parsed.securityAlerts = [];
+  if (!Array.isArray(parsed.staffChat)) parsed.staffChat = [];
+  return parsed;
+}
+
+async function readDbFromMongo() {
+  const ok = await initMongo();
+  if (!ok || !mongoCollection) throw new Error(mongoFailureReason || 'MongoDB unavailable.');
+  const doc = await mongoCollection.findOne({ _id: 'app_state' });
+  if (!doc || !doc.state || typeof doc.state !== 'object') {
+    const blank = emptyDb();
+    await mongoCollection.updateOne({ _id: 'app_state' }, { $set: { state: blank, updatedAt: new Date().toISOString() } }, { upsert: true });
+    return blank;
+  }
+  return normalizeDbShape(doc.state);
+}
+
+async function ensureDb() {
   if (isRenderDiskMode) {
     try {
       await fs.access(dataDir);
@@ -490,16 +470,17 @@ function syncModeratorRegistry(db) {
 }
 
 async function readDb() {
-  await ensureDb();
-  if (mongoAvailable) {
-    const collection = await ensureMongo();
-    if (collection) {
-      const doc = await collection.findOne({ _id: 'main' });
-      const parsed = normalizeDbShape(doc && doc.state ? doc.state : emptyDb());
-      return syncAdminRegistry(syncModeratorRegistry(syncAndPruneDb(parsed)));
+  if (mongoUri) {
+    try {
+      const parsed = await readDbFromMongo();
+      return syncAndPruneDb(parsed);
+    } catch (error) {
+      mongoAvailable = false;
+      mongoFailureReason = String(error?.message || error || 'MongoDB unavailable.');
+      console.warn('[Stepper] MongoDB init skipped; using JSON storage fallback.');
     }
-    console.warn('[Stepper] MongoDB read skipped; using JSON storage fallback.');
   }
+  await ensureDb();
   try {
     const parsed = await readDbFromPath(dbPath);
     return syncAndPruneDb(parsed);
@@ -566,42 +547,44 @@ function syncAdminRegistry(db) {
 }
 
 async function writeDb(payload) {
-  await ensureDb();
   const normalized = syncAdminRegistry(syncModeratorRegistry(syncAndPruneDb(payload)));
-  if (mongoAvailable) {
-    const collection = await ensureMongo();
-    if (collection) {
-      await collection.updateOne(
-        { _id: 'main' },
-        {
-          $set: {
-            state: normalized,
-            updatedAt: new Date().toISOString(),
-            storage: 'mongodb'
-          },
-          $setOnInsert: {
-            createdAt: new Date().toISOString()
-          }
-        },
-        { upsert: true }
-      );
-      return;
+  if (mongoUri) {
+    try {
+      const ok = await initMongo();
+      if (ok && mongoCollection) {
+        await mongoCollection.updateOne(
+          { _id: 'app_state' },
+          { $set: { state: normalized, updatedAt: new Date().toISOString() } },
+          { upsert: true }
+        );
+        mongoAvailable = true;
+        mongoFailureReason = '';
+        return;
+      }
+    } catch (error) {
+      mongoAvailable = false;
+      mongoFailureReason = String(error?.message || error || 'MongoDB unavailable.');
+      console.warn('[Stepper] MongoDB write failed; using JSON storage fallback.', mongoFailureReason);
     }
-    console.warn('[Stepper] MongoDB write skipped; using JSON storage fallback.');
   }
+  await ensureDb();
   const data = JSON.stringify(normalized, null, 2);
-  try {
+  writeQueue = writeQueue.then(async () => {
+    const uniqueTempPath = `${dbPath}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
     try {
-      await fs.copyFile(dbPath, dbBackupPath);
-    } catch {}
-    await fs.writeFile(dbTempPath, data, 'utf8');
-    await fs.rename(dbTempPath, dbPath);
-    try {
-      await fs.copyFile(dbPath, dbBackupPath);
-    } catch {}
-  } finally {
-    try { await fs.unlink(dbTempPath); } catch {}
-  }
+      try {
+        await fs.copyFile(dbPath, dbBackupPath);
+      } catch {}
+      await fs.writeFile(uniqueTempPath, data, 'utf8');
+      await fs.rename(uniqueTempPath, dbPath);
+      try {
+        await fs.copyFile(dbPath, dbBackupPath);
+      } catch {}
+    } finally {
+      try { await fs.unlink(uniqueTempPath); } catch {}
+    }
+  });
+  return writeQueue;
 }
 
 
@@ -1396,10 +1379,7 @@ app.get("/api/health", async (_req, res) => {
     googleEnabled: !!googleClientId,
     openaiEnabled: !!openaiClient,
     geminiEnabled: !!geminiApiKey,
-    cloudStorage: mongoConfigured ? (mongoAvailable ? "mongodb" : "json-file-fallback") : "json-file",
-    mongoConfigured,
-    mongoAvailable,
-    mongoFailureReason,
+    cloudStorage: "json-file",
     onlineCount: getOnlineUsers(db).length,
     danceCount: Array.isArray(db.danceRegistry) ? db.danceRegistry.length : 0,
     glossaryCount: Array.isArray(db.approvedGlossarySteps) ? db.approvedGlossarySteps.length : 0
@@ -1413,10 +1393,7 @@ app.get("/api/auth/config", (_req, res) => {
     googleClientId: googleClientId || "",
     openaiEnabled: !!openaiClient,
     geminiEnabled: !!geminiApiKey,
-    cloudStorage: mongoConfigured ? (mongoAvailable ? "mongodb" : "json-file-fallback") : "json-file",
-    mongoConfigured,
-    mongoAvailable,
-    mongoFailureReason,
+    cloudStorage: "json-file",
     authMode: googleClientId ? "google-id-token" : "none",
     adminEmail,
     onlineWindowMs,
@@ -1622,6 +1599,16 @@ app.post("/api/admin/submissions/:id/reject", requireAdmin, async (req, res) => 
     title: 'Feature request declined',
     message: `${item.title || 'Your dance'} was not approved this time.`
   });
+  db.submissions = (Array.isArray(db.submissions) ? db.submissions : []).filter(row => row && row.id !== id);
+  await writeDb(db);
+  res.json({ ok: true, removedId: id, item });
+});
+
+app.delete("/api/admin/submissions/:id", requireAdmin, async (req, res) => {
+  const db = await readDb();
+  const id = String(req.params.id || "").trim();
+  const item = (Array.isArray(db.submissions) ? db.submissions : []).find(row => row && row.id === id);
+  if (!item) return res.status(404).json({ ok: false, error: 'Submission not found.' });
   db.submissions = (Array.isArray(db.submissions) ? db.submissions : []).filter(row => row && row.id !== id);
   await writeDb(db);
   res.json({ ok: true, removedId: id, item });
@@ -2168,24 +2155,35 @@ app.post('/api/glossary/request', requireGoogleUser, async (req, res) => {
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);
   touchUser(db, req.stepperUser, key);
+  const requestType = String(raw.requestType || '').trim() === 'edit' ? 'edit' : 'new';
+  const original = raw.original && typeof raw.original === 'object' ? raw.original : {};
   const item = {
     id: createId('glossary_request'),
     ownerKey: key,
     ownerEmail: req.stepperUser.email,
     ownerName: req.stepperUser.name,
+    requestType,
     name: name.slice(0, 120),
     description: description.slice(0, 1200),
     counts: String(raw.counts || raw.count || '1').trim().slice(0, 40) || '1',
     foot: String(raw.foot || 'Either').trim().slice(0, 24) || 'Either',
     tags: String(raw.tags || '').trim().slice(0, 240),
-    autoMirror: buildGlossaryTwin(raw),
+    original: requestType === 'edit' ? {
+      sourceId: String(original.sourceId || '').trim().slice(0, 120),
+      name: String(original.name || '').trim().slice(0, 120),
+      description: String(original.description || original.desc || '').trim().slice(0, 1200),
+      counts: String(original.counts || original.count || '').trim().slice(0, 40),
+      foot: String(original.foot || '').trim().slice(0, 24),
+      tags: String(original.tags || '').trim().slice(0, 240)
+    } : null,
+    autoMirror: requestType === 'new' ? buildGlossaryTwin(raw) : null,
     status: 'pending',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
   db.glossaryRequests = [item, ...(Array.isArray(db.glossaryRequests) ? db.glossaryRequests : [])].slice(0, 1000);
   await writeDb(db);
-  res.json({ ok:true, item, message:'Glossary step request sent to Admin.' });
+  res.json({ ok:true, item, message: requestType === 'edit' ? 'Glossary edit suggestion sent to Admin.' : 'Glossary step request sent to Admin.' });
 });
 
 app.get('/api/admin/glossary-requests', requireAdmin, async (_req, res) => {
@@ -2202,19 +2200,42 @@ app.post('/api/admin/glossary-requests/:id/approve', requireAdmin, async (req, r
   item.status = 'approved';
   item.updatedAt = new Date().toISOString();
   item.adminNote = String(req.body?.note || '').trim().slice(0, 600);
-  const approved = normalizeGlossaryStepPayload(item, { email:item.ownerEmail, name:item.ownerName });
-  approved.status = 'approved';
-  approved.sourceRequestId = item.id;
-  const additions = [approved];
-  if (item.autoMirror) {
-    const twin = normalizeGlossaryStepPayload({ ...item.autoMirror, counts:item.autoMirror.counts || item.counts, tags:item.autoMirror.tags || item.tags }, { email:item.ownerEmail, name:item.ownerName });
-    twin.status = 'approved';
-    twin.sourceRequestId = item.id;
-    twin.isAutoMirror = true;
-    additions.push(twin);
+  const additions = [];
+  if (String(item.requestType || 'new') === 'edit' && item.original && item.original.name) {
+    const approved = normalizeGlossaryStepPayload(item, { email:item.ownerEmail, name:item.ownerName });
+    approved.status = 'approved';
+    approved.sourceRequestId = item.id;
+    let replaced = false;
+    db.approvedGlossarySteps = (Array.isArray(db.approvedGlossarySteps) ? db.approvedGlossarySteps : []).map((row) => {
+      const byId = item.original.sourceId && String(row?.id || '') === String(item.original.sourceId || '');
+      const byShape = !item.original.sourceId && String(row?.name || '').trim().toLowerCase() === String(item.original.name || '').trim().toLowerCase() && String(row?.foot || '').trim().toLowerCase() === String(item.original.foot || '').trim().toLowerCase();
+      if (byId || byShape) {
+        replaced = true;
+        return { ...row, ...approved, id: String(row?.id || approved.id || '').trim() || approved.id, sourceRequestId: item.id, updatedAt: new Date().toISOString() };
+      }
+      return row;
+    });
+    if (!replaced) {
+      db.approvedGlossarySteps = [approved, ...(Array.isArray(db.approvedGlossarySteps) ? db.approvedGlossarySteps : [])];
+      additions.push(approved);
+    } else {
+      additions.push(approved);
+    }
+  } else {
+    const approved = normalizeGlossaryStepPayload(item, { email:item.ownerEmail, name:item.ownerName });
+    approved.status = 'approved';
+    approved.sourceRequestId = item.id;
+    additions.push(approved);
+    if (item.autoMirror) {
+      const twin = normalizeGlossaryStepPayload({ ...item.autoMirror, counts:item.autoMirror.counts || item.counts, tags:item.autoMirror.tags || item.tags }, { email:item.ownerEmail, name:item.ownerName });
+      twin.status = 'approved';
+      twin.sourceRequestId = item.id;
+      twin.isAutoMirror = true;
+      additions.push(twin);
+    }
+    db.approvedGlossarySteps = [...additions, ...(Array.isArray(db.approvedGlossarySteps) ? db.approvedGlossarySteps : [])].slice(0, 4000);
   }
-  db.approvedGlossarySteps = [...additions, ...(Array.isArray(db.approvedGlossarySteps) ? db.approvedGlossarySteps : [])].slice(0, 4000);
-  notifyUser(db, item.ownerKey, { kind:'glossary-approved', title:'Glossary step approved', message: item.autoMirror ? 'Admin approved your glossary step and created the opposite-foot twin too.' : 'Admin approved your glossary step.' });
+  notifyUser(db, item.ownerKey, { kind:'glossary-approved', title:'Glossary step approved', message: String(item.requestType || 'new') === 'edit' ? 'Admin approved your glossary edit suggestion.' : (item.autoMirror ? 'Admin approved your glossary step and created the opposite-foot twin too.' : 'Admin approved your glossary step.') });
   await writeDb(db);
   res.json({ ok:true, item, added:additions });
 });
