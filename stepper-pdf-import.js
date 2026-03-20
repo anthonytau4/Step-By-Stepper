@@ -240,7 +240,6 @@
 
   let injected = false;
   let parsedData = null;
-  let currentTab = null;
 
   // --- Tab / page awareness ---
   const PAGE_IDS = [
@@ -578,15 +577,7 @@
     el.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
-  function showToast(data) {
-    const n = (data.steps || []).length;
-    const toast = document.createElement('div');
-    toast.setAttribute('data-testid', 'pdf-import-toast');
-    toast.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:99999;padding:12px 24px;border-radius:999px;background:linear-gradient(135deg,#6366f1,#4f46e5);color:#fff;font-size:13px;font-weight:700;box-shadow:0 8px 28px rgba(0,0,0,0.35),inset 0 1px 0 rgba(255,255,255,0.15);transition:opacity 0.4s,transform 0.4s;';
-    toast.textContent = `PDF imported: ${n} steps${data.title ? ' from "' + data.title + '"' : ''}`;
-    document.body.appendChild(toast);
-    setTimeout(() => { toast.style.opacity = '0'; toast.style.transform = 'translateX(-50%) translateY(-10px)'; setTimeout(() => toast.remove(), 400); }, 3500);
-  }
+
 
   // Only inject on pages that have the editor
   const path = window.location.pathname.replace(/\/+$/, '');
