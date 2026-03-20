@@ -11,7 +11,7 @@
   function buildRuntimeSrc() {
     const path = window.location.pathname.replace(/\/+/g, '/');
     const onSheetPage = /(^|\/)sheet(\/|\/index\.html)?$/.test(path);
-    return (onSheetPage ? '../' : './') + 'stepper-pdf-import-runtime.js?v=20260320-pdf-import-runtime-3';
+    return (onSheetPage ? '../' : './') + 'stepper-pdf-import-runtime.js';
   }
 
   function initRuntime() {
