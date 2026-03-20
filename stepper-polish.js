@@ -89,8 +89,35 @@
     document.head.appendChild(style);
   }
 
+
+  function injectPdfImportRuntime() {
+    const path = window.location.pathname.replace(/\/+$/, '') || '/';
+    const isEditorPath = path === '/' || path === '/sheet' || path === '/index' || path === '/index.html';
+    if (!isEditorPath) return;
+    if (typeof window.StepperPdfImportRuntimeInit === 'function') {
+      window.StepperPdfImportRuntimeInit();
+      return;
+    }
+    const src = path === '/sheet' ? '../stepper-pdf-import-runtime.js?v=20260320-pdf-import-runtime-2' : './stepper-pdf-import-runtime.js?v=20260320-pdf-import-runtime-2';
+    const existing = Array.from(document.scripts).find((item) => item.src && item.src.indexOf('stepper-pdf-import-runtime.js') !== -1);
+    if (existing) {
+      existing.addEventListener('load', () => {
+        if (typeof window.StepperPdfImportRuntimeInit === 'function') window.StepperPdfImportRuntimeInit();
+      }, { once: true });
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = src;
+    script.async = false;
+    script.onload = () => {
+      if (typeof window.StepperPdfImportRuntimeInit === 'function') window.StepperPdfImportRuntimeInit();
+    };
+    document.head.appendChild(script);
+  }
+
   function init() {
     injectPolishStyles();
+    injectPdfImportRuntime();
   }
 
   if (document.readyState === 'loading') {
