@@ -15,9 +15,20 @@
   }
 
   function initRuntime() {
-    if (typeof window.StepperPdfImportRuntimeInit === 'function') {
-      window.StepperPdfImportRuntimeInit();
-    }
+    if (window.__stepperPdfImportRuntimeInitialized) return;
+    if (typeof window.StepperPdfImportRuntimeInit !== 'function') return;
+    window.__stepperPdfImportRuntimeInitialized = true;
+    window.StepperPdfImportRuntimeInit();
+  }
+
+  function bindRuntimeLoad(script) {
+    if (!script || script.__stepperPdfImportBound) return;
+    script.__stepperPdfImportBound = true;
+    script.addEventListener('load', initRuntime, { once: true });
+    script.addEventListener('error', function() {
+      window.__stepperPdfImportRuntimeInitialized = false;
+      console.error('Failed to load stepper-pdf-import-runtime.js');
+    }, { once: true });
   }
 
   function ensureRuntime() {
@@ -26,18 +37,23 @@
       return;
     }
 
-    const existing = Array.from(document.scripts).find((script) =>
-      script.src && script.src.indexOf('stepper-pdf-import-runtime.js') !== -1
-    );
+    const existing = document.querySelector('script[data-stepper-pdf-import-runtime], script[src*="stepper-pdf-import-runtime.js"]');
     if (existing) {
-      existing.addEventListener('load', initRuntime, { once: true });
+      bindRuntimeLoad(existing);
+      if (existing.dataset.loaded === 'true' || existing.readyState === 'complete') {
+        initRuntime();
+      }
       return;
     }
 
     const script = document.createElement('script');
     script.src = buildRuntimeSrc();
     script.async = false;
-    script.addEventListener('load', initRuntime, { once: true });
+    script.dataset.stepperPdfImportRuntime = 'true';
+    bindRuntimeLoad(script);
+    script.addEventListener('load', function() {
+      script.dataset.loaded = 'true';
+    }, { once: true });
     document.head.appendChild(script);
   }
 
