@@ -89,6 +89,7 @@
     document.head.appendChild(style);
   }
 
+
   function init() {
     injectPolishStyles();
   }
