@@ -1,24 +1,57 @@
 /**
- * stepper-pdf-import.js
- * Stable bridge kept intentionally tiny to avoid merge conflicts.
+ * stepper-pdf-import-ui.js
+ * PDF Import UI wiring for Step By Stepper.
  */
 (function() {
   'use strict';
 
-  if (window.__stepperPdfImportBridgeStarted) return;
-  window.__stepperPdfImportBridgeStarted = true;
-  function getApiBase() {
-    return window.STEPPER_API_BASE || window.location.origin;
+  window.StepperPdfImportUiInit = function StepperPdfImportUiInit() {
+
+  let injected = false;
+  let parsedData = null;
+
+  // --- Tab / page awareness ---
+  const PAGE_IDS = [
+    'stepper-whatsnew-page',
+    'stepper-saved-dances-page',
+    'stepper-featured-choreo-page'
+  ];
+
+  function isEditorVisible() {
+    // If any overlay page is visible, editor is NOT the active page
+    for (const id of PAGE_IDS) {
+      const el = document.getElementById(id);
+      if (el && !el.hidden && el.style.display !== 'none') return false;
+    }
+    return true;
   }
 
-  function getApiBase() {
-    return window.STEPPER_API_BASE || window.location.origin;
+  function updateButtonVisibility() {
+    const btn = document.getElementById('stepper-pdf-import-btn');
+    if (!btn) return;
+    const show = isEditorVisible();
+    btn.style.opacity = show ? '1' : '0';
+    btn.style.pointerEvents = show ? 'auto' : 'none';
+    btn.style.transform = show ? 'translateY(0)' : 'translateY(20px)';
   }
 
-  function initBridge() {
-    if (typeof window.StepperPdfImportLoaderCoreInit === 'function') {
-      window.StepperPdfImportLoaderCoreInit();
-      return;
+  // Poll for tab changes (React state isn't accessible from outside)
+  function startTabWatcher() {
+    setInterval(updateButtonVisibility, 400);
+  }
+
+  // --- Wait for app ---
+  function waitForApp(cb, maxWait) {
+    maxWait = maxWait || 20000;
+    const start = Date.now();
+    const check = () => {
+      const root = document.getElementById('root');
+      if (root && root.children.length > 0) { setTimeout(cb, 600); return; }
+      if (Date.now() - start < maxWait) setTimeout(check, 300);
+    };
+    check();
+  }
+
   // --- Inject UI ---
   function injectPdfImportUI() {
     if (injected) return;
@@ -236,6 +269,12 @@
     s.className = type; s.textContent = msg; s.style.display = 'block';
   }
 
+  function getImportCore() {
+    const core = window.StepperPdfImportCore;
+    if (!core) throw new Error('Stepper PDF import core is missing.');
+    return core;
+  }
+
   async function handleFile(file) {
     if (!file.name.toLowerCase().endsWith('.pdf')) { setStatus('error', 'Please select a PDF file.'); return; }
     if (file.size > 10 * 1024 * 1024) { setStatus('error', 'File too large (max 10MB).'); return; }
@@ -248,21 +287,9 @@
     formData.append('file', file);
 
     try {
-      const endpoint = getApiBase() + '/api/pdf/parse';
-      const resp = await fetch(endpoint, { method: 'POST', body: formData });
-      const contentType = (resp.headers.get('content-type') || '').toLowerCase();
-      const data = contentType.includes('application/json')
-        ? await resp.json()
-        : null;
-
-      if (!data) {
-        const bodyPreview = (await resp.text()).trim().slice(0, 120);
-        const preview = bodyPreview ? ` Received ${bodyPreview}.` : '';
-        setStatus('error', `PDF import hit ${endpoint}, but the server responded with ${contentType || 'non-JSON content'}.${preview}`);
-        return;
-      }
-
-      if (!resp.ok || !data.ok) { setStatus('error', data.detail || data.error || 'Failed to parse PDF.'); return; }
+      const importCore = getImportCore();
+      const result = await importCore.requestPdfParse(formData);
+      const data = await importCore.enrichImportedData(result.data, result.base);
 
       parsedData = data;
       const n = (data.steps || []).length;
@@ -270,30 +297,69 @@
       renderResults(data);
       document.getElementById('stepper-pdf-apply').style.display = 'inline-block';
     } catch (err) {
-      setStatus('error', 'Network error: ' + (err.message || 'Could not reach the server.'));
+      const message = err && err.message ? err.message : 'Could not reach the server.';
+      const isNetworkError = !err || !err.status;
+      setStatus('error', isNetworkError ? ('Network error: ' + message) : message);
     }
-
-    const existing = document.querySelector('script[data-stepper-pdf-import-loader-core], script[src*="stepper-pdf-import-loader-core.js"]');
-    if (existing) {
-      existing.addEventListener('load', function() {
-        if (typeof window.StepperPdfImportLoaderCoreInit === 'function') window.StepperPdfImportLoaderCoreInit();
-      }, { once: true });
-      return;
-    }
-
-    const script = document.createElement('script');
-    script.src = ((/(^|\/)sheet(\/|\/index\.html)?$/).test(window.location.pathname.replace(/\/+/g, '/')) ? '../' : './') + 'stepper-pdf-import-loader-core.js';
-    script.async = false;
-    script.dataset.stepperPdfImportLoaderCore = 'true';
-    script.addEventListener('load', function() {
-      if (typeof window.StepperPdfImportLoaderCoreInit === 'function') window.StepperPdfImportLoaderCoreInit();
-    }, { once: true });
-    document.head.appendChild(script);
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initBridge, { once: true });
-  } else {
-    initBridge();
+  function renderResults(data) {
+    const results = document.getElementById('stepper-pdf-results');
+    let html = '';
+    if (data.title) html += row('Title', data.title);
+    if (data.choreographer) html += row('Choreographer', data.choreographer);
+    if (data.music) html += row('Music', data.music);
+    if (data.count) html += row('Counts', data.count);
+    if (data.level) html += row('Level', data.level);
+
+    if (data.steps && data.steps.length > 0) {
+      html += `<div class="steps-header">Extracted Steps (${data.steps.length})</div>`;
+      data.steps.forEach((step, i) => {
+        html += `<div class="step-item"><span class="step-count">${esc(step.counts || String(i + 1))}</span><span class="step-desc">${esc(step.description || step.name)}</span><span class="step-foot">${esc(step.foot)}</span></div>`;
+      });
+    }
+    results.innerHTML = html;
+    results.style.display = 'block';
   }
+
+  function row(label, val) { return `<div class="meta-row"><span class="meta-label">${label}</span><span class="meta-value">${esc(val)}</span></div>`; }
+  function esc(str) { const d = document.createElement('div'); d.textContent = String(str || ''); return d.innerHTML; }
+
+  function applyToEditor(data) {
+    const importCore = getImportCore();
+    const snapshot = importCore.buildEditorSnapshot(data);
+    importCore.writeEditorSnapshot(snapshot);
+    window.__STEPPER_PDF_DATA = data;
+    window.dispatchEvent(new CustomEvent('stepper-pdf-import', { detail: data }));
+    tryDirectPopulate(data);
+    setStatus('success', 'Imported into the editor. Reloading with the new steps...');
+    setTimeout(() => window.location.reload(), 180);
+  }
+
+  function tryDirectPopulate(data) {
+    const inputs = document.querySelectorAll('input[type="text"], input:not([type])');
+    inputs.forEach(input => {
+      const ph = (input.placeholder || '').toLowerCase();
+      const nm = (input.name || '').toLowerCase();
+      if ((ph.includes('title') || ph.includes('dance name') || nm.includes('title')) && data.title) setNative(input, data.title);
+      if ((ph.includes('choreographer') || ph.includes('choreo') || nm.includes('choreographer')) && data.choreographer) setNative(input, data.choreographer);
+      if ((ph.includes('music') || ph.includes('song') || nm.includes('music')) && data.music) setNative(input, data.music);
+    });
+  }
+
+  function setNative(el, val) {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(el, val);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+
+
+  // Only inject on pages that have the editor
+  const path = window.location.pathname.replace(/\/+$/, '');
+  if (path === '/sheet' || path === '' || path === '/index.html' || path === '/index') {
+    waitForApp(injectPdfImportUI);
+  }
+  };
 })();
