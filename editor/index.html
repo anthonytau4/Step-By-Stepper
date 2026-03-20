@@ -89,6 +89,26 @@
     .stepper-static-startup__logo,.stepper-static-startup__playback-logo{width:min(34vw,140px);height:min(34vw,140px);}
   }
 </style>
+<script>
+(function(){
+  try {
+    var path = String(window.location.pathname || '/');
+    var basePath = path.endsWith('/') ? path : path.replace(/[^\/]*$/, '');
+    var absoluteBase = new URL(basePath || './', window.location.href).href;
+    window.__stepperAssetBaseHref = absoluteBase;
+    window.__stepperResolveAssetUrl = function(assetPath){
+      try { return new URL(String(assetPath || ''), window.__stepperAssetBaseHref || absoluteBase).href; }
+      catch (error) { return String(assetPath || ''); }
+    };
+    if (!document.querySelector('base[data-stepper-asset-base]')) {
+      var base = document.createElement('base');
+      base.setAttribute('data-stepper-asset-base', 'true');
+      base.href = absoluteBase;
+      document.head.appendChild(base);
+    }
+  } catch (error) {}
+})();
+</script>
 </head>
   <body>
 
