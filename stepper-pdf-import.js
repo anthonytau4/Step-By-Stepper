@@ -5,6 +5,9 @@
 (function() {
   'use strict';
 
+  if (window.__stepperPdfImportBridgeStarted) return;
+  window.__stepperPdfImportBridgeStarted = true;
+
   function initBridge() {
     if (typeof window.StepperPdfImportLoaderCoreInit === 'function') {
       window.StepperPdfImportLoaderCoreInit();
