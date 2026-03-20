@@ -5,10 +5,10 @@
 (function() {
   'use strict';
 
-  if (typeof window.StepperPdfImportUiInit === 'function') {
-    window.StepperPdfImportUiInit();
+  if (typeof window.StepperPdfImportRuntimeInit === 'function') {
+    window.StepperPdfImportRuntimeInit();
     return;
   }
 
-  console.error('Stepper PDF import UI is missing.');
+  console.error('Stepper PDF import runtime is missing.');
 })();
