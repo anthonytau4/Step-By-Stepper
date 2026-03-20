@@ -5,12 +5,6 @@
 (function() {
   'use strict';
 
-  const importCore = window.StepperPdfImportCore;
-  if (!importCore) {
-    console.error('Stepper PDF import core is missing.');
-    return;
-  }
-
   let injected = false;
   let parsedData = null;
 
@@ -273,6 +267,12 @@
     s.className = type; s.textContent = msg; s.style.display = 'block';
   }
 
+  function getImportCore() {
+    const core = window.StepperPdfImportCore;
+    if (!core) throw new Error('Stepper PDF import core is missing.');
+    return core;
+  }
+
   async function handleFile(file) {
     if (!file.name.toLowerCase().endsWith('.pdf')) { setStatus('error', 'Please select a PDF file.'); return; }
     if (file.size > 10 * 1024 * 1024) { setStatus('error', 'File too large (max 10MB).'); return; }
@@ -285,6 +285,7 @@
     formData.append('file', file);
 
     try {
+      const importCore = getImportCore();
       const result = await importCore.requestPdfParse(formData);
       const data = await importCore.enrichImportedData(result.data, result.base);
 
@@ -323,6 +324,7 @@
   function esc(str) { const d = document.createElement('div'); d.textContent = String(str || ''); return d.innerHTML; }
 
   function applyToEditor(data) {
+    const importCore = getImportCore();
     const snapshot = importCore.buildEditorSnapshot(data);
     importCore.writeEditorSnapshot(snapshot);
     window.__STEPPER_PDF_DATA = data;
