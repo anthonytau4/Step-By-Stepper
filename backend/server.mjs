@@ -1290,7 +1290,7 @@ with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         page_text = page.extract_text() or ''
         if page_text:
             text_parts.append(page_text)
-print(json.dumps({"text": "\n\n".join(text_parts)}))`;
+print(json.dumps({"text": "\\n\\n".join(text_parts)}))`;
   const { stdout } = await execFileAsync('python3', ['-c', script], { input: encoded, maxBuffer: 20 * 1024 * 1024 });
   const parsed = JSON.parse(String(stdout || '{}'));
   return String(parsed && parsed.text || '').trim();
