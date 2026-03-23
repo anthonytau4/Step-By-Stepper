@@ -2793,6 +2793,84 @@
     }
   }
 
+  function coerceStoredObject(value){
+    if (!value) return null;
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) return null;
+      try {
+        const parsed = JSON.parse(trimmed);
+        return parsed && typeof parsed === 'object' ? parsed : null;
+      } catch {
+        return null;
+      }
+    }
+    return typeof value === 'object' ? value : null;
+  }
+
+  function normalizeRestoredSections(rawSections){
+    if (!Array.isArray(rawSections)) return [];
+    return rawSections.map((section, sectionIndex) => {
+      if (!section || typeof section !== 'object') return null;
+      const rawSteps = Array.isArray(section.steps) ? section.steps : (Array.isArray(section.lines) ? section.lines.map((line, lineIndex) => buildRestoredStepFromLine(line, lineIndex)) : []);
+      const steps = rawSteps.map((step, stepIndex) => {
+        if (!step) return null;
+        if (typeof step === 'string') return buildRestoredStepFromLine(step, stepIndex);
+        const count = String(step.count || step.counts || '').trim();
+        const name = String(step.name || '').trim();
+        const description = String(step.description || step.desc || '').trim();
+        const note = String(step.note || '').trim();
+        return {
+          id: String(step.id || `restored-${Date.now().toString(36)}-${sectionIndex}-${stepIndex}-${Math.random().toString(36).slice(2, 7)}`),
+          type: 'step',
+          count,
+          counts: count || String(step.counts || '').trim(),
+          name,
+          description: description || name,
+          foot: normalizeFootForRestore(step.foot),
+          weight: !!step.weight,
+          showNote: !!(step.showNote || note),
+          note
+        };
+      }).filter(Boolean);
+      return {
+        id: String(section.id || `restored-section-${sectionIndex}-${Math.random().toString(36).slice(2, 7)}`),
+        name: String(section.name || section.title || `Section ${sectionIndex + 1}`).trim(),
+        steps
+      };
+    }).filter(section => section && Array.isArray(section.steps));
+  }
+
+  function extractStoredSnapshotData(entry, parsed){
+    const candidates = [
+      entry && entry.snapshot && entry.snapshot.data,
+      parsed && parsed.snapshot && parsed.snapshot.data,
+      parsed && parsed.snapshot,
+      parsed && parsed.data,
+      parsed && parsed.worksheet,
+      parsed && parsed.sheet,
+      parsed && parsed.editorData,
+      parsed && parsed.appData,
+      parsed && parsed.dance && parsed.dance.data,
+      parsed && parsed.dance && parsed.dance.snapshot && parsed.dance.snapshot.data
+    ];
+    for (const candidate of candidates) {
+      const obj = coerceStoredObject(candidate);
+      if (!obj) continue;
+      const sections = normalizeRestoredSections(obj.sections || obj.mainSections || obj.parts || obj.sheetSections);
+      const tags = Array.isArray(obj.tags) ? obj.tags : [];
+      if (obj.meta || sections.length || tags.length) {
+        return {
+          meta: Object.assign({}, obj.meta || {}, obj.metaData || {}),
+          sections,
+          tags,
+          isDarkMode: !!obj.isDarkMode
+        };
+      }
+    }
+    return null;
+  }
+
 
   function normalizeFootForRestore(value){
     const raw = String(value || '').trim();
@@ -2876,39 +2954,28 @@
     if (!entry || typeof entry !== 'object') return null;
     const parsed = parseStoredJsonPayload(entry.jsonPayload);
     const dance = parsed && parsed.dance && typeof parsed.dance === 'object' ? parsed.dance : {};
-    const existingData = entry && entry.snapshot && entry.snapshot.data && typeof entry.snapshot.data === 'object'
-      ? entry.snapshot.data
-      : (parsed && parsed.snapshot && parsed.snapshot.data && typeof parsed.snapshot.data === 'object' ? parsed.snapshot.data : null);
-    if (existingData && (Array.isArray(existingData.sections) || existingData.meta)) return existingData;
+    const existingData = extractStoredSnapshotData(entry, parsed);
     const previewSections = (Array.isArray(entry.previewSections) && entry.previewSections.length)
       ? entry.previewSections
       : (parsed && Array.isArray(parsed.previewSections) ? parsed.previewSections : []);
-    const sectionBlocks = previewSections.length ? previewSections : [{
+    const metaSource = Object.assign({}, dance, entry, existingData && existingData.meta ? existingData.meta : {});
+    const fallbackSectionBlocks = previewSections.length ? previewSections : [{
       name: String(entry.title || dance.title || 'Loaded Dance').trim(),
       lines: []
     }];
-    const sections = sectionBlocks.map((section, sectionIndex) => {
+    const rebuiltSections = fallbackSectionBlocks.map((section, sectionIndex) => {
       const lines = Array.isArray(section && section.lines) ? section.lines.filter(Boolean) : [];
       const steps = lines.map((line, lineIndex) => buildRestoredStepFromLine(line, lineIndex))
         .filter(step => String(step.description || '').trim() || String(step.name || '').trim());
       return {
         id: `restored-section-${sectionIndex}-${Math.random().toString(36).slice(2, 7)}`,
         name: String(section && section.name || `Section ${sectionIndex + 1}`).trim(),
-        steps: steps.length ? steps : [{
-          id: `restored-empty-${sectionIndex}`,
-          type: 'step',
-          count: '',
-          counts: '',
-          name: '',
-          description: '',
-          foot: 'Either',
-          weight: false,
-          showNote: false,
-          note: ''
-        }]
+        steps: steps.length ? steps : []
       };
     }).filter(Boolean);
-    const metaSource = Object.assign({}, dance, entry);
+    const sections = (existingData && Array.isArray(existingData.sections) && existingData.sections.length)
+      ? existingData.sections
+      : rebuiltSections;
     return {
       meta: {
         title: String(metaSource.title || '').trim(),
@@ -2920,7 +2987,7 @@
         music: String(metaSource.music || '').trim()
       },
       sections: sections.length ? sections : [{
-        id: `restored-section-0`,
+        id: 'restored-section-0',
         name: String(metaSource.title || 'Loaded Dance').trim() || 'Loaded Dance',
         steps: []
       }],
@@ -2974,12 +3041,17 @@
 
   const __origRestoreDanceSnapshot = restoreDanceSnapshot;
   restoreDanceSnapshot = function(item){
-    const normalized = normalizeStoredEntry(item) || item;
-    const rebuilt = buildAppDataFromStoredEntry(normalized);
-    if (rebuilt && typeof rebuilt === 'object') {
-      writeJson(DATA_KEY, rebuilt);
-      writeJson(PHR_TOOLS_KEY, normalized && normalized.snapshot && normalized.snapshot.phrasedTools && typeof normalized.snapshot.phrasedTools === 'object' ? normalized.snapshot.phrasedTools : {});
-      window.dispatchEvent(new Event('storage'));
+    const normalized = normalizeStoredEntry(item);
+    const rebuiltData = buildSnapshotDataFromEntry(normalized || item);
+    if (rebuiltData && typeof rebuiltData === 'object') {
+      writeJson(DATA_KEY, rebuiltData);
+      const phrasedTools = normalized && normalized.snapshot && normalized.snapshot.phrasedTools && typeof normalized.snapshot.phrasedTools === 'object'
+        ? normalized.snapshot.phrasedTools
+        : {};
+      writeJson(PHR_TOOLS_KEY, phrasedTools);
+      try { sessionStorage.setItem('stepper_force_loaded_worksheet_v1', '1'); } catch {}
+      window.dispatchEvent(new StorageEvent('storage', { key: DATA_KEY, newValue: JSON.stringify(rebuiltData) }));
+      window.dispatchEvent(new CustomEvent('stepper:worksheet-loaded', { detail: { data: rebuiltData } }));
       return true;
     }
     return __origRestoreDanceSnapshot(item);
@@ -2987,7 +3059,18 @@
 
   const __origLoadDanceIntoWorksheet = loadDanceIntoWorksheet;
   loadDanceIntoWorksheet = function(item){
-    return __origLoadDanceIntoWorksheet(normalizeStoredEntry(item) || item);
+    const ok = __origLoadDanceIntoWorksheet(normalizeStoredEntry(item) || item);
+    if (ok) {
+      window.setTimeout(() => {
+        try {
+          if (sessionStorage.getItem('stepper_force_loaded_worksheet_v1') === '1') {
+            sessionStorage.removeItem('stepper_force_loaded_worksheet_v1');
+            window.location.reload();
+          }
+        } catch {}
+      }, 120);
+    }
+    return ok;
   };
 
   const __origRefreshSession = refreshSession;
