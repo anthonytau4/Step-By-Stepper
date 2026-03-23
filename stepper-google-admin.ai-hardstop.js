@@ -2833,6 +2833,142 @@
     }
   }
 
+
+  function normalizeFootForRestore(value){
+    const raw = String(value || '').trim();
+    if (!raw) return 'Either';
+    const lower = raw.toLowerCase();
+    if (lower === 'r' || lower === 'right') return 'R';
+    if (lower === 'l' || lower === 'left') return 'L';
+    if (lower === 'both') return 'Both';
+    if (lower === 'either') return 'Either';
+    return raw;
+  }
+
+  function deriveStepNameFromText(text){
+    const clean = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!clean) return '';
+    const withoutLeadCount = clean.replace(/^\s*(?:count(?:s)?[:\s-]*)?(?:\d+\s*(?:[,&-]\s*\d+)*[&a-z]*)\s+/i, '').trim();
+    const head = withoutLeadCount.split(/\s*[–—:\-]\s*/)[0].trim();
+    const words = head.split(/\s+/).filter(Boolean);
+    return words.slice(0, Math.min(words.length, 5)).join(' ');
+  }
+
+  function deriveCountsFromText(text){
+    const clean = String(text || '').replace(/\s+/g, ' ').trim();
+    const match = clean.match(/^\s*((?:count(?:s)?[:\s-]*)?(?:\d+[a-z&]*(?:\s*[\-–—,&]\s*\d+[a-z&]*)*))/i);
+    if (!match) return '';
+    return String(match[1] || '').replace(/^count(?:s)?[:\s-]*/i, '').trim();
+  }
+
+  function findGlossaryMatchForText(text){
+    const clean = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!clean) return null;
+    const lower = clean.toLowerCase();
+    const stripped = lower.replace(/^\s*(?:count(?:s)?[:\s-]*)?(?:\d+[a-z&]*(?:\s*[\-–—,&]\s*\d+[a-z&]*)*)\s+/i, '').trim();
+    const items = Array.isArray(state.glossaryApproved) ? state.glossaryApproved : [];
+    let best = null;
+    let bestScore = 0;
+    items.forEach((item) => {
+      const name = String(item && item.name || '').trim();
+      const desc = String(item && (item.description || item.desc) || '').trim();
+      if (!name && !desc) return;
+      let score = 0;
+      const nameLower = name.toLowerCase();
+      const descLower = desc.toLowerCase();
+      if (stripped === nameLower) score = 100;
+      else if (stripped.startsWith(nameLower)) score = 85;
+      else if (nameLower && stripped.includes(nameLower)) score = 72;
+      else if (descLower && (stripped === descLower || stripped.includes(descLower) || descLower.includes(stripped))) score = 60;
+      const nameWords = nameLower.split(/\s+/).filter(Boolean);
+      const overlap = nameWords.filter((word) => stripped.includes(word)).length;
+      if (overlap >= 2) score = Math.max(score, 45 + overlap * 8);
+      if (score > bestScore) {
+        best = item;
+        bestScore = score;
+      }
+    });
+    return bestScore >= 45 ? best : null;
+  }
+
+  function buildRestoredStepFromLine(line, index){
+    const clean = String(line || '').replace(/\s+/g, ' ').trim();
+    const glossary = findGlossaryMatchForText(clean);
+    const counts = deriveCountsFromText(clean) || String(glossary && glossary.counts || '').trim();
+    const name = String(glossary && glossary.name || '').trim() || deriveStepNameFromText(clean) || `Step ${index + 1}`;
+    const description = String(glossary && (glossary.description || glossary.desc) || '').trim() || clean || name;
+    const foot = normalizeFootForRestore(glossary && glossary.foot);
+    return {
+      id: `restored-${Date.now().toString(36)}-${index}-${Math.random().toString(36).slice(2, 7)}`,
+      type: 'step',
+      count: counts,
+      counts,
+      name,
+      description,
+      foot,
+      weight: false,
+      showNote: false,
+      note: ''
+    };
+  }
+
+  function buildSnapshotDataFromEntry(entry){
+    if (!entry || typeof entry !== 'object') return null;
+    const parsed = parseStoredJsonPayload(entry.jsonPayload);
+    const dance = parsed && parsed.dance && typeof parsed.dance === 'object' ? parsed.dance : {};
+    const existingData = entry && entry.snapshot && entry.snapshot.data && typeof entry.snapshot.data === 'object'
+      ? entry.snapshot.data
+      : (parsed && parsed.snapshot && parsed.snapshot.data && typeof parsed.snapshot.data === 'object' ? parsed.snapshot.data : null);
+    if (existingData && (Array.isArray(existingData.sections) || existingData.meta)) return existingData;
+    const previewSections = (Array.isArray(entry.previewSections) && entry.previewSections.length)
+      ? entry.previewSections
+      : (parsed && Array.isArray(parsed.previewSections) ? parsed.previewSections : []);
+    const sectionBlocks = previewSections.length ? previewSections : [{
+      name: String(entry.title || dance.title || 'Loaded Dance').trim(),
+      lines: []
+    }];
+    const sections = sectionBlocks.map((section, sectionIndex) => {
+      const lines = Array.isArray(section && section.lines) ? section.lines.filter(Boolean) : [];
+      const steps = lines.map((line, lineIndex) => buildRestoredStepFromLine(line, lineIndex))
+        .filter(step => String(step.description || '').trim() || String(step.name || '').trim());
+      return {
+        id: `restored-section-${sectionIndex}-${Math.random().toString(36).slice(2, 7)}`,
+        name: String(section && section.name || `Section ${sectionIndex + 1}`).trim(),
+        steps: steps.length ? steps : [{
+          id: `restored-empty-${sectionIndex}`,
+          type: 'step',
+          count: '',
+          counts: '',
+          name: '',
+          description: '',
+          foot: 'Either',
+          weight: false,
+          showNote: false,
+          note: ''
+        }]
+      };
+    }).filter(Boolean);
+    const metaSource = Object.assign({}, dance, entry);
+    return {
+      meta: {
+        title: String(metaSource.title || '').trim(),
+        choreographer: String(metaSource.choreographer || '').trim(),
+        country: String(metaSource.country || '').trim(),
+        level: String(metaSource.level || '').trim(),
+        counts: String(metaSource.counts || metaSource.count || '').trim(),
+        walls: String(metaSource.walls || metaSource.wall || '').trim(),
+        music: String(metaSource.music || '').trim()
+      },
+      sections: sections.length ? sections : [{
+        id: `restored-section-0`,
+        name: String(metaSource.title || 'Loaded Dance').trim() || 'Loaded Dance',
+        steps: []
+      }],
+      tags: Array.isArray(existingData && existingData.tags) ? existingData.tags : [],
+      isDarkMode: !!(existingData && existingData.isDarkMode)
+    };
+  }
+
   function normalizeStoredEntry(entry){
     if (!entry || typeof entry !== 'object') return null;
     const parsed = parseStoredJsonPayload(entry.jsonPayload);
@@ -2879,9 +3015,13 @@
   const __origRestoreDanceSnapshot = restoreDanceSnapshot;
   restoreDanceSnapshot = function(item){
     const normalized = normalizeStoredEntry(item);
-    if (normalized && normalized.snapshot && normalized.snapshot.data && typeof normalized.snapshot.data === 'object') {
-      writeJson(DATA_KEY, normalized.snapshot.data);
-      writeJson(PHR_TOOLS_KEY, normalized.snapshot.phrasedTools && typeof normalized.snapshot.phrasedTools === 'object' ? normalized.snapshot.phrasedTools : {});
+    const rebuiltData = buildSnapshotDataFromEntry(normalized || item);
+    if (rebuiltData && typeof rebuiltData === 'object') {
+      writeJson(DATA_KEY, rebuiltData);
+      const phrasedTools = normalized && normalized.snapshot && normalized.snapshot.phrasedTools && typeof normalized.snapshot.phrasedTools === 'object'
+        ? normalized.snapshot.phrasedTools
+        : {};
+      writeJson(PHR_TOOLS_KEY, phrasedTools);
       window.dispatchEvent(new Event('storage'));
       return true;
     }

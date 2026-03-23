@@ -283,12 +283,9 @@
     document.getElementById('stepper-pdf-results').style.display = 'none';
     document.getElementById('stepper-pdf-apply').style.display = 'none';
 
-    const formData = new FormData();
-    formData.append('file', file);
-
     try {
       const importCore = getImportCore();
-      const result = await importCore.requestPdfParse(formData);
+      const result = await importCore.requestPdfParse(file);
       const data = await importCore.enrichImportedData(result.data, result.base);
 
       parsedData = data;

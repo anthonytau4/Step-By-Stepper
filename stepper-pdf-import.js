@@ -244,12 +244,18 @@
     document.getElementById('stepper-pdf-results').style.display = 'none';
     document.getElementById('stepper-pdf-apply').style.display = 'none';
 
-    const formData = new FormData();
-    formData.append('file', file);
-
     try {
       const endpoint = getApiBase() + '/api/pdf/parse';
-      const resp = await fetch(endpoint, { method: 'POST', body: formData });
+      const fileBase64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('Could not read that PDF file.'));
+        reader.onload = () => {
+          const result = String(reader.result || '');
+          resolve(result.includes(',') ? result.split(',').pop() : result);
+        };
+        reader.readAsDataURL(file);
+      });
+      const resp = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: String(file && file.name || 'stepsheet.pdf'), fileBase64 }) });
       const contentType = (resp.headers.get('content-type') || '').toLowerCase();
       const data = contentType.includes('application/json')
         ? await resp.json()

@@ -67,7 +67,19 @@
     return candidates;
   }
 
-  async function fileToBase64(file) {
+  function resolvePdfFile(input) {
+    if (input instanceof Blob) return input;
+    if (input && typeof input.get === 'function') {
+      const maybe = input.get('file') || input.get('pdf') || input.get('document');
+      if (maybe instanceof Blob) return maybe;
+    }
+    if (input && input.file instanceof Blob) return input.file;
+    return null;
+  }
+
+  async function fileToBase64(input) {
+    const file = resolvePdfFile(input);
+    if (!(file instanceof Blob)) throw new Error('Could not read that PDF file.');
     return await new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onerror = () => reject(new Error('Could not read that PDF file.'));
@@ -84,7 +96,8 @@
     const retryableStatuses = new Set([0, 404, 405, 413, 422, 502, 503, 504]);
     const candidates = getApiBaseCandidates(window.STEPPER_API_BASE);
     let lastError = null;
-    const fileBase64 = await fileToBase64(file);
+    const sourceFile = resolvePdfFile(file);
+    const fileBase64 = await fileToBase64(sourceFile);
 
     for (const base of candidates) {
       const endpoint = base + '/api/pdf/parse';
@@ -92,7 +105,7 @@
         const resp = await fetch(endpoint, {
           method: 'POST',
           headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filename: String(file && file.name || 'stepsheet.pdf'), fileBase64 })
+          body: JSON.stringify({ filename: String(sourceFile && sourceFile.name || 'stepsheet.pdf'), fileBase64 })
         });
         const contentType = (resp.headers.get('content-type') || '').toLowerCase();
         const isJson = contentType.includes('application/json');

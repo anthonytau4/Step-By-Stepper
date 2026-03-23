@@ -662,11 +662,8 @@
     document.getElementById('stepper-pdf-results').style.display = 'none';
     document.getElementById('stepper-pdf-apply').style.display = 'none';
 
-    const formData = new FormData();
-    formData.append('file', file);
-
     try {
-      const result = await requestPdfParse(formData);
+      const result = await requestPdfParse(file);
       const data = await enrichImportedData(result.data, result.base);
 
       parsedData = data;
