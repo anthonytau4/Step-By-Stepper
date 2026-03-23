@@ -67,18 +67,32 @@
     return candidates;
   }
 
-  async function requestPdfParse(formData) {
-    const retryableStatuses = new Set([0, 404, 405, 502, 503, 504]);
+  async function fileToBase64(file) {
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('Could not read that PDF file.'));
+      reader.onload = () => {
+        const result = String(reader.result || '');
+        const base64 = result.includes(',') ? result.split(',').pop() : result;
+        resolve(base64 || '');
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function requestPdfParse(file) {
+    const retryableStatuses = new Set([0, 404, 405, 413, 422, 502, 503, 504]);
     const candidates = getApiBaseCandidates(window.STEPPER_API_BASE);
     let lastError = null;
+    const fileBase64 = await fileToBase64(file);
 
     for (const base of candidates) {
       const endpoint = base + '/api/pdf/parse';
       try {
         const resp = await fetch(endpoint, {
           method: 'POST',
-          body: formData,
-          headers: { Accept: 'application/json' }
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: String(file && file.name || 'stepsheet.pdf'), fileBase64 })
         });
         const contentType = (resp.headers.get('content-type') || '').toLowerCase();
         const isJson = contentType.includes('application/json');

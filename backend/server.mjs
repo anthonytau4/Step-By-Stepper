@@ -6,12 +6,15 @@ import { OAuth2Client } from "google-auth-library";
 import { promises as fs } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { execFile } from "child_process";
+import { promisify } from "util";
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
+const execFileAsync = promisify(execFile);
 const port = Number(process.env.PORT || 3000);
 const model = process.env.OPENAI_MODEL || "gpt-5";
 const googleClientId = String(process.env.GOOGLE_CLIENT_ID || "").trim();
@@ -324,7 +327,7 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
-app.use(express.json({ limit: "4mb" }));
+app.use(express.json({ limit: "20mb" }));
 
 function emptyDb() {
   return {
@@ -1267,6 +1270,145 @@ function buildFallbackCountLines(dance) {
   return { countLines: lines, totalCounts: String(Math.max(8, sectionCount * 8 || 8)) };
 }
 
+
+
+function decodeBase64Pdf(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return Buffer.alloc(0);
+  const cleaned = raw.replace(/^data:application\/pdf;base64,/i, '').replace(/\s+/g, '');
+  return Buffer.from(cleaned, 'base64');
+}
+
+async function extractPdfTextWithPython(pdfBuffer) {
+  const encoded = pdfBuffer.toString('base64');
+  const script = `import base64, io, json, sys
+import pdfplumber
+pdf_bytes = base64.b64decode(sys.stdin.read())
+text_parts = []
+with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+    for page in pdf.pages:
+        page_text = page.extract_text() or ''
+        if page_text:
+            text_parts.append(page_text)
+print(json.dumps({"text": "\n\n".join(text_parts)}))`;
+  const { stdout } = await execFileAsync('python3', ['-c', script], { input: encoded, maxBuffer: 20 * 1024 * 1024 });
+  const parsed = JSON.parse(String(stdout || '{}'));
+  return String(parsed && parsed.text || '').trim();
+}
+
+function cleanPdfLine(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function titleCaseWords(value) {
+  return String(value || '').split(/\s+/).filter(Boolean).map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+}
+
+function normalizeStepName(name, description) {
+  const raw = cleanPdfLine(name || '');
+  if (raw) return raw.slice(0, 120);
+  const source = cleanPdfLine(description || '');
+  const firstClause = source.split(/[.;:]/)[0].trim();
+  if (!firstClause) return 'Imported Step';
+  return titleCaseWords(firstClause.split(/\s+/).slice(0, 6).join(' ')).slice(0, 120) || 'Imported Step';
+}
+
+function inferFootFromPdfText(text) {
+  const lower = ` ${String(text || '').toLowerCase()} `;
+  if (lower.includes(' left ') && lower.includes(' right ')) return 'Either';
+  if (lower.includes(' left ')) return 'L';
+  if (lower.includes(' right ')) return 'R';
+  if (lower.includes(' both ')) return 'Both';
+  return 'Either';
+}
+
+function parseStepLine(line, fallbackIndex) {
+  const cleaned = cleanPdfLine(line).replace(/^[-•·]+\s*/, '');
+  if (!cleaned) return null;
+  let rest = cleaned;
+  let counts = '';
+  const countMatch = rest.match(/^((?:counts?\s*)?(?:\d+(?:\s*[&-]\s*\d+)*|[&a-z](?:\s*[&-]\s*\d+)*))(?:\s*[:.)-]|\s{2,}|\s+(?=[A-Z]))/i);
+  if (countMatch) {
+    counts = cleanPdfLine(countMatch[1].replace(/^counts?\s*/i, ''));
+    rest = cleanPdfLine(rest.slice(countMatch[0].length));
+  }
+  let name = '';
+  let description = rest;
+  const splitMatch = rest.match(/^([^:–—-]{2,80})\s*[:–—-]\s*(.+)$/);
+  if (splitMatch) {
+    name = cleanPdfLine(splitMatch[1]);
+    description = cleanPdfLine(splitMatch[2]);
+  }
+  if (!description) description = rest;
+  if (!name && /,/.test(description)) {
+    const clause = description.split(',')[0];
+    if (clause && clause.length <= 80) name = titleCaseWords(clause);
+  }
+  const finalName = normalizeStepName(name, description);
+  const finalDescription = cleanPdfLine(description || rest || finalName);
+  return {
+    counts: counts || String(fallbackIndex + 1),
+    count: counts || String(fallbackIndex + 1),
+    name: finalName,
+    description: finalDescription,
+    foot: inferFootFromPdfText(finalDescription)
+  };
+}
+
+function parsePdfTextToDance(rawText) {
+  const text = String(rawText || '').replace(/\r/g, '');
+  const lines = text.split('\n').map(cleanPdfLine).filter(Boolean);
+  const title = lines[0] || 'Imported PDF';
+  const joined = lines.join('\n');
+  const meta = {
+    title: cleanPdfLine(title),
+    choreographer: '',
+    music: '',
+    level: '',
+    count: '',
+    counts: '',
+    wall: '',
+    walls: ''
+  };
+  for (const line of lines.slice(0, 24)) {
+    let match = line.match(/^(?:choreographer|choreographed by)\s*[:.-]?\s*(.+)$/i);
+    if (match && !meta.choreographer) meta.choreographer = cleanPdfLine(match[1]);
+    match = line.match(/^(?:music|song)\s*[:.-]?\s*(.+)$/i);
+    if (match && !meta.music) meta.music = cleanPdfLine(match[1]);
+    match = line.match(/^(?:level)\s*[:.-]?\s*(.+)$/i);
+    if (match && !meta.level) meta.level = cleanPdfLine(match[1]);
+    match = line.match(/^(?:count|counts)\s*[:.-]?\s*(\d+)\b/i);
+    if (match && !meta.count) meta.count = meta.counts = String(match[1]);
+    match = line.match(/^(?:wall|walls)\s*[:.-]?\s*(\d+)\b/i);
+    if (match && !meta.wall) meta.wall = meta.walls = String(match[1]);
+  }
+  if (!meta.count) {
+    const match = joined.match(/\b(\d{1,3})\s*count\b/i);
+    if (match) meta.count = meta.counts = String(match[1]);
+  }
+  if (!meta.wall) {
+    const match = joined.match(/\b(\d{1,2})\s*wall\b/i);
+    if (match) meta.wall = meta.walls = String(match[1]);
+  }
+  if (!meta.level) {
+    const match = joined.match(/\b(absolute beginner|beginner|improver|intermediate|advanced)\b/i);
+    if (match) meta.level = titleCaseWords(match[1]);
+  }
+  const steps = [];
+  let inSteps = false;
+  for (const line of lines) {
+    if (/^(section|part)\b/i.test(line)) { inSteps = true; continue; }
+    if (/^steps?\b/i.test(line)) { inSteps = true; continue; }
+    if (!inSteps && /^(count|counts|wall|walls|level|music|song|choreographer|choreographed by)\b/i.test(line)) continue;
+    if (!inSteps && line === title) continue;
+    const stepish = /^(\d|[&])/.test(line) || /^((side|step|walk|rock|cross|behind|together|touch|tap|point|heel|toe|kick|shuffle|sailor|mambo|weave|vine|nightclub|lunge|lock|scissor|scissors|coaster|skate|pivot|turn|charleston|monterey|stomp|swivel|twinkle|roll|drag|brush|flick|hitch|run|slide|ball|hold|syncopated|wizard|diamond)\b)/i.test(line);
+    if (!stepish) continue;
+    inSteps = true;
+    const parsed = parseStepLine(line, steps.length);
+    if (parsed) steps.push(parsed);
+  }
+  return { ok: true, ...meta, title: meta.title || 'Imported PDF', steps };
+}
 function fallbackDanceTool(mode, dance, prompt) {
   const sections = Array.isArray(dance?.snapshot?.data?.sections) ? dance.snapshot.data.sections : [];
   const stepCount = sections.reduce((sum, section) => sum + (Array.isArray(section?.steps) ? section.steps.length : 0), 0);
@@ -1403,6 +1545,26 @@ app.post("/api/presence/heartbeat", requireGoogleUser, async (req, res) => {
   res.json({ ok: true, onlineCount: onlineUsers.length, members: onlineUsers, isAdmin: isAdminProfile(req.stepperUser, db) || String(bucket?.role || '').trim().toLowerCase() === 'admin', isModerator: isModeratorBucket(bucket), role: getRoleForBucket(bucket, req.stepperUser), suspension: suspensionPayload(bucket) });
 });
 
+
+
+app.post('/api/pdf/parse', async (req, res) => {
+  try {
+    const pdfBase64 = String(req.body?.fileBase64 || '').trim();
+    const filename = String(req.body?.filename || 'stepsheet.pdf').trim();
+    const buffer = decodeBase64Pdf(pdfBase64);
+    if (!buffer.length) return res.status(400).json({ ok:false, error:'Missing PDF file data.' });
+    if (buffer.length > 10 * 1024 * 1024) return res.status(413).json({ ok:false, error:'PDF file is too large. Max 10MB.' });
+    if (!/\.pdf$/i.test(filename)) return res.status(400).json({ ok:false, error:'Please upload a PDF file.' });
+    const text = await extractPdfTextWithPython(buffer);
+    if (!text) return res.status(422).json({ ok:false, error:'Could not extract readable text from that PDF.' });
+    const parsed = parsePdfTextToDance(text);
+    parsed.sourceTextLength = text.length;
+    parsed.filename = filename;
+    return res.json(parsed);
+  } catch (error) {
+    return res.status(error.status || 500).json({ ok:false, error: error?.message || 'Could not parse that PDF.' });
+  }
+});
 app.get("/api/cloud-saves", requireGoogleUser, async (req, res) => {
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);

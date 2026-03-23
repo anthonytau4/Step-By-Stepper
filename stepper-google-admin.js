@@ -1050,10 +1050,100 @@
     else localStorage.removeItem(LAST_SAVED_SIGNATURE_KEY);
   }
 
+
+
+  function cleanWorksheetText(value){
+    return String(value || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function inferWorksheetFoot(value){
+    const lower = ` ${String(value || '').toLowerCase()} `;
+    if (lower.includes(' left ') && lower.includes(' right ')) return 'Either';
+    if (lower.includes(' left ')) return 'L';
+    if (lower.includes(' right ')) return 'R';
+    if (lower.includes(' both ')) return 'Both';
+    return 'Either';
+  }
+
+  function parsePreviewLineToStep(line, index){
+    const cleaned = cleanWorksheetText(line).replace(/^[-•·]+\s*/, '');
+    if (!cleaned) return null;
+    let rest = cleaned;
+    let count = '';
+    const countMatch = rest.match(/^((?:counts?\s*)?(?:\d+(?:\s*[&-]\s*\d+)*|[&a-z](?:\s*[&-]\s*\d+)*))(?:\s*[:.)-]|\s{2,}|\s+(?=[A-Z]))/i);
+    if (countMatch) {
+      count = cleanWorksheetText(countMatch[1].replace(/^counts?\s*/i, ''));
+      rest = cleanWorksheetText(rest.slice(countMatch[0].length));
+    }
+    let name = '';
+    let description = rest;
+    const splitMatch = rest.match(/^([^:–—-]{2,80})\s*[:–—-]\s*(.+)$/);
+    if (splitMatch) {
+      name = cleanWorksheetText(splitMatch[1]);
+      description = cleanWorksheetText(splitMatch[2]);
+    } else {
+      const bits = rest.split(/,\s*/);
+      if (bits[0] && bits[0].length <= 80) name = cleanWorksheetText(bits[0]);
+    }
+    const glossary = Array.isArray(state.glossaryApproved) ? state.glossaryApproved : [];
+    const lowerDesc = cleanWorksheetText(description || rest).toLowerCase();
+    const lowerName = cleanWorksheetText(name).toLowerCase();
+    const matched = glossary.find((item) => {
+      const itemName = cleanWorksheetText(item && item.name).toLowerCase();
+      const itemDesc = cleanWorksheetText(item && item.description).toLowerCase();
+      return (itemName && (itemName === lowerName || itemName === lowerDesc || lowerDesc.includes(itemName)))
+        || (itemDesc && (itemDesc === lowerDesc || lowerDesc.includes(itemDesc) || itemDesc.includes(lowerDesc)));
+    }) || null;
+    const finalName = cleanWorksheetText(matched && matched.name || name || rest.split(/[.,;:]/)[0]).slice(0, 120) || `Imported Step ${index + 1}`;
+    const finalDescription = cleanWorksheetText(matched && matched.description || description || rest || finalName);
+    return {
+      id: createLocalId('step'),
+      type: 'step',
+      count: cleanWorksheetText(count || (matched && (matched.counts || matched.count)) || String(index + 1)) || String(index + 1),
+      name: finalName,
+      description: finalDescription,
+      foot: cleanWorksheetText(matched && matched.foot || inferWorksheetFoot(finalDescription)) || 'Either',
+      weight: true,
+      showNote: false,
+      note: ''
+    };
+  }
+
+  function buildAppDataFromStoredEntry(entry){
+    const normalized = normalizeStoredEntry(entry) || {};
+    const snapshotData = normalized && normalized.snapshot && normalized.snapshot.data && typeof normalized.snapshot.data === 'object'
+      ? normalized.snapshot.data
+      : null;
+    if (snapshotData && Array.isArray(snapshotData.sections) && snapshotData.sections.length) return snapshotData;
+    const parsed = normalized.jsonPayload ? parseStoredJsonPayload(normalized.jsonPayload) : null;
+    const dance = parsed && parsed.dance && typeof parsed.dance === 'object' ? parsed.dance : {};
+    const previewSections = (Array.isArray(normalized.previewSections) && normalized.previewSections.length)
+      ? normalized.previewSections
+      : (parsed && Array.isArray(parsed.previewSections) ? parsed.previewSections : []);
+    const meta = {
+      title: cleanWorksheetText(normalized.title || dance.title || ''),
+      choreographer: cleanWorksheetText(normalized.choreographer || dance.choreographer || ''),
+      country: cleanWorksheetText(normalized.country || dance.country || ''),
+      level: cleanWorksheetText(normalized.level || dance.level || 'Beginner') || 'Beginner',
+      counts: cleanWorksheetText(normalized.counts || dance.counts || '32') || '32',
+      walls: cleanWorksheetText(normalized.walls || dance.walls || '4') || '4',
+      music: cleanWorksheetText(normalized.music || dance.music || ''),
+      type: '4-Wall'
+    };
+    const sections = previewSections.length
+      ? previewSections.map((section, sectionIndex) => ({
+          id: createLocalId('section'),
+          name: cleanWorksheetText(section && section.name || `Section ${sectionIndex + 1}`) || `Section ${sectionIndex + 1}`,
+          steps: (Array.isArray(section && section.lines) ? section.lines : []).map((line, lineIndex) => parsePreviewLineToStep(line, lineIndex)).filter(Boolean)
+        })).filter((section) => Array.isArray(section.steps) && section.steps.length)
+      : [{ id: createLocalId('section'), name: 'Section 1', steps: [] }];
+    return { meta, sections, tags: [], isDarkMode: isDarkMode() };
+  }
   function restoreDanceSnapshot(item){
-    const data = item && item.snapshot && item.snapshot.data && typeof item.snapshot.data === 'object' ? item.snapshot.data : null;
-    const phrasedTools = item && item.snapshot && item.snapshot.phrasedTools && typeof item.snapshot.phrasedTools === 'object' ? item.snapshot.phrasedTools : {};
-    if (!data) return false;
+    const normalized = normalizeStoredEntry(item) || item || {};
+    const data = buildAppDataFromStoredEntry(normalized);
+    const phrasedTools = normalized && normalized.snapshot && normalized.snapshot.phrasedTools && typeof normalized.snapshot.phrasedTools === 'object' ? normalized.snapshot.phrasedTools : {};
+    if (!data || typeof data !== 'object') return false;
     writeJson(DATA_KEY, data);
     writeJson(PHR_TOOLS_KEY, phrasedTools);
     window.dispatchEvent(new Event('storage'));
@@ -2748,10 +2838,11 @@
 
   const __origRestoreDanceSnapshot = restoreDanceSnapshot;
   restoreDanceSnapshot = function(item){
-    const normalized = normalizeStoredEntry(item);
-    if (normalized && normalized.snapshot && normalized.snapshot.data && typeof normalized.snapshot.data === 'object') {
-      writeJson(DATA_KEY, normalized.snapshot.data);
-      writeJson(PHR_TOOLS_KEY, normalized.snapshot.phrasedTools && typeof normalized.snapshot.phrasedTools === 'object' ? normalized.snapshot.phrasedTools : {});
+    const normalized = normalizeStoredEntry(item) || item;
+    const rebuilt = buildAppDataFromStoredEntry(normalized);
+    if (rebuilt && typeof rebuilt === 'object') {
+      writeJson(DATA_KEY, rebuilt);
+      writeJson(PHR_TOOLS_KEY, normalized && normalized.snapshot && normalized.snapshot.phrasedTools && typeof normalized.snapshot.phrasedTools === 'object' ? normalized.snapshot.phrasedTools : {});
       window.dispatchEvent(new Event('storage'));
       return true;
     }
