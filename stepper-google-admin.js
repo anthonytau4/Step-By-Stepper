@@ -3065,10 +3065,13 @@
         try {
           if (sessionStorage.getItem('stepper_force_loaded_worksheet_v1') === '1') {
             sessionStorage.removeItem('stepper_force_loaded_worksheet_v1');
-            window.location.reload();
           }
         } catch {}
-      }, 120);
+        try { if (typeof window.__stepperRefreshWorksheetFromStorage === 'function') window.__stepperRefreshWorksheetFromStorage(); } catch {}
+        try { window.dispatchEvent(new Event('storage')); } catch {}
+        try { window.dispatchEvent(new CustomEvent('stepper:worksheet-loaded', { detail: { data: readJson(DATA_KEY, {}) } })); } catch {}
+        try { window.dispatchEvent(new CustomEvent('stepper-pdf-live-apply', { detail: readJson(DATA_KEY, {}) })); } catch {}
+      }, 40);
     }
     return ok;
   };
