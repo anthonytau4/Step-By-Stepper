@@ -1290,10 +1290,41 @@ with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         page_text = page.extract_text() or ''
         if page_text:
             text_parts.append(page_text)
-print(json.dumps({"text": "\\n\\n".join(text_parts)}))`;
+print(json.dumps({"text": "\n\n".join(text_parts)}))`;
   const { stdout } = await execFileAsync('python3', ['-c', script], { input: encoded, maxBuffer: 20 * 1024 * 1024 });
   const parsed = JSON.parse(String(stdout || '{}'));
   return String(parsed && parsed.text || '').trim();
+}
+
+async function extractPdfTextWithService(pdfBuffer) {
+  const baseUrl = String(process.env.PDF_PARSER_URL || '').trim().replace(/\/$/, '');
+  if (!baseUrl) throw new Error('PDF_PARSER_URL is not configured');
+  const formData = new FormData();
+  const blob = new Blob([pdfBuffer], { type: 'application/pdf' });
+  formData.append('file', blob, 'stepsheet.pdf');
+  const response = await fetch(`${baseUrl}/parse`, {
+    method: 'POST',
+    body: formData,
+  });
+  const raw = await response.text();
+  let data = null;
+  try {
+    data = raw ? JSON.parse(raw) : null;
+  } catch {
+    data = null;
+  }
+  if (!response.ok) {
+    const message = String(data?.error || raw || `PDF parser failed with status ${response.status}`).trim();
+    throw new Error(message || 'PDF parser failed.');
+  }
+  return String(data?.text || '').trim();
+}
+
+async function extractPdfText(pdfBuffer) {
+  if (String(process.env.PDF_PARSER_URL || '').trim()) {
+    return extractPdfTextWithService(pdfBuffer);
+  }
+  return extractPdfTextWithPython(pdfBuffer);
 }
 
 function cleanPdfLine(value) {
@@ -1555,7 +1586,7 @@ app.post('/api/pdf/parse', async (req, res) => {
     if (!buffer.length) return res.status(400).json({ ok:false, error:'Missing PDF file data.' });
     if (buffer.length > 10 * 1024 * 1024) return res.status(413).json({ ok:false, error:'PDF file is too large. Max 10MB.' });
     if (!/\.pdf$/i.test(filename)) return res.status(400).json({ ok:false, error:'Please upload a PDF file.' });
-    const text = await extractPdfTextWithPython(buffer);
+    const text = await extractPdfText(buffer);
     if (!text) return res.status(422).json({ ok:false, error:'Could not extract readable text from that PDF.' });
     const parsed = parsePdfTextToDance(text);
     parsed.sourceTextLength = text.length;

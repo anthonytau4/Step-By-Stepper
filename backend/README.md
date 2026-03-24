@@ -35,3 +35,47 @@ Recommended backend start command:
 
 GEMINI_API_KEY=your_gemini_api_key
 GEMINI_MODEL=gemini-2.5-flash
+
+## Separate Python PDF parser service
+
+If you would rather split PDF parsing into its own Render service, this repo now includes a `pdf-parser/` folder.
+
+### Main Node backend Render service
+
+If the Node service root is `backend/`:
+
+**Build Command**
+```bash
+npm install
+```
+
+**Start Command**
+```bash
+npm start
+```
+
+Add this environment variable to the Node service:
+
+```text
+PDF_PARSER_URL=https://your-python-service.onrender.com
+```
+
+### Python Render service
+
+Set the service root to `pdf-parser/`.
+
+**Build Command**
+```bash
+pip install -r requirements.txt
+```
+
+**Start Command**
+```bash
+./render-start.sh
+```
+
+The Python service exposes:
+- `GET /health`
+- `POST /parse`
+
+When `PDF_PARSER_URL` exists, `backend/server.mjs` will call the Python service for PDF text extraction instead of spawning local Python.
