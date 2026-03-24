@@ -2676,6 +2676,16 @@
     scheduleRenderPages(2000);
   });
 
+  window.addEventListener('stepper-pdf-import-complete', () => {
+    state.savedDancesUiSignature = '';
+    if (state.session && state.session.credential) {
+      syncCurrentDanceToBackend(true).catch(() => {});
+      refreshCloudSaves().then(() => { state.savedDancesUiSignature = ''; renderPages(); }).catch(() => {});
+      refreshGlossaryApproved().then(() => { renderPages(); }).catch(() => {});
+    }
+    scheduleRenderPages(200);
+  });
+
   async function refreshSubscription(){
     if (!state.session || !state.session.credential) {
       state.subscription = { isPremium: false, plan: 'free', status: 'free', source: 'signed-out' };

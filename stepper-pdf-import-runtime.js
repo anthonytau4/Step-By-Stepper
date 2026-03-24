@@ -41,6 +41,93 @@
       try {
         window.dispatchEvent(new StorageEvent('storage', { key: DATA_KEY, newValue: raw }));
       } catch (_) {}
+      try { window.dispatchEvent(new Event('storage')); } catch (_) {}
+      try { window.dispatchEvent(new CustomEvent('stepper-pdf-live-apply', { detail: snapshot })); } catch (_) {}
+      try { if (typeof window.__stepperRefreshWorksheetFromStorage === 'function') window.__stepperRefreshWorksheetFromStorage(); } catch (_) {}
+    }
+
+    function readSessionCredential() {
+      try {
+        const raw = localStorage.getItem('stepper_google_auth_session_v2');
+        const parsed = raw ? JSON.parse(raw) : null;
+        return parsed && parsed.credential ? String(parsed.credential).trim() : '';
+      } catch (_) {
+        return '';
+      }
+    }
+
+    function getAudioUrl() {
+      const path = window.location.pathname.replace(/\/+/g, '/');
+      return (/^\/sheet(\/|$)/).test(path) ? '../loading-screen-song.m4a' : './loading-screen-song.m4a';
+    }
+
+    let loadingAudio = null;
+    function startLoadingAudio() {
+      try {
+        if (!loadingAudio) {
+          loadingAudio = new Audio(getAudioUrl());
+          loadingAudio.loop = true;
+          loadingAudio.preload = 'auto';
+          loadingAudio.volume = 0.45;
+        }
+        loadingAudio.currentTime = 0;
+        const playAttempt = loadingAudio.play();
+        if (playAttempt && typeof playAttempt.catch === 'function') playAttempt.catch(() => {});
+      } catch (_) {}
+    }
+
+    function stopLoadingAudio() {
+      try {
+        if (loadingAudio) { loadingAudio.pause(); loadingAudio.currentTime = 0; }
+      } catch (_) {}
+    }
+
+    function setProgress(percent, label, detail) {
+      const wrap = document.getElementById('stepper-pdf-progress-wrap');
+      const bar = document.getElementById('stepper-pdf-progress-bar');
+      const text = document.getElementById('stepper-pdf-progress-text');
+      const line = document.getElementById('stepper-pdf-progress-detail');
+      if (wrap) wrap.style.display = 'block';
+      if (bar) bar.style.width = `${Math.max(0, Math.min(100, Number(percent) || 0))}%`;
+      if (text) text.textContent = label || '';
+      if (line) line.textContent = detail || '';
+    }
+
+    function resetProgress() {
+      setProgress(0, '', '');
+      const wrap = document.getElementById('stepper-pdf-progress-wrap');
+      if (wrap) wrap.style.display = 'none';
+    }
+
+    function delayFrame(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    async function autoAddGlossarySteps(data, preferredBase) {
+      const credential = readSessionCredential();
+      if (!credential) return { skipped: true, reason: 'not-signed-in' };
+      const payload = buildGlossaryRequestPayload(data);
+      if (!payload.length) return { skipped: true, reason: 'no-steps' };
+      const candidates = getApiBaseCandidates(preferredBase);
+      let lastError = null;
+      for (const base of candidates) {
+        try {
+          const resp = await fetch(base + '/api/glossary/auto-add', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${credential}` },
+            body: JSON.stringify({ steps: payload, tags: String(data && data.title || 'Imported PDF').trim() })
+          });
+          const json = await resp.json().catch(() => null);
+          if (resp.ok && json && json.ok) {
+            rememberApiBase(base);
+            return { ok: true, added: Number(json.added || 0) };
+          }
+          lastError = new Error(json && (json.error || json.detail) || 'Glossary auto-add failed.');
+        } catch (err) {
+          lastError = err;
+        }
+      }
+      return { skipped: true, reason: lastError ? String(lastError.message || lastError) : 'failed' };
     }
 
     function getApiBaseCandidates(preferred) {
@@ -571,6 +658,11 @@
           </div>
           <input type="file" id="stepper-pdf-file-input" accept=".pdf" data-testid="pdf-file-input" />
           <div id="stepper-pdf-status"></div>
+          <div id="stepper-pdf-progress-wrap" style="display:none;margin-bottom:14px;">
+            <div id="stepper-pdf-progress-text" style="font-size:12px;font-weight:800;color:#c7d2fe;margin-bottom:6px;"></div>
+            <div style="height:10px;border-radius:999px;background:rgba(255,255,255,0.08);overflow:hidden;"><div id="stepper-pdf-progress-bar" style="width:0%;height:100%;background:linear-gradient(90deg,#6366f1,#7c3aed,#22c55e);transition:width .2s ease;"></div></div>
+            <div id="stepper-pdf-progress-detail" style="font-size:11px;color:#8b8b99;margin-top:6px;min-height:16px;"></div>
+          </div>
           <div id="stepper-pdf-results" data-testid="pdf-results"></div>
           <div class="stepper-pdf-btn-row">
             <button class="stepper-pdf-btn stepper-pdf-btn-cancel" id="stepper-pdf-cancel" data-testid="pdf-cancel-button">Cancel</button>
@@ -599,8 +691,8 @@
     const applyBtn = document.getElementById('stepper-pdf-apply');
 
     btn.addEventListener('click', () => { overlay.classList.add('active'); resetModal(); });
-    cancelBtn.addEventListener('click', () => overlay.classList.remove('active'));
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.classList.remove('active'); });
+    cancelBtn.addEventListener('click', () => { stopLoadingAudio(); overlay.classList.remove('active'); });
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) { stopLoadingAudio(); overlay.classList.remove('active'); } });
 
     dropzone.addEventListener('click', () => fileInput.click());
     dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
@@ -630,12 +722,14 @@
     });
 
     applyBtn.addEventListener('click', () => {
-      if (parsedData) { applyToEditor(parsedData); overlay.classList.remove('active'); }
+      if (parsedData) { Promise.resolve(applyToEditor(parsedData)).then(() => { overlay.classList.remove('active'); }).catch((error) => { console.error('[Stepper PDF Import] Apply failed', error); setStatus('error', error && error.message ? error.message : 'Could not apply that import live.'); stopLoadingAudio(); }); }
     });
   }
 
   function resetModal() {
     parsedData = null;
+    stopLoadingAudio();
+    resetProgress();
     const status = document.getElementById('stepper-pdf-status');
     const results = document.getElementById('stepper-pdf-results');
     const applyBtn = document.getElementById('stepper-pdf-apply');
@@ -702,14 +796,35 @@
   function row(label, val) { return `<div class="meta-row"><span class="meta-label">${label}</span><span class="meta-value">${esc(val)}</span></div>`; }
   function esc(str) { const d = document.createElement('div'); d.textContent = String(str || ''); return d.innerHTML; }
 
-  function applyToEditor(data) {
-    const snapshot = buildEditorSnapshot(data);
+  async function applyToEditor(data) {
+    startLoadingAudio();
+    const snapshot = buildEditorSnapshot(Object.assign({}, data, { steps: [] }));
+    writeEditorSnapshot(snapshot);
+    tryDirectPopulate(data);
+    setStatus('loading', 'Pushing imported steps live into the worksheet...');
+    setProgress(8, 'Applying metadata', 'Title, counts, choreographer, and music are going into the editor.');
+    await delayFrame(120);
+    const sourceSteps = Array.isArray(data && data.steps) ? data.steps : [];
+    const targetSection = snapshot.sections && snapshot.sections[0] ? snapshot.sections[0] : null;
+    if (targetSection) targetSection.steps = [];
+    for (let i = 0; i < sourceSteps.length; i += 1) {
+      const step = sourceSteps[i];
+      if (targetSection) targetSection.steps.push(step);
+      writeEditorSnapshot(snapshot);
+      tryDirectPopulate(Object.assign({}, data, { steps: targetSection ? targetSection.steps : sourceSteps.slice(0, i + 1) }));
+      setProgress(10 + Math.round(((i + 1) / Math.max(sourceSteps.length, 1)) * 70), 'Adding steps in real time', `Adding step ${i + 1} of ${sourceSteps.length}: ${step && (step.name || step.description || 'Imported step')}`);
+      await delayFrame(Math.min(65, sourceSteps.length > 28 ? 20 : 38));
+    }
     writeEditorSnapshot(snapshot);
     window.__STEPPER_PDF_DATA = data;
     window.dispatchEvent(new CustomEvent('stepper-pdf-import', { detail: data }));
-    tryDirectPopulate(data);
-    setStatus('success', 'Imported into the editor. Reloading with the new steps...');
-    setTimeout(() => window.location.reload(), 180);
+    window.dispatchEvent(new CustomEvent('stepper:worksheet-loaded', { detail: { data: snapshot } }));
+    const glossaryResult = await autoAddGlossarySteps(data, window.STEPPER_API_BASE).catch(() => ({ skipped: true }));
+    setProgress(92, 'Syncing cloud + glossary', glossaryResult && glossaryResult.ok ? `Added ${glossaryResult.added} imported step${glossaryResult.added === 1 ? '' : 's'} into Glossary+.` : 'Glossary+ skipped or unchanged.');
+    window.dispatchEvent(new CustomEvent('stepper-pdf-import-complete', { detail: { data, snapshot, glossaryResult } }));
+    setStatus('success', glossaryResult && glossaryResult.ok ? `Imported live with ${sourceSteps.length} steps and added ${glossaryResult.added} step${glossaryResult.added === 1 ? '' : 's'} to Glossary+.` : `Imported live with ${sourceSteps.length} steps. Glossary+ was left alone.`);
+    setProgress(100, 'Import finished', 'Everything is live in the worksheet now.');
+    stopLoadingAudio();
   }
 
   function tryDirectPopulate(data) {

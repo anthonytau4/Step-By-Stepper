@@ -1440,6 +1440,37 @@ function parsePdfTextToDance(rawText) {
   }
   return { ok: true, ...meta, title: meta.title || 'Imported PDF', steps };
 }
+
+async function enhanceParsedPdfDance(parsed, rawText) {
+  const base = parsed && typeof parsed === 'object' ? JSON.parse(JSON.stringify(parsed)) : { ok: true, title: 'Imported PDF', steps: [] };
+  if (!rawText || (!openaiClient && !geminiApiKey)) return base;
+  const trimmedText = String(rawText || '').slice(0, 24000);
+  const prompt = `Clean this imported line-dance PDF parse into strict JSON only. Keep it factual and based on the supplied text.\nReturn an object with keys: title, choreographer, music, level, count, counts, wall, walls, steps.\nEach step must be an object with keys: counts, count, name, description, foot.\nNever invent steps that are not supported by the PDF text. Merge broken lines when obvious.\nIf something is unknown, leave it as an empty string.\nPDF text:\n${trimmedText}\n\nCurrent heuristic parse:\n${JSON.stringify(base).slice(0, 12000)}`;
+  try {
+    const ai = await runSiteHelperAI({
+      preferredModel: 'gemini',
+      system: 'You repair imported line-dance worksheet data. Output JSON only. No markdown. No commentary.',
+      prompt
+    });
+    const cleanedText = String(ai && ai.text || '').trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
+    const repaired = JSON.parse(cleanedText);
+    const merged = Object.assign({}, base, repaired || {});
+    const safeSteps = Array.isArray(merged.steps) ? merged.steps : [];
+    merged.steps = safeSteps.map((step, index) => ({
+      counts: String(step && (step.counts || step.count) || index + 1).trim() || String(index + 1),
+      count: String(step && (step.count || step.counts) || index + 1).trim() || String(index + 1),
+      name: normalizeStepName(step && step.name, step && step.description),
+      description: cleanPdfLine(step && (step.description || step.name) || ''),
+      foot: inferFootFromPdfText(step && (step.description || step.name || step.foot) || '') || 'Either'
+    })).filter(step => step.description);
+    if (!merged.steps.length) merged.steps = base.steps || [];
+    merged.ok = true;
+    merged.aiEnhanced = true;
+    return merged;
+  } catch (_) {
+    return base;
+  }
+}
 function fallbackDanceTool(mode, dance, prompt) {
   const sections = Array.isArray(dance?.snapshot?.data?.sections) ? dance.snapshot.data.sections : [];
   const stepCount = sections.reduce((sum, section) => sum + (Array.isArray(section?.steps) ? section.steps.length : 0), 0);
@@ -1588,7 +1619,7 @@ app.post('/api/pdf/parse', async (req, res) => {
     if (!/\.pdf$/i.test(filename)) return res.status(400).json({ ok:false, error:'Please upload a PDF file.' });
     const text = await extractPdfText(buffer);
     if (!text) return res.status(422).json({ ok:false, error:'Could not extract readable text from that PDF.' });
-    const parsed = parsePdfTextToDance(text);
+    const parsed = await enhanceParsedPdfDance(parsePdfTextToDance(text), text);
     parsed.sourceTextLength = text.length;
     parsed.filename = filename;
     return res.json(parsed);
@@ -2305,6 +2336,36 @@ app.get('/api/glossary/steps', async (_req, res) => {
   const db = await readDb();
   const items = (Array.isArray(db.approvedGlossarySteps) ? db.approvedGlossarySteps : []).slice().sort((a,b)=> String(a?.name || '').localeCompare(String(b?.name || '')));
   res.json({ ok:true, items });
+});
+
+app.post('/api/glossary/auto-add', requireGoogleUser, async (req, res) => {
+  const db = await readDb();
+  const key = userKeyFromClaims(req.stepperClaims);
+  touchUser(db, req.stepperUser, key);
+  const steps = Array.isArray(req.body?.steps) ? req.body.steps : [];
+  if (!steps.length) return res.status(400).json({ ok:false, error:'No steps were supplied.' });
+  const approved = Array.isArray(db.approvedGlossarySteps) ? db.approvedGlossarySteps : [];
+  const seen = new Set(approved.map(step => `${String(step?.name || '').trim().toLowerCase()}::${String(step?.description || '').trim().toLowerCase()}`));
+  const additions = [];
+  for (const raw of steps.slice(0, 80)) {
+    const normalized = normalizeGlossaryStepPayload({
+      name: String(raw?.name || '').trim(),
+      description: String(raw?.description || raw?.name || '').trim(),
+      counts: String(raw?.counts || raw?.count || '1').trim() || '1',
+      foot: String(raw?.foot || 'Either').trim() || 'Either',
+      tags: String(raw?.tags || req.body?.tags || 'Imported PDF').trim()
+    }, { email:req.stepperUser.email, name:req.stepperUser.name });
+    const dedupeKey = `${String(normalized?.name || '').trim().toLowerCase()}::${String(normalized?.description || '').trim().toLowerCase()}`;
+    if (!normalized.name || !normalized.description || seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    normalized.source = 'pdf-import';
+    normalized.ownerKey = key;
+    additions.push(normalized);
+  }
+  if (!additions.length) return res.json({ ok:true, added:0, items: [] });
+  db.approvedGlossarySteps = [...additions, ...approved].slice(0, 4000);
+  await writeDb(db);
+  res.json({ ok:true, added:additions.length, items:additions });
 });
 
 app.post('/api/glossary/request', requireGoogleUser, async (req, res) => {
