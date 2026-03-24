@@ -1386,6 +1386,66 @@ function parseStepLine(line, fallbackIndex) {
   };
 }
 
+function detectPdfSections(lines, parsedSteps) {
+  const sections = [];
+  let current = null;
+  let stepCursor = 0;
+  const headingPattern = /^(section\s+[a-z0-9]+|part\s+[a-z0-9]+|tag\s+[a-z0-9]+|restart|bridge|intro|ending|verse|chorus|block\s+[a-z0-9]+)[:\s-]*/i;
+  for (const rawLine of lines) {
+    const line = cleanPdfLine(rawLine);
+    if (!line) continue;
+    const headingMatch = line.match(headingPattern);
+    if (headingMatch) {
+      current = {
+        id: `pdfsec_${sections.length + 1}`,
+        title: line,
+        kind: /^part\b/i.test(line) ? 'part' : 'section',
+        steps: []
+      };
+      sections.push(current);
+      continue;
+    }
+    const stepish = /^(\d|[&])/.test(line) || /^((side|step|walk|rock|cross|behind|together|touch|tap|point|heel|toe|kick|shuffle|sailor|mambo|weave|vine|nightclub|lunge|lock|scissor|scissors|coaster|skate|pivot|turn|charleston|monterey|stomp|swivel|twinkle|roll|drag|brush|flick|hitch|run|slide|ball|hold|syncopated|wizard|diamond))/i.test(line);
+    if (!stepish) continue;
+    if (!current) {
+      current = { id: 'pdfsec_1', title: 'Main Dance', kind: 'section', steps: [] };
+      sections.push(current);
+    }
+    const step = parsedSteps[stepCursor] || parseStepLine(line, stepCursor);
+    if (step) {
+      current.steps.push(step);
+      stepCursor += 1;
+    }
+  }
+  if (!sections.length) {
+    sections.push({ id: 'pdfsec_1', title: 'Main Dance', kind: 'section', steps: Array.isArray(parsedSteps) ? parsedSteps.slice() : [] });
+  } else if (stepCursor < parsedSteps.length) {
+    const tail = sections[sections.length - 1];
+    tail.steps = tail.steps.concat(parsedSteps.slice(stepCursor));
+  }
+  const partCount = sections.filter(section => section.kind === 'part').length;
+  const sectionCount = sections.length;
+  return {
+    sections,
+    partCount,
+    sectionCount,
+    danceType: partCount > 0 ? 'Part dance' : 'Non part dance'
+  };
+}
+
+function buildPdfImportLog(meta, sectionMeta) {
+  return {
+    danceType: sectionMeta.danceType,
+    sectionCount: sectionMeta.sectionCount,
+    partCount: sectionMeta.partCount,
+    counts: String(meta.count || meta.counts || '').trim(),
+    walls: String(meta.wall || meta.walls || '').trim(),
+    level: String(meta.level || '').trim(),
+    choreographer: String(meta.choreographer || '').trim(),
+    music: String(meta.music || '').trim()
+  };
+}
+
 function parsePdfTextToDance(rawText) {
   const text = String(rawText || '').replace(/\r/g, '');
   const lines = text.split('\n').map(cleanPdfLine).filter(Boolean);
@@ -1408,44 +1468,45 @@ function parsePdfTextToDance(rawText) {
     if (match && !meta.music) meta.music = cleanPdfLine(match[1]);
     match = line.match(/^(?:level)\s*[:.-]?\s*(.+)$/i);
     if (match && !meta.level) meta.level = cleanPdfLine(match[1]);
-    match = line.match(/^(?:count|counts)\s*[:.-]?\s*(\d+)\b/i);
+    match = line.match(/^(?:count|counts)\s*[:.-]?\s*(\d+)/i);
     if (match && !meta.count) meta.count = meta.counts = String(match[1]);
-    match = line.match(/^(?:wall|walls)\s*[:.-]?\s*(\d+)\b/i);
+    match = line.match(/^(?:wall|walls)\s*[:.-]?\s*(\d+)/i);
     if (match && !meta.wall) meta.wall = meta.walls = String(match[1]);
   }
   if (!meta.count) {
-    const match = joined.match(/\b(\d{1,3})\s*count\b/i);
+    const match = joined.match(/(\d{1,3})\s*count/i);
     if (match) meta.count = meta.counts = String(match[1]);
   }
   if (!meta.wall) {
-    const match = joined.match(/\b(\d{1,2})\s*wall\b/i);
+    const match = joined.match(/(\d{1,2})\s*wall/i);
     if (match) meta.wall = meta.walls = String(match[1]);
   }
   if (!meta.level) {
-    const match = joined.match(/\b(absolute beginner|beginner|improver|intermediate|advanced)\b/i);
+    const match = joined.match(/(absolute beginner|beginner|improver|intermediate|advanced)/i);
     if (match) meta.level = titleCaseWords(match[1]);
   }
   const steps = [];
   let inSteps = false;
   for (const line of lines) {
-    if (/^(section|part)\b/i.test(line)) { inSteps = true; continue; }
-    if (/^steps?\b/i.test(line)) { inSteps = true; continue; }
-    if (!inSteps && /^(count|counts|wall|walls|level|music|song|choreographer|choreographed by)\b/i.test(line)) continue;
+    if (/^(section|part)/i.test(line)) { inSteps = true; continue; }
+    if (/^steps?/i.test(line)) { inSteps = true; continue; }
+    if (!inSteps && /^(count|counts|wall|walls|level|music|song|choreographer|choreographed by)/i.test(line)) continue;
     if (!inSteps && line === title) continue;
-    const stepish = /^(\d|[&])/.test(line) || /^((side|step|walk|rock|cross|behind|together|touch|tap|point|heel|toe|kick|shuffle|sailor|mambo|weave|vine|nightclub|lunge|lock|scissor|scissors|coaster|skate|pivot|turn|charleston|monterey|stomp|swivel|twinkle|roll|drag|brush|flick|hitch|run|slide|ball|hold|syncopated|wizard|diamond)\b)/i.test(line);
+    const stepish = /^(\d|[&])/.test(line) || /^((side|step|walk|rock|cross|behind|together|touch|tap|point|heel|toe|kick|shuffle|sailor|mambo|weave|vine|nightclub|lunge|lock|scissor|scissors|coaster|skate|pivot|turn|charleston|monterey|stomp|swivel|twinkle|roll|drag|brush|flick|hitch|run|slide|ball|hold|syncopated|wizard|diamond))/i.test(line);
     if (!stepish) continue;
     inSteps = true;
     const parsed = parseStepLine(line, steps.length);
     if (parsed) steps.push(parsed);
   }
-  return { ok: true, ...meta, title: meta.title || 'Imported PDF', steps };
+  const sectionMeta = detectPdfSections(lines, steps);
+  return { ok: true, ...meta, title: meta.title || 'Imported PDF', steps, sections: sectionMeta.sections, importLog: buildPdfImportLog(meta, sectionMeta), danceType: sectionMeta.danceType, partCount: sectionMeta.partCount, sectionCount: sectionMeta.sectionCount };
 }
 
 async function enhanceParsedPdfDance(parsed, rawText) {
   const base = parsed && typeof parsed === 'object' ? JSON.parse(JSON.stringify(parsed)) : { ok: true, title: 'Imported PDF', steps: [] };
   if (!rawText || (!openaiClient && !geminiApiKey)) return base;
   const trimmedText = String(rawText || '').slice(0, 24000);
-  const prompt = `Clean this imported line-dance PDF parse into strict JSON only. Keep it factual and based on the supplied text.\nReturn an object with keys: title, choreographer, music, level, count, counts, wall, walls, steps.\nEach step must be an object with keys: counts, count, name, description, foot.\nNever invent steps that are not supported by the PDF text. Merge broken lines when obvious.\nIf something is unknown, leave it as an empty string.\nPDF text:\n${trimmedText}\n\nCurrent heuristic parse:\n${JSON.stringify(base).slice(0, 12000)}`;
+  const prompt = `Clean this imported line-dance PDF parse into strict JSON only. Keep it factual and based on the supplied text.\nReturn an object with keys: title, choreographer, music, level, count, counts, wall, walls, steps, sections, importLog, danceType, partCount, sectionCount.\nEach step must be an object with keys: counts, count, name, description, foot.\nNever invent steps that are not supported by the PDF text. Merge broken lines when obvious.\nIf something is unknown, leave it as an empty string.\nPDF text:\n${trimmedText}\n\nCurrent heuristic parse:\n${JSON.stringify(base).slice(0, 12000)}`;
   try {
     const ai = await runSiteHelperAI({
       preferredModel: 'gemini',
@@ -1464,6 +1525,24 @@ async function enhanceParsedPdfDance(parsed, rawText) {
       foot: inferFootFromPdfText(step && (step.description || step.name || step.foot) || '') || 'Either'
     })).filter(step => step.description);
     if (!merged.steps.length) merged.steps = base.steps || [];
+    const fallbackSectionMeta = detectPdfSections(String(rawText || '').replace(/\r/g, '').split('\n').map(cleanPdfLine).filter(Boolean), merged.steps);
+    const aiSections = Array.isArray(merged.sections) ? merged.sections : [];
+    merged.sections = aiSections.length ? aiSections.map((section, index) => ({
+      id: `pdfsec_${index + 1}`,
+      title: cleanPdfLine(section && (section.title || section.name) || `Section ${index + 1}`),
+      kind: /^part$/i.test(String(section && section.kind || '')) || /^part\b/i.test(String(section && (section.title || section.name) || '')) ? 'part' : 'section',
+      steps: Array.isArray(section && section.steps) ? section.steps.map((step, stepIndex) => ({
+        counts: String(step && (step.counts || step.count) || stepIndex + 1).trim() || String(stepIndex + 1),
+        count: String(step && (step.count || step.counts) || stepIndex + 1).trim() || String(stepIndex + 1),
+        name: normalizeStepName(step && step.name, step && step.description),
+        description: cleanPdfLine(step && (step.description || step.name) || ''),
+        foot: inferFootFromPdfText(step && (step.description || step.name || step.foot) || '') || 'Either'
+      })).filter(step => step.description) : []
+    })) : fallbackSectionMeta.sections;
+    merged.partCount = Number.isFinite(Number(merged.partCount)) ? Number(merged.partCount) : merged.sections.filter(section => section.kind === 'part').length;
+    merged.sectionCount = Number.isFinite(Number(merged.sectionCount)) ? Number(merged.sectionCount) : merged.sections.length;
+    merged.danceType = String(merged.danceType || (merged.partCount > 0 ? 'Part dance' : 'Non part dance')).trim() || 'Non part dance';
+    merged.importLog = Object.assign({}, buildPdfImportLog(merged, { danceType: merged.danceType, partCount: merged.partCount, sectionCount: merged.sectionCount }), merged.importLog || {});
     merged.ok = true;
     merged.aiEnhanced = true;
     return merged;

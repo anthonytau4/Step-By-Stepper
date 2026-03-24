@@ -428,16 +428,17 @@
         music: String(data && data.music || '').trim(),
         level: String(data && data.level || (existing.meta && existing.meta.level) || '').trim(),
         counts: String(data && (data.count || data.counts) || (existing.meta && existing.meta.counts) || '').trim(),
-        walls: String(data && data.wall || (existing.meta && existing.meta.walls) || '').trim()
+        walls: String(data && (data.wall || data.walls) || (existing.meta && existing.meta.walls) || '').trim()
       });
       const importedSteps = Array.isArray(data && data.steps) ? data.steps : [];
-      const sections = [{
+      const sourceSections = Array.isArray(data && data.sections) && data.sections.length
+        ? data.sections
+        : [{ title: String(data && data.title || 'Imported PDF').trim(), kind: 'section', steps: importedSteps }];
+      const sections = sourceSections.map((section, index) => ({
         id: makeId(),
-        name: String(data && data.title || 'Imported PDF').trim(),
-        steps: importedSteps.length
-          ? importedSteps
-          : [{ id: makeId(), type: 'step', count: '', name: '', description: '', foot: 'Either', weight: false, showNote: false, note: '' }]
-      }];
+        name: String(section && (section.title || section.name) || (index === 0 ? (data && data.title || 'Imported PDF') : `Section ${index + 1}`)).trim(),
+        steps: []
+      }));
       return {
         meta,
         sections,
@@ -752,22 +753,29 @@
     if (!file.name.toLowerCase().endsWith('.pdf')) { setStatus('error', 'Please select a PDF file.'); return; }
     if (file.size > 10 * 1024 * 1024) { setStatus('error', 'File too large (max 10MB).'); return; }
 
+    startLoadingAudio();
+    setProgress(6, 'Parsing PDF', 'Starting the Python parser and AI cleanup.');
     setStatus('loading', 'Waking the AI PDF importer and parsing your file...');
     document.getElementById('stepper-pdf-results').style.display = 'none';
     document.getElementById('stepper-pdf-apply').style.display = 'none';
 
     try {
       const result = await requestPdfParse(file);
+      setProgress(58, 'Cleaning parse', 'Python finished. Matching glossary steps and rebuilding sections.');
       const data = await enrichImportedData(result.data, result.base);
 
       parsedData = data;
       const n = (data.steps || []).length;
+      const danceType = String(data && data.danceType || '').trim();
+      setProgress(100, 'Parse complete', danceType ? `${danceType}. ${n} step${n !== 1 ? 's' : ''} ready to apply.` : `${n} step${n !== 1 ? 's' : ''} ready to apply.`);
       setStatus('success', `Found ${n} step${n !== 1 ? 's' : ''}${data.title ? ' in "' + data.title + '"' : ''}.`);
       renderResults(data);
       document.getElementById('stepper-pdf-apply').style.display = 'inline-block';
       document.getElementById('stepper-pdf-glossary').style.display = 'inline-block';
       document.getElementById('stepper-pdf-copy-glossary').style.display = 'inline-block';
     } catch (err) {
+      stopLoadingAudio();
+      resetProgress();
       const message = err && err.message ? err.message : 'Could not reach the server.';
       const isNetworkError = !err || !err.status;
       setStatus('error', isNetworkError ? (`Network error: ${message} The importer retried every known backend. If the server was asleep, wait a moment and try again.`) : message);
@@ -782,12 +790,37 @@
     if (data.music) html += row('Music', data.music);
     if (data.count) html += row('Counts', data.count);
     if (data.level) html += row('Level', data.level);
+    if (data.walls || data.wall) html += row('Walls', data.walls || data.wall);
+
+    const sections = Array.isArray(data.sections) ? data.sections : [];
+    if (sections.length) {
+      html += `<div class="steps-header">Detected Sections / Parts (${sections.length})</div>`;
+      sections.forEach((section, index) => {
+        const title = section && (section.title || section.name) ? section.title || section.name : `Section ${index + 1}`;
+        const kind = section && section.kind ? String(section.kind) : 'section';
+        const count = Array.isArray(section && section.steps) ? section.steps.length : 0;
+        html += `<div class="meta-row"><span class="meta-label">${esc(kind === 'part' ? 'Part' : 'Section')}</span><span class="meta-value">${esc(title)}${count ? ` (${count} steps)` : ''}</span></div>`;
+      });
+    }
 
     if (data.steps && data.steps.length > 0) {
       html += `<div class="steps-header">Extracted Steps (${data.steps.length})</div>`;
       data.steps.forEach((step, i) => {
         html += `<div class="step-item"><span class="step-count">${esc(step.counts || String(i + 1))}</span><span class="step-desc">${esc(step.description || step.name)}</span><span class="step-foot">${esc(step.foot)}</span></div>`;
       });
+    }
+
+    const log = data && data.importLog ? data.importLog : null;
+    if (log) {
+      html += `<div class="steps-header">Import Log</div>`;
+      html += row('Dance Type', log.danceType || data.danceType || 'Non part dance');
+      html += row('Sections', String(log.sectionCount ?? data.sectionCount ?? sections.length ?? 0));
+      html += row('Parts', String(log.partCount ?? data.partCount ?? sections.filter(section => section.kind === 'part').length ?? 0));
+      if (log.counts) html += row('Counts', log.counts);
+      if (log.walls) html += row('Walls', log.walls);
+      if (log.level) html += row('Level', log.level);
+      if (log.choreographer) html += row('Choreographer', log.choreographer);
+      if (log.music) html += row('Music', log.music);
     }
     results.innerHTML = html;
     results.style.display = 'block';
@@ -798,22 +831,36 @@
 
   async function applyToEditor(data) {
     startLoadingAudio();
+    const structuredSections = Array.isArray(data && data.sections) && data.sections.length
+      ? data.sections
+      : [{ title: String(data && data.title || 'Imported PDF').trim() || 'Imported PDF', kind: 'section', steps: Array.isArray(data && data.steps) ? data.steps : [] }];
     const snapshot = buildEditorSnapshot(Object.assign({}, data, { steps: [] }));
     writeEditorSnapshot(snapshot);
     tryDirectPopulate(data);
     setStatus('loading', 'Pushing imported steps live into the worksheet...');
     setProgress(8, 'Applying metadata', 'Title, counts, choreographer, and music are going into the editor.');
     await delayFrame(120);
-    const sourceSteps = Array.isArray(data && data.steps) ? data.steps : [];
-    const targetSection = snapshot.sections && snapshot.sections[0] ? snapshot.sections[0] : null;
-    if (targetSection) targetSection.steps = [];
-    for (let i = 0; i < sourceSteps.length; i += 1) {
-      const step = sourceSteps[i];
-      if (targetSection) targetSection.steps.push(step);
-      writeEditorSnapshot(snapshot);
-      tryDirectPopulate(Object.assign({}, data, { steps: targetSection ? targetSection.steps : sourceSteps.slice(0, i + 1) }));
-      setProgress(10 + Math.round(((i + 1) / Math.max(sourceSteps.length, 1)) * 70), 'Adding steps in real time', `Adding step ${i + 1} of ${sourceSteps.length}: ${step && (step.name || step.description || 'Imported step')}`);
-      await delayFrame(Math.min(65, sourceSteps.length > 28 ? 20 : 38));
+    const totalSteps = structuredSections.reduce((sum, section) => sum + (Array.isArray(section && section.steps) ? section.steps.length : 0), 0);
+    let applied = 0;
+    for (let s = 0; s < structuredSections.length; s += 1) {
+      const sourceSection = structuredSections[s] || {};
+      const targetSection = snapshot.sections && snapshot.sections[s] ? snapshot.sections[s] : null;
+      if (targetSection) {
+        targetSection.name = String(sourceSection.title || sourceSection.name || targetSection.name || `Section ${s + 1}`).trim();
+        targetSection.steps = [];
+      }
+      const sourceSteps = Array.isArray(sourceSection.steps) ? sourceSection.steps : [];
+      setProgress(10 + Math.round((applied / Math.max(totalSteps, 1)) * 70), sourceSection.kind === 'part' ? `Loading part ${s + 1}` : `Loading section ${s + 1}`, String(sourceSection.title || sourceSection.name || `Section ${s + 1}`));
+      await delayFrame(60);
+      for (let i = 0; i < sourceSteps.length; i += 1) {
+        const step = sourceSteps[i];
+        if (targetSection) targetSection.steps.push(step);
+        applied += 1;
+        writeEditorSnapshot(snapshot);
+        tryDirectPopulate(Object.assign({}, data, { steps: sourceSteps.slice(0, i + 1) }));
+        setProgress(10 + Math.round((applied / Math.max(totalSteps, 1)) * 70), 'Adding steps in real time', `Adding ${sourceSection.kind === 'part' ? 'part' : 'section'} ${s + 1}, step ${i + 1}: ${step && (step.name || step.description || 'Imported step')}`);
+        await delayFrame(Math.min(65, totalSteps > 28 ? 20 : 38));
+      }
     }
     writeEditorSnapshot(snapshot);
     window.__STEPPER_PDF_DATA = data;
@@ -822,8 +869,8 @@
     const glossaryResult = await autoAddGlossarySteps(data, window.STEPPER_API_BASE).catch(() => ({ skipped: true }));
     setProgress(92, 'Syncing cloud + glossary', glossaryResult && glossaryResult.ok ? `Added ${glossaryResult.added} imported step${glossaryResult.added === 1 ? '' : 's'} into Glossary+.` : 'Glossary+ skipped or unchanged.');
     window.dispatchEvent(new CustomEvent('stepper-pdf-import-complete', { detail: { data, snapshot, glossaryResult } }));
-    setStatus('success', glossaryResult && glossaryResult.ok ? `Imported live with ${sourceSteps.length} steps and added ${glossaryResult.added} step${glossaryResult.added === 1 ? '' : 's'} to Glossary+.` : `Imported live with ${sourceSteps.length} steps. Glossary+ was left alone.`);
-    setProgress(100, 'Import finished', 'Everything is live in the worksheet now.');
+    setStatus('success', glossaryResult && glossaryResult.ok ? `Imported live with ${totalSteps} steps and added ${glossaryResult.added} step${glossaryResult.added === 1 ? '' : 's'} to Glossary+.` : `Imported live with ${totalSteps} steps. Glossary+ was left alone.`);
+    setProgress(100, 'Import finished', `${data && data.danceType ? data.danceType + '. ' : ''}Everything is live in the worksheet now.`);
     stopLoadingAudio();
   }
 
