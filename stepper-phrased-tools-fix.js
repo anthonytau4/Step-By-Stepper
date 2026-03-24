@@ -359,7 +359,16 @@
   function loadSavedDance(id){
     const entry = getFeaturedDances().find(item => item && item.id === id);
     if (!entry) return;
-    if (restoreEditableDanceProject(entry.projectJson, entry.snapshot)) location.reload();
+    if (restoreEditableDanceProject(entry.projectJson, entry.snapshot)) softRefreshAfterRestore();
+  }
+
+
+
+  function softRefreshAfterRestore(){
+    try { window.dispatchEvent(new Event('storage')); } catch {}
+    try { window.dispatchEvent(new CustomEvent('stepper:worksheet-loaded', { detail: { data: readAppData() || {} } })); } catch {}
+    try { window.dispatchEvent(new CustomEvent('stepper-pdf-live-apply', { detail: readAppData() || {} })); } catch {}
+    try { if (typeof window.__stepperRefreshWorksheetFromStorage === 'function') window.__stepperRefreshWorksheetFromStorage(); } catch {}
   }
 
   function getSavedForLater(){
@@ -406,7 +415,7 @@
       writeAppData(targetData);
       writeStoredPhrasedTools(targetTools || {});
       try { sessionStorage.setItem(SAVE_LATER_SESSION_KEY, 'restored'); } catch {}
-      location.reload();
+      softRefreshAfterRestore();
       return true;
     }
     try { sessionStorage.setItem(SAVE_LATER_SESSION_KEY, 'restored'); } catch {}

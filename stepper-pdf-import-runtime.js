@@ -105,7 +105,6 @@
 
     async function autoAddGlossarySteps(data, preferredBase) {
       const credential = readSessionCredential();
-      if (!credential) return { skipped: true, reason: 'not-signed-in' };
       const payload = buildGlossaryRequestPayload(data);
       if (!payload.length) return { skipped: true, reason: 'no-steps' };
       const candidates = getApiBaseCandidates(preferredBase);
@@ -114,7 +113,8 @@
         try {
           const resp = await fetch(base + '/api/glossary/auto-add', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${credential}` },
+            headers: Object.assign({ 'Content-Type': 'application/json', Accept: 'application/json' }, credential ? { Authorization: `Bearer ${credential}` } : {}),
+            credentials: 'include',
             body: JSON.stringify({ steps: payload, tags: String(data && data.title || 'Imported PDF').trim() })
           });
           const json = await resp.json().catch(() => null);
@@ -448,6 +448,7 @@
     }
 
   window.StepperPdfImportRuntimeInit = function StepperPdfImportRuntimeInit() {
+    ensureImportButtonVisible();
 
     warmApiBase(window.STEPPER_API_BASE).catch(() => {});
 
@@ -727,6 +728,15 @@
     });
   }
 
+  function ensureImportButtonVisible() {
+    const btn = document.getElementById('stepper-pdf-import-btn');
+    if (!btn) return;
+    btn.style.display = 'inline-flex';
+    btn.style.visibility = 'visible';
+    btn.style.opacity = '1';
+    btn.style.pointerEvents = 'auto';
+  }
+
   function resetModal() {
     parsedData = null;
     stopLoadingAudio();
@@ -746,10 +756,13 @@
 
   function setStatus(type, msg) {
     const s = document.getElementById('stepper-pdf-status');
+    if (!s) return;
     s.className = type; s.textContent = msg; s.style.display = 'block';
+    ensureImportButtonVisible();
   }
 
   async function handleFile(file) {
+    ensureImportButtonVisible();
     if (!file.name.toLowerCase().endsWith('.pdf')) { setStatus('error', 'Please select a PDF file.'); return; }
     if (file.size > 10 * 1024 * 1024) { setStatus('error', 'File too large (max 10MB).'); return; }
 

@@ -26,6 +26,18 @@
     return true;
   }
 
+  function startImportUiWatcher() {
+    const ensure = () => {
+      let btn = document.getElementById('stepper-pdf-import-btn');
+      if (!btn && typeof injectUi === 'function') { try { injectUi(); } catch (_) {} btn = document.getElementById('stepper-pdf-import-btn'); }
+      if (btn) { btn.style.display = 'inline-flex'; btn.style.visibility = 'visible'; }
+      updateButtonVisibility();
+    };
+    ensure();
+    try { new MutationObserver(() => ensure()).observe(document.body, { childList:true, subtree:true }); } catch (_) {}
+    setInterval(ensure, 1200);
+  }
+
   function updateButtonVisibility() {
     const btn = document.getElementById('stepper-pdf-import-btn');
     if (!btn) return;
@@ -227,6 +239,7 @@
     document.body.appendChild(container);
     bindEvents();
     startTabWatcher();
+    startImportUiWatcher();
     updateButtonVisibility();
   }
 
