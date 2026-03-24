@@ -347,6 +347,95 @@
     return true;
   }
 
+
+
+  const APPROVAL_SOUND_SRC = './moderator-approved-admin-approved.m4a';
+  const DENIAL_SOUND_SRC = './denied-sound.m4a';
+  let __stepperDecisionAudioApprove = null;
+  let __stepperDecisionAudioDeny = null;
+  let __stepperDecisionAudioUnlocked = false;
+
+  function resolveDecisionSoundSrc(src){
+    try {
+      if (window.__stepperResolveAssetUrl) return window.__stepperResolveAssetUrl(src);
+    } catch (_error) {}
+    return src;
+  }
+
+  function ensureDecisionAudio(kind){
+    try {
+      const isApprove = kind === 'approve';
+      let audio = isApprove ? __stepperDecisionAudioApprove : __stepperDecisionAudioDeny;
+      if (!audio) {
+        audio = new Audio(resolveDecisionSoundSrc(isApprove ? APPROVAL_SOUND_SRC : DENIAL_SOUND_SRC));
+        audio.preload = 'auto';
+        audio.setAttribute('playsinline', '');
+        audio.playsInline = true;
+        audio.crossOrigin = 'anonymous';
+        try { audio.load(); } catch (_error) {}
+        if (isApprove) __stepperDecisionAudioApprove = audio;
+        else __stepperDecisionAudioDeny = audio;
+      }
+      return audio;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function unlockDecisionAudio(){
+    if (__stepperDecisionAudioUnlocked) return;
+    __stepperDecisionAudioUnlocked = true;
+    ['approve', 'deny'].forEach((kind) => {
+      try {
+        const audio = ensureDecisionAudio(kind);
+        if (!audio) return;
+        const attempt = audio.play();
+        if (attempt && typeof attempt.then === 'function') {
+          attempt.then(() => {
+            try {
+              audio.pause();
+              audio.currentTime = 0;
+            } catch (_error) {}
+          }).catch(() => {
+            try {
+              audio.pause();
+              audio.currentTime = 0;
+            } catch (_error) {}
+          });
+        }
+      } catch (_error) {}
+    });
+  }
+
+  try {
+    window.addEventListener('pointerdown', unlockDecisionAudio, { once: true, passive: true });
+    window.addEventListener('keydown', unlockDecisionAudio, { once: true });
+    window.addEventListener('touchstart', unlockDecisionAudio, { once: true, passive: true });
+  } catch (_error) {}
+
+  function playDecisionSound(kind){
+    try {
+      const audio = ensureDecisionAudio(kind === 'approve' ? 'approve' : 'deny');
+      if (!audio) return;
+      audio.pause();
+      audio.currentTime = 0;
+      try { audio.load(); } catch (_error) {}
+      const playAttempt = audio.play();
+      if (playAttempt && typeof playAttempt.catch === 'function') {
+        playAttempt.catch(() => {
+          try {
+            const retry = new Audio(resolveDecisionSoundSrc(kind === 'approve' ? APPROVAL_SOUND_SRC : DENIAL_SOUND_SRC));
+            retry.preload = 'auto';
+            retry.setAttribute('playsinline', '');
+            retry.playsInline = true;
+            const retryAttempt = retry.play();
+            if (retryAttempt && typeof retryAttempt.catch === 'function') retryAttempt.catch(() => {});
+          } catch (_error) {}
+        });
+      }
+    } catch (_error) {}
+  }
+
   function approvedGlossaryPromptList(limit){
     return (state.glossaryApproved || []).slice(0, limit || 80).map(item => `${item.name} [${item.foot || 'Either'}] - ${item.description || item.desc || ''}`).join('\n');
   }
@@ -1450,6 +1539,7 @@
   async function rejectSubmission(submissionId){
     try {
       await authFetch(`/api/admin/submissions/${encodeURIComponent(submissionId)}/reject`, { method: 'POST' });
+      playDecisionSound('deny');
       await refreshSubmissions();
       renderPages();
     } catch (error) {
@@ -1460,6 +1550,7 @@
   async function approveSiteSubmission(submissionId){
     try {
       await authFetch(`/api/admin/submissions/${encodeURIComponent(submissionId)}/approve-site`, { method: 'POST' });
+      playDecisionSound('approve');
       await refreshSubmissions();
       renderPages();
     } catch (error) {
@@ -1471,6 +1562,7 @@
     if (!window.confirm('Delete this request from the queue?')) return;
     try {
       await authFetch(`/api/admin/submissions/${encodeURIComponent(submissionId)}/reject`, { method: 'POST' });
+      playDecisionSound('deny');
       await refreshSubmissions();
       renderPages();
     } catch (error) {
@@ -1634,6 +1726,7 @@
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ note: note || '' })
       });
+      playDecisionSound(decision === 'approve' ? 'approve' : 'deny');
       await refreshGlossaryRequests();
       await refreshGlossaryApproved();
       renderPages();
@@ -3381,6 +3474,7 @@
     try {
       const path = decision === 'decline' ? `/api/admin/moderator-applications/${encodeURIComponent(applicationId)}/decline` : `/api/admin/moderator-applications/${encodeURIComponent(applicationId)}/approve`;
       await authFetch(path, { method: 'POST' });
+      playDecisionSound(decision === 'decline' ? 'deny' : 'approve');
       await Promise.all([refreshModeratorApplications(), refreshAdminPowerTools()]);
       renderPages();
     } catch (error) {
@@ -3395,6 +3489,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ decision, note })
       });
+      playDecisionSound(decision === 'disapprove' ? 'deny' : 'approve');
       await refreshModeratorQueue();
       if (isAdminSession()) await refreshSubmissions();
       renderPages(true);
