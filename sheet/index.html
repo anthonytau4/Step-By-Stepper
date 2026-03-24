@@ -1811,7 +1811,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
 
   function loadSnapshotEntry(entry){
     if (!entry) return;
-    if (restoreRestorableDancePayload(entry.projectJson, entry.snapshot)) location.reload();
+    if (restoreRestorableDancePayload(entry.projectJson, entry.snapshot)) { if (window.__stepperSoftReload) window.__stepperSoftReload(); }
   }
 
   function deleteLocalSavedDance(id){
@@ -2965,7 +2965,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   function loadSavedDance(id){
     const entry = getFeaturedDances().find(item => item && item.id === id);
     if (!entry) return;
-    if (restoreEditableDanceProject(entry.projectJson, entry.snapshot)) location.reload();
+    if (restoreEditableDanceProject(entry.projectJson, entry.snapshot)) { if (window.__stepperSoftReload) window.__stepperSoftReload(); }
   }
 
   function getSavedForLater(){
@@ -3012,7 +3012,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       writeAppData(targetData);
       writeStoredPhrasedTools(targetTools || {});
       try { sessionStorage.setItem(SAVE_LATER_SESSION_KEY, 'restored'); } catch {}
-      location.reload();
+      if (window.__stepperSoftReload) window.__stepperSoftReload();
       return true;
     }
     try { sessionStorage.setItem(SAVE_LATER_SESSION_KEY, 'restored'); } catch {}
@@ -4617,7 +4617,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   function loadSavedDance(id){
     const entry = getFeaturedDances().find(item => item && item.id === id);
     if (!entry) return;
-    if (restoreEditableDanceProject(entry.projectJson, entry.snapshot)) location.reload();
+    if (restoreEditableDanceProject(entry.projectJson, entry.snapshot)) { if (window.__stepperSoftReload) window.__stepperSoftReload(); }
   }
 
   function getSavedForLater(){
@@ -4664,7 +4664,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       writeAppData(targetData);
       writeStoredPhrasedTools(targetTools || {});
       try { sessionStorage.setItem(SAVE_LATER_SESSION_KEY, 'restored'); } catch {}
-      location.reload();
+      if (window.__stepperSoftReload) window.__stepperSoftReload();
       return true;
     }
     try { sessionStorage.setItem(SAVE_LATER_SESSION_KEY, 'restored'); } catch {}
@@ -5823,5 +5823,5 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
 <script src="../stepper-pdf-import-ui.js?v=20260320-pdf-import-ui-1"></script>
 <script src="../stepper-pdf-import-bootstrap.js?v=20260320-pdf-import-bootstrap-1"></script>
 
-</body>
+<script>(function(){function emitStepByStepperRefresh(){try{if(typeof window.__stepperRefreshWorksheetFromStorage==='function')window.__stepperRefreshWorksheetFromStorage();}catch(e){}try{window.dispatchEvent(new Event('storage'));}catch(e){}try{window.dispatchEvent(new CustomEvent('stepper:worksheet-loaded',{detail:{data:(function(){try{return JSON.parse(localStorage.getItem('linedance_builder_data_v13')||'{}');}catch(e){return {};}})()}}));}catch(e){}try{window.dispatchEvent(new CustomEvent('stepper-pdf-live-apply',{detail:(function(){try{return JSON.parse(localStorage.getItem('linedance_builder_data_v13')||'{}');}catch(e){return {};}})()}));}catch(e){}}window.__stepperSoftReload=emitStepByStepperRefresh;})();</script></body>
 </html>
