@@ -1792,6 +1792,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       sections: sections.length,
       steps: stepCount,
       updatedAt: new Date().toISOString(),
+      source: 'cloud-front-end',
       projectJson: JSON.stringify(projectPayload),
       snapshot: {
         data: projectPayload.data,
@@ -1807,9 +1808,35 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     return list.slice().sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
   }
 
+  function rememberLoadedDanceSource(source, entry){
+    try {
+      localStorage.setItem('stepper_last_loaded_source', JSON.stringify({
+        source: String(source || 'saved-dance'),
+        id: entry && entry.id ? entry.id : '',
+        title: entry && entry.title ? entry.title : '',
+        updatedAt: new Date().toISOString()
+      }));
+    } catch {}
+  }
+
+  function softApplyAndOpenBuilder(source, entry){
+    if (!entry) return false;
+    rememberLoadedDanceSource(source, entry);
+    try {
+      sessionStorage.setItem('stepper_open_builder_after_restore', '1');
+    } catch {}
+    try {
+      window.dispatchEvent(new Event('storage'));
+      window.dispatchEvent(new CustomEvent('stepper:worksheet-loaded', { detail: { data: readAppData() } }));
+      window.dispatchEvent(new CustomEvent('stepper-pdf-live-apply', { detail: readAppData() }));
+    } catch {}
+    window.location.href = '../sheet/';
+    return true;
+  }
+
   function loadSnapshotEntry(entry){
     if (!entry) return;
-    if (restoreRestorableDancePayload(entry.projectJson, entry.snapshot)) location.reload();
+    if (restoreRestorableDancePayload(entry.projectJson, entry.snapshot)) softApplyAndOpenBuilder(entry.source || 'cloud-front-end', entry);
   }
 
   function deleteLocalSavedDance(id){
@@ -1890,7 +1917,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
           <button type="button" data-action="load-local" class="stepper-mini-btn ${theme.button}">Load</button>
           <button type="button" data-action="delete-local" class="stepper-danger-btn ${theme.dark ? 'bg-red-500/15 text-red-300 border border-red-400/20' : 'bg-red-50 text-red-700 border border-red-200'}">Delete</button>
           <button type="button" data-action="push-local-cloud" class="stepper-mini-btn ${theme.orange}">Push to cloud</button>
-          <span class="text-xs font-semibold uppercase tracking-widest ${theme.subtle}">Updated ${escapeHtml(formatDate(item.updatedAt))}</span>
+          <span class="text-xs font-semibold uppercase tracking-widest ${theme.subtle}">Source ${escapeHtml(String(item.source || 'on-device'))}</span><span class="text-xs font-semibold uppercase tracking-widest ${theme.subtle}">Updated ${escapeHtml(formatDate(item.updatedAt))}</span>
         </div>
       </article>
     `).join('') : `<div class="rounded-3xl border p-6 sm:p-8 text-center ${theme.soft}"><p class="text-lg font-bold">No saved dances yet.</p><p class="mt-2 ${theme.subtle}">Step by Stepper already remembers what people make on this device. Once a dance has a title or a few steps, it will show up here automatically.</p></div>`;
@@ -1913,7 +1940,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
         <div class="mt-4 flex flex-wrap items-center gap-3">
           <button type="button" data-action="load-cloud" class="stepper-mini-btn ${theme.button}">Load</button>
           <button type="button" data-action="delete-cloud" class="stepper-danger-btn ${theme.dark ? 'bg-red-500/15 text-red-300 border border-red-400/20' : 'bg-red-50 text-red-700 border border-red-200'}">Delete</button>
-          <span class="text-xs font-semibold uppercase tracking-widest ${theme.subtle}">Saved ${escapeHtml(formatDate(item.updatedAt))}</span>
+          <span class="text-xs font-semibold uppercase tracking-widest ${theme.subtle}">Source ${escapeHtml(String(item.source || 'my-saved-dances'))}</span><span class="text-xs font-semibold uppercase tracking-widest ${theme.subtle}">Saved ${escapeHtml(formatDate(item.updatedAt))}</span>
         </div>
       </article>
     `).join('') : `<div class="rounded-3xl border p-6 sm:p-8 text-center ${theme.soft}"><p class="text-lg font-bold">No cloud saves yet.</p><p class="mt-2 ${theme.subtle}">Use the cloud button above or push one of your saved dances up into the cloud shelf.</p></div>`;
@@ -2926,6 +2953,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       sections: sectionCount,
       steps: stepCount,
       updatedAt: new Date().toISOString(),
+      source: 'cloud-front-end',
       projectJson: JSON.stringify(projectPayload),
       snapshot: { data: projectPayload.data, phrasedTools: projectPayload.phrasedTools }
     };
@@ -2961,7 +2989,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   function loadSavedDance(id){
     const entry = getFeaturedDances().find(item => item && item.id === id);
     if (!entry) return;
-    if (restoreEditableDanceProject(entry.projectJson, entry.snapshot)) location.reload();
+    if (restoreEditableDanceProject(entry.projectJson, entry.snapshot)) softApplyAndOpenBuilder(entry.source || 'my-saved-dances', entry);
   }
 
   function getSavedForLater(){
@@ -3008,7 +3036,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       writeAppData(targetData);
       writeStoredPhrasedTools(targetTools || {});
       try { sessionStorage.setItem(SAVE_LATER_SESSION_KEY, 'restored'); } catch {}
-      location.reload();
+      softApplyAndOpenBuilder('save-for-later', { id:'save-for-later', title: (targetData.meta && targetData.meta.title) || 'Saved For Later' });
       return true;
     }
     try { sessionStorage.setItem(SAVE_LATER_SESSION_KEY, 'restored'); } catch {}
@@ -3406,7 +3434,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
           <button type="button" data-action="load" class="stepper-mini-btn ${theme.button}">Load</button>
           <a href="${escapeHtml(buildFeaturedSubmissionLink(item))}" class="stepper-mini-btn ${theme.orange}">Gmail PDF</a>
           <button type="button" data-action="delete" class="stepper-danger-btn ${theme.dark ? 'bg-red-500/15 text-red-300 border border-red-400/20' : 'bg-red-50 text-red-700 border border-red-200'}">🗑 Delete</button>
-          <span class="text-xs font-semibold uppercase tracking-widest ${theme.subtle}">Saved ${escapeHtml(formatDate(item.updatedAt))}</span>
+          <span class="text-xs font-semibold uppercase tracking-widest ${theme.subtle}">Source ${escapeHtml(String(item.source || 'my-saved-dances'))}</span><span class="text-xs font-semibold uppercase tracking-widest ${theme.subtle}">Saved ${escapeHtml(formatDate(item.updatedAt))}</span>
         </div>
       </article>
     `).join('') : `<div class="rounded-3xl border p-6 sm:p-8 text-center ${theme.soft}"><p class="text-lg font-bold">No saved dances yet.</p><p class="mt-2 ${theme.subtle}">Build a dance and it will save here automatically on this device.</p></div>`;
@@ -4576,6 +4604,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       sections: sectionCount,
       steps: stepCount,
       updatedAt: new Date().toISOString(),
+      source: 'cloud-front-end',
       projectJson: JSON.stringify(projectPayload),
       snapshot: { data: projectPayload.data, phrasedTools: projectPayload.phrasedTools }
     };
@@ -4611,7 +4640,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   function loadSavedDance(id){
     const entry = getFeaturedDances().find(item => item && item.id === id);
     if (!entry) return;
-    if (restoreEditableDanceProject(entry.projectJson, entry.snapshot)) location.reload();
+    if (restoreEditableDanceProject(entry.projectJson, entry.snapshot)) softApplyAndOpenBuilder(entry.source || 'my-saved-dances', entry);
   }
 
   function getSavedForLater(){
@@ -4658,7 +4687,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       writeAppData(targetData);
       writeStoredPhrasedTools(targetTools || {});
       try { sessionStorage.setItem(SAVE_LATER_SESSION_KEY, 'restored'); } catch {}
-      location.reload();
+      softApplyAndOpenBuilder('save-for-later', { id:'save-for-later', title: (targetData.meta && targetData.meta.title) || 'Saved For Later' });
       return true;
     }
     try { sessionStorage.setItem(SAVE_LATER_SESSION_KEY, 'restored'); } catch {}
@@ -5043,7 +5072,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
           <button type="button" data-action="load" class="stepper-mini-btn ${theme.button}">Load</button>
           <a href="${escapeHtml(buildFeaturedSubmissionLink(item))}" class="stepper-mini-btn ${theme.orange}">Gmail PDF</a>
           <button type="button" data-action="delete" class="stepper-danger-btn ${theme.dark ? 'bg-red-500/15 text-red-300 border border-red-400/20' : 'bg-red-50 text-red-700 border border-red-200'}">🗑 Delete</button>
-          <span class="text-xs font-semibold uppercase tracking-widest ${theme.subtle}">Saved ${escapeHtml(formatDate(item.updatedAt))}</span>
+          <span class="text-xs font-semibold uppercase tracking-widest ${theme.subtle}">Source ${escapeHtml(String(item.source || 'my-saved-dances'))}</span><span class="text-xs font-semibold uppercase tracking-widest ${theme.subtle}">Saved ${escapeHtml(formatDate(item.updatedAt))}</span>
         </div>
       </article>
     `).join('') : `<div class="rounded-3xl border p-6 sm:p-8 text-center ${theme.soft}"><p class="text-lg font-bold">No saved dances yet.</p><p class="mt-2 ${theme.subtle}">Build a dance and it will save here automatically on this device.</p></div>`;

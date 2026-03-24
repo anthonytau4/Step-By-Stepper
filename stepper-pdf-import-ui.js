@@ -326,11 +326,20 @@
     const importCore = getImportCore();
     const snapshot = importCore.buildEditorSnapshot(data);
     importCore.writeEditorSnapshot(snapshot);
+    try {
+      localStorage.setItem('stepper_last_loaded_source', JSON.stringify({
+        source: 'pdf-import',
+        title: String((data && data.title) || 'Untitled'),
+        updatedAt: new Date().toISOString()
+      }));
+    } catch {}
     window.__STEPPER_PDF_DATA = data;
     window.dispatchEvent(new CustomEvent('stepper-pdf-import', { detail: data }));
+    window.dispatchEvent(new CustomEvent('stepper:worksheet-loaded', { detail: { data: snapshot } }));
+    window.dispatchEvent(new CustomEvent('stepper-pdf-live-apply', { detail: snapshot }));
+    try { if (typeof window.__stepperRefreshWorksheetFromStorage === 'function') window.__stepperRefreshWorksheetFromStorage(); } catch (_) {}
     tryDirectPopulate(data);
-    setStatus('success', 'Imported into the editor. Reloading with the new steps...');
-    setTimeout(() => window.location.reload(), 180);
+    setStatus('success', 'Imported into the editor live. No reload needed.');
   }
 
   function tryDirectPopulate(data) {
