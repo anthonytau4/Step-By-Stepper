@@ -1386,7 +1386,47 @@ function parseStepLine(line, fallbackIndex) {
   };
 }
 
-function detectPdfSections(lines, parsedSteps) {
+function guessDanceFeel(meta, rawText) {
+  const blob = `${String(meta?.title || '')}
+${String(meta?.music || '')}
+${String(meta?.level || '')}
+${String(rawText || '')}`.toLowerCase();
+  if (/waltz|vals|viennese/.test(blob)) return 'Waltz';
+  if (/6\s*\/\s*8|3\s*\/\s*4/.test(blob)) return 'Waltz';
+  return '8-count';
+}
+
+function parseCountCeiling(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return 0;
+  const matches = [...raw.matchAll(/\d+/g)].map((match) => Number(match[0])).filter(Number.isFinite);
+  return matches.length ? Math.max(...matches) : 0;
+}
+
+function autoSectionizeSteps(parsedSteps, size) {
+  const steps = Array.isArray(parsedSteps) ? parsedSteps.slice() : [];
+  const sectionSize = Math.max(1, Number(size) || 8);
+  if (!steps.length) return [{ id: 'pdfsec_1', title: '', kind: 'section', steps: [] }];
+  const sections = [];
+  let current = { id: 'pdfsec_1', title: '', kind: 'section', steps: [] };
+  let currentBoundary = sectionSize;
+  for (let i = 0; i < steps.length; i += 1) {
+    const step = steps[i];
+    current.steps.push(step);
+    const ceiling = parseCountCeiling(step?.counts || step?.count || '');
+    const reachedBoundary = ceiling >= currentBoundary && current.steps.length > 0;
+    const isLast = i === steps.length - 1;
+    if ((reachedBoundary || isLast) && current.steps.length) {
+      sections.push(current);
+      currentBoundary += sectionSize;
+      if (!isLast) current = { id: `pdfsec_${sections.length + 1}`, title: '', kind: 'section', steps: [] };
+    }
+  }
+  if (current.steps.length && sections[sections.length - 1] !== current) sections.push(current);
+  return sections.filter((section) => Array.isArray(section.steps) && section.steps.length);
+}
+
+function detectPdfSections(lines, parsedSteps, meta = {}, rawText = '') {
   const sections = [];
   let current = null;
   let stepCursor = 0;
@@ -1398,8 +1438,8 @@ function detectPdfSections(lines, parsedSteps) {
     if (headingMatch) {
       current = {
         id: `pdfsec_${sections.length + 1}`,
-        title: line,
-        kind: /^part\b/i.test(line) ? 'part' : 'section',
+        title: /^part/i.test(line) ? line : '',
+        kind: /^part/i.test(line) ? 'part' : 'section',
         steps: []
       };
       sections.push(current);
@@ -1408,7 +1448,7 @@ function detectPdfSections(lines, parsedSteps) {
     const stepish = /^(\d|[&])/.test(line) || /^((side|step|walk|rock|cross|behind|together|touch|tap|point|heel|toe|kick|shuffle|sailor|mambo|weave|vine|nightclub|lunge|lock|scissor|scissors|coaster|skate|pivot|turn|charleston|monterey|stomp|swivel|twinkle|roll|drag|brush|flick|hitch|run|slide|ball|hold|syncopated|wizard|diamond))/i.test(line);
     if (!stepish) continue;
     if (!current) {
-      current = { id: 'pdfsec_1', title: 'Main Dance', kind: 'section', steps: [] };
+      current = { id: 'pdfsec_1', title: '', kind: 'section', steps: [] };
       sections.push(current);
     }
     const step = parsedSteps[stepCursor] || parseStepLine(line, stepCursor);
@@ -1418,24 +1458,40 @@ function detectPdfSections(lines, parsedSteps) {
     }
   }
   if (!sections.length) {
-    sections.push({ id: 'pdfsec_1', title: 'Main Dance', kind: 'section', steps: Array.isArray(parsedSteps) ? parsedSteps.slice() : [] });
+    sections.push({ id: 'pdfsec_1', title: '', kind: 'section', steps: Array.isArray(parsedSteps) ? parsedSteps.slice() : [] });
   } else if (stepCursor < parsedSteps.length) {
     const tail = sections[sections.length - 1];
     tail.steps = tail.steps.concat(parsedSteps.slice(stepCursor));
   }
-  const partCount = sections.filter(section => section.kind === 'part').length;
-  const sectionCount = sections.length;
+  const danceFeel = guessDanceFeel(meta, rawText);
+  const phraseCounts = danceFeel === 'Waltz' ? 6 : 8;
+  const partCount = sections.filter((section) => section.kind === 'part').length;
+  const hasNamedStructure = partCount > 0 || sections.some((section) => String(section?.title || '').trim());
+  const normalizedSections = hasNamedStructure
+    ? sections.map((section, index) => ({
+        id: `pdfsec_${index + 1}`,
+        title: section.kind === 'part' ? String(section.title || '').trim() : '',
+        kind: section.kind || 'section',
+        steps: Array.isArray(section.steps) ? section.steps : []
+      })).filter((section) => section.steps.length)
+    : autoSectionizeSteps(parsedSteps, phraseCounts).map((section, index) => ({ ...section, id: `pdfsec_${index + 1}`, title: '' }));
+  const normalizedPartCount = normalizedSections.filter((section) => section.kind === 'part').length;
+  const sectionCount = normalizedSections.length;
   return {
-    sections,
-    partCount,
+    sections: normalizedSections,
+    partCount: normalizedPartCount,
     sectionCount,
-    danceType: partCount > 0 ? 'Part dance' : 'Non part dance'
+    danceType: normalizedPartCount > 0 ? 'Part dance' : 'Non part dance',
+    danceFeel,
+    phraseCounts
   };
 }
 
 function buildPdfImportLog(meta, sectionMeta) {
   return {
     danceType: sectionMeta.danceType,
+    danceFeel: String(sectionMeta.danceFeel || '').trim(),
+    smartSectionSize: String(sectionMeta.phraseCounts || '').trim(),
     sectionCount: sectionMeta.sectionCount,
     partCount: sectionMeta.partCount,
     counts: String(meta.count || meta.counts || '').trim(),
@@ -1498,15 +1554,15 @@ function parsePdfTextToDance(rawText) {
     const parsed = parseStepLine(line, steps.length);
     if (parsed) steps.push(parsed);
   }
-  const sectionMeta = detectPdfSections(lines, steps);
-  return { ok: true, ...meta, title: meta.title || 'Imported PDF', steps, sections: sectionMeta.sections, importLog: buildPdfImportLog(meta, sectionMeta), danceType: sectionMeta.danceType, partCount: sectionMeta.partCount, sectionCount: sectionMeta.sectionCount };
+  const sectionMeta = detectPdfSections(lines, steps, meta, text);
+  return { ok: true, ...meta, title: meta.title || 'Imported PDF', steps, sections: sectionMeta.sections, importLog: buildPdfImportLog(meta, sectionMeta), danceType: sectionMeta.danceType, danceFeel: sectionMeta.danceFeel, phraseCounts: sectionMeta.phraseCounts, partCount: sectionMeta.partCount, sectionCount: sectionMeta.sectionCount };
 }
 
 async function enhanceParsedPdfDance(parsed, rawText) {
   const base = parsed && typeof parsed === 'object' ? JSON.parse(JSON.stringify(parsed)) : { ok: true, title: 'Imported PDF', steps: [] };
   if (!rawText || (!openaiClient && !geminiApiKey)) return base;
   const trimmedText = String(rawText || '').slice(0, 24000);
-  const prompt = `Clean this imported line-dance PDF parse into strict JSON only. Keep it factual and based on the supplied text.\nReturn an object with keys: title, choreographer, music, level, count, counts, wall, walls, steps, sections, importLog, danceType, partCount, sectionCount.\nEach step must be an object with keys: counts, count, name, description, foot.\nNever invent steps that are not supported by the PDF text. Merge broken lines when obvious.\nIf something is unknown, leave it as an empty string.\nPDF text:\n${trimmedText}\n\nCurrent heuristic parse:\n${JSON.stringify(base).slice(0, 12000)}`;
+  const prompt = `Clean this imported line-dance PDF parse into strict JSON only. Keep it factual and based on the supplied text.\nReturn an object with keys: title, choreographer, music, level, count, counts, wall, walls, steps, sections, importLog, danceType, danceFeel, phraseCounts, partCount, sectionCount.\nEach step must be an object with keys: counts, count, name, description, foot.\nNever invent steps that are not supported by the PDF text. Merge broken lines when obvious.\nIf something is unknown, leave it as an empty string.\nPDF text:\n${trimmedText}\n\nCurrent heuristic parse:\n${JSON.stringify(base).slice(0, 12000)}`;
   try {
     const ai = await runSiteHelperAI({
       preferredModel: 'gemini',
@@ -1525,11 +1581,11 @@ async function enhanceParsedPdfDance(parsed, rawText) {
       foot: inferFootFromPdfText(step && (step.description || step.name || step.foot) || '') || 'Either'
     })).filter(step => step.description);
     if (!merged.steps.length) merged.steps = base.steps || [];
-    const fallbackSectionMeta = detectPdfSections(String(rawText || '').replace(/\r/g, '').split('\n').map(cleanPdfLine).filter(Boolean), merged.steps);
+    const fallbackSectionMeta = detectPdfSections(String(rawText || '').replace(/\r/g, '').split('\n').map(cleanPdfLine).filter(Boolean), merged.steps, merged, rawText);
     const aiSections = Array.isArray(merged.sections) ? merged.sections : [];
     merged.sections = aiSections.length ? aiSections.map((section, index) => ({
       id: `pdfsec_${index + 1}`,
-      title: cleanPdfLine(section && (section.title || section.name) || `Section ${index + 1}`),
+      title: cleanPdfLine(section && (section.title || section.name) || ''),
       kind: /^part$/i.test(String(section && section.kind || '')) || /^part\b/i.test(String(section && (section.title || section.name) || '')) ? 'part' : 'section',
       steps: Array.isArray(section && section.steps) ? section.steps.map((step, stepIndex) => ({
         counts: String(step && (step.counts || step.count) || stepIndex + 1).trim() || String(stepIndex + 1),
@@ -1542,7 +1598,15 @@ async function enhanceParsedPdfDance(parsed, rawText) {
     merged.partCount = Number.isFinite(Number(merged.partCount)) ? Number(merged.partCount) : merged.sections.filter(section => section.kind === 'part').length;
     merged.sectionCount = Number.isFinite(Number(merged.sectionCount)) ? Number(merged.sectionCount) : merged.sections.length;
     merged.danceType = String(merged.danceType || (merged.partCount > 0 ? 'Part dance' : 'Non part dance')).trim() || 'Non part dance';
-    merged.importLog = Object.assign({}, buildPdfImportLog(merged, { danceType: merged.danceType, partCount: merged.partCount, sectionCount: merged.sectionCount }), merged.importLog || {});
+    merged.danceFeel = String(merged.danceFeel || fallbackSectionMeta.danceFeel || '').trim() || '8-count';
+    merged.phraseCounts = Number.isFinite(Number(merged.phraseCounts)) ? Number(merged.phraseCounts) : Number(fallbackSectionMeta.phraseCounts || (merged.danceFeel === 'Waltz' ? 6 : 8));
+    if (!merged.partCount) {
+      merged.sections = autoSectionizeSteps(merged.steps, merged.phraseCounts).map((section, index) => ({ ...section, id: `pdfsec_${index + 1}`, title: '' }));
+      merged.sectionCount = merged.sections.length;
+      merged.partCount = merged.sections.filter(section => section.kind === 'part').length;
+      merged.danceType = merged.partCount > 0 ? 'Part dance' : 'Non part dance';
+    }
+    merged.importLog = Object.assign({}, buildPdfImportLog(merged, { danceType: merged.danceType, danceFeel: merged.danceFeel, phraseCounts: merged.phraseCounts, partCount: merged.partCount, sectionCount: merged.sectionCount }), merged.importLog || {});
     merged.ok = true;
     merged.aiEnhanced = true;
     return merged;

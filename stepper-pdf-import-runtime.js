@@ -796,10 +796,9 @@
     if (sections.length) {
       html += `<div class="steps-header">Detected Sections / Parts (${sections.length})</div>`;
       sections.forEach((section, index) => {
-        const title = section && (section.title || section.name) ? section.title || section.name : `Section ${index + 1}`;
         const kind = section && section.kind ? String(section.kind) : 'section';
         const count = Array.isArray(section && section.steps) ? section.steps.length : 0;
-        html += `<div class="meta-row"><span class="meta-label">${esc(kind === 'part' ? 'Part' : 'Section')}</span><span class="meta-value">${esc(title)}${count ? ` (${count} steps)` : ''}</span></div>`;
+        html += `<div class="meta-row"><span class="meta-label">${esc(kind === 'part' ? 'Part' : 'Section')}</span><span class="meta-value">${count ? `${count} steps` : 'Ready'}</span></div>`;
       });
     }
 
@@ -816,6 +815,8 @@
       html += row('Dance Type', log.danceType || data.danceType || 'Non part dance');
       html += row('Sections', String(log.sectionCount ?? data.sectionCount ?? sections.length ?? 0));
       html += row('Parts', String(log.partCount ?? data.partCount ?? sections.filter(section => section.kind === 'part').length ?? 0));
+      if (log.danceFeel) html += row('Feel', log.danceFeel);
+      if (log.smartSectionSize) html += row('Smart Section Size', log.smartSectionSize);
       if (log.counts) html += row('Counts', log.counts);
       if (log.walls) html += row('Walls', log.walls);
       if (log.level) html += row('Level', log.level);
@@ -846,7 +847,7 @@
       const sourceSection = structuredSections[s] || {};
       const targetSection = snapshot.sections && snapshot.sections[s] ? snapshot.sections[s] : null;
       if (targetSection) {
-        targetSection.name = String(sourceSection.title || sourceSection.name || targetSection.name || `Section ${s + 1}`).trim();
+        targetSection.name = String(sourceSection.kind === 'part' ? (sourceSection.title || sourceSection.name || '') : '').trim();
         targetSection.steps = [];
       }
       const sourceSteps = Array.isArray(sourceSection.steps) ? sourceSection.steps : [];
