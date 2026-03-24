@@ -815,6 +815,8 @@
       html += row('Dance Type', log.danceType || data.danceType || 'Non part dance');
       html += row('Sections', String(log.sectionCount ?? data.sectionCount ?? sections.length ?? 0));
       html += row('Parts', String(log.partCount ?? data.partCount ?? sections.filter(section => section.kind === 'part').length ?? 0));
+      html += row('Tags', String(log.tagCount ?? data.tagCount ?? 0));
+      html += row('Restarts', String(log.restartCount ?? data.restartCount ?? 0));
       if (log.danceFeel) html += row('Feel', log.danceFeel);
       if (log.smartSectionSize) html += row('Smart Section Size', log.smartSectionSize);
       if (log.counts) html += row('Counts', log.counts);
@@ -851,7 +853,7 @@
         targetSection.steps = [];
       }
       const sourceSteps = Array.isArray(sourceSection.steps) ? sourceSection.steps : [];
-      setProgress(10 + Math.round((applied / Math.max(totalSteps, 1)) * 70), sourceSection.kind === 'part' ? `Loading part ${s + 1}` : `Loading section ${s + 1}`, String(sourceSection.title || sourceSection.name || `Section ${s + 1}`));
+      setProgress(10 + Math.round((applied / Math.max(totalSteps, 1)) * 70), sourceSection.kind === 'part' ? `Loading part ${s + 1}` : `Loading section ${s + 1}`, String(sourceSection.title || sourceSection.name || ''));
       await delayFrame(60);
       for (let i = 0; i < sourceSteps.length; i += 1) {
         const step = sourceSteps[i];
@@ -859,7 +861,8 @@
         applied += 1;
         writeEditorSnapshot(snapshot);
         tryDirectPopulate(Object.assign({}, data, { steps: sourceSteps.slice(0, i + 1) }));
-        setProgress(10 + Math.round((applied / Math.max(totalSteps, 1)) * 70), 'Adding steps in real time', `Adding ${sourceSection.kind === 'part' ? 'part' : 'section'} ${s + 1}, step ${i + 1}: ${step && (step.name || step.description || 'Imported step')}`);
+        const label = step && step.markerType ? `${String(step.markerType).replace(/^./, (m) => m.toUpperCase())}: ${step.description || step.name || ''}` : (step && (step.name || step.description || 'Imported step'));
+        setProgress(10 + Math.round((applied / Math.max(totalSteps, 1)) * 70), 'Adding steps in real time', `Adding ${sourceSection.kind === 'part' ? 'part' : 'section'} ${s + 1}, step ${i + 1}: ${label}`);
         await delayFrame(Math.min(65, totalSteps > 28 ? 20 : 38));
       }
     }
