@@ -108,6 +108,89 @@
   } catch (error) {}
 })();
 </script>
+<style>
+
+/* Android/mobile tab unsmoosh patch */
+@media (max-width: 900px) {
+  .tab-strip,
+  .tabs-strip,
+  .top-tabs,
+  .nav-tabs,
+  .main-tabs,
+  .extra-tabs,
+  .tab-row,
+  [data-tab-strip],
+  [role="tablist"] {
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    -webkit-overflow-scrolling: touch !important;
+    gap: 8px !important;
+    white-space: nowrap !important;
+    scrollbar-width: none;
+    padding-bottom: 2px !important;
+  }
+  .tab-strip::-webkit-scrollbar,
+  .tabs-strip::-webkit-scrollbar,
+  .top-tabs::-webkit-scrollbar,
+  .nav-tabs::-webkit-scrollbar,
+  .main-tabs::-webkit-scrollbar,
+  .extra-tabs::-webkit-scrollbar,
+  .tab-row::-webkit-scrollbar,
+  [data-tab-strip]::-webkit-scrollbar,
+  [role="tablist"]::-webkit-scrollbar {
+    display: none;
+  }
+  .tab-strip > *,
+  .tabs-strip > *,
+  .top-tabs > *,
+  .nav-tabs > *,
+  .main-tabs > *,
+  .extra-tabs > *,
+  .tab-row > *,
+  [data-tab-strip] > *,
+  [role="tablist"] > * {
+    flex: 0 0 auto !important;
+    min-width: max-content !important;
+    width: auto !important;
+    max-width: none !important;
+  }
+  .tab-strip a, .tab-strip button, .tab-strip .tab,
+  .tabs-strip a, .tabs-strip button, .tabs-strip .tab,
+  .top-tabs a, .top-tabs button, .top-tabs .tab,
+  .nav-tabs a, .nav-tabs button, .nav-tabs .tab,
+  .main-tabs a, .main-tabs button, .main-tabs .tab,
+  .extra-tabs a, .extra-tabs button, .extra-tabs .tab,
+  .tab-row a, .tab-row button, .tab-row .tab,
+  [data-tab-strip] a, [data-tab-strip] button, [data-tab-strip] .tab,
+  [role="tablist"] a, [role="tablist"] button, [role="tablist"] .tab {
+    flex: 0 0 auto !important;
+    min-width: max-content !important;
+    width: auto !important;
+    padding: 10px 12px !important;
+    gap: 6px !important;
+    font-size: 14px !important;
+    line-height: 1.1 !important;
+    white-space: nowrap !important;
+  }
+  .tab-strip a svg, .tab-strip button svg, .tab-strip .tab svg,
+  .tabs-strip a svg, .tabs-strip button svg, .tabs-strip .tab svg,
+  .top-tabs a svg, .top-tabs button svg, .top-tabs .tab svg,
+  .nav-tabs a svg, .nav-tabs button svg, .nav-tabs .tab svg,
+  .main-tabs a svg, .main-tabs button svg, .main-tabs .tab svg,
+  .extra-tabs a svg, .extra-tabs button svg, .extra-tabs .tab svg,
+  .tab-row a svg, .tab-row button svg, .tab-row .tab svg,
+  [data-tab-strip] a svg, [data-tab-strip] button svg, [data-tab-strip] .tab svg,
+  [role="tablist"] a svg, [role="tablist"] button svg, [role="tablist"] .tab svg {
+    width: 18px !important;
+    height: 18px !important;
+    min-width: 18px !important;
+    min-height: 18px !important;
+  }
+}
+
+</style>
 </head>
   <body>
 
@@ -2779,6 +2862,51 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
 <script src="./stepper-pdf-import-core.js?v=20260320-pdf-import-core-1"></script>
 <script src="./stepper-pdf-import-ui.js?v=20260320-pdf-import-ui-1"></script>
 <script src="./stepper-pdf-import-bootstrap.js?v=20260320-pdf-import-bootstrap-1"></script>
+
+
+<script id="android-tab-unsmoosh-patch">
+(function () {
+  function patchStrip(strip) {
+    if (!strip || strip.dataset.unsmooshed === '1') return;
+    strip.dataset.unsmooshed = '1';
+    strip.style.display = 'flex';
+    strip.style.flexWrap = 'nowrap';
+    strip.style.overflowX = 'auto';
+    strip.style.overflowY = 'hidden';
+    strip.style.webkitOverflowScrolling = 'touch';
+    strip.style.gap = '8px';
+    strip.style.whiteSpace = 'nowrap';
+    Array.from(strip.children).forEach(function (el) {
+      el.style.flex = '0 0 auto';
+      el.style.minWidth = 'max-content';
+      el.style.width = 'auto';
+      el.style.maxWidth = 'none';
+    });
+    strip.querySelectorAll('a,button,.tab,[role="tab"]').forEach(function (el) {
+      el.style.flex = '0 0 auto';
+      el.style.minWidth = 'max-content';
+      el.style.width = 'auto';
+      el.style.whiteSpace = 'nowrap';
+    });
+  }
+  function patchAll() {
+    var selectors = [
+      '.tab-strip','.tabs-strip','.top-tabs','.nav-tabs','.main-tabs','.extra-tabs','.tab-row',
+      '[data-tab-strip]','[role="tablist"]'
+    ];
+    selectors.forEach(function (sel) {
+      document.querySelectorAll(sel).forEach(patchStrip);
+    });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', patchAll);
+  } else {
+    patchAll();
+  }
+  window.addEventListener('resize', patchAll);
+  setTimeout(patchAll, 300);
+})();
+</script>
 
 </body>
 </html>
