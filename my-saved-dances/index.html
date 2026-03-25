@@ -2308,8 +2308,14 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   function makeExtraButton(label, iconSvg, pageName){
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'stepper-extra-tab shrink-0 px-2.5 sm:px-4 py-2 rounded-lg flex items-center gap-1.5 sm:gap-2 text-[11px] sm:text-sm font-bold transition-all whitespace-nowrap opacity-50 hover:opacity-100';
-    btn.innerHTML = `<span class="stepper-extra-tab-icon">${iconSvg}</span><span>${escapeHtml(label)}</span>`;
+    const mobileLabelMap = {
+      saveddances: 'Saved',
+      featured: 'Featured',
+      whatsnew: 'New'
+    };
+    const shortLabel = mobileLabelMap[pageName] || label;
+    btn.className = 'stepper-extra-tab shrink-0 px-2 sm:px-3 py-2 rounded-lg flex items-center gap-1.5 sm:gap-2 text-[11px] sm:text-sm font-bold transition-all whitespace-nowrap opacity-50 hover:opacity-100';
+    btn.innerHTML = `<span class="stepper-extra-tab-icon">${iconSvg}</span><span class="stepper-extra-tab-label stepper-extra-tab-label--full">${escapeHtml(label)}</span><span class="stepper-extra-tab-label stepper-extra-tab-label--short">${escapeHtml(shortLabel)}</span>`;
     btn.addEventListener('click', () => {
       openExtraPage(pageName, btn);
     });
@@ -2351,7 +2357,38 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     style.id = 'stepper-extra-tabs-style';
     style.textContent = `
       .stepper-extra-tab-icon,
-      .stepper-setting-icon { display:inline-flex; align-items:center; justify-content:center; width:1.4rem; height:1.4rem; }
+      .stepper-setting-icon { display:inline-flex; align-items:center; justify-content:center; width:1.4rem; height:1.4rem; flex:0 0 auto; }
+      .stepper-extra-tab { min-width: 0; flex: 0 0 auto; }
+      .stepper-extra-tab-label--short { display: none; }
+      .stepper-tab-strip-mobile-fix {
+        display: flex !important;
+        flex-wrap: nowrap !important;
+        overflow-x: auto !important;
+        overflow-y: hidden !important;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: thin;
+        gap: .5rem !important;
+        max-width: 100%;
+        width: 100%;
+        min-width: 0;
+        padding-right: .25rem !important;
+      }
+      .stepper-tab-strip-mobile-fix::-webkit-scrollbar { height: 6px; }
+      .stepper-tab-strip-mobile-fix::-webkit-scrollbar-thumb { background: rgba(148,163,184,.45); border-radius: 999px; }
+      @media (max-width: 640px) {
+        .stepper-extra-tab {
+          padding: .55rem .7rem !important;
+          gap: .4rem !important;
+          max-width: max-content;
+          border-radius: .9rem !important;
+        }
+        .stepper-extra-tab .stepper-extra-tab-icon {
+          width: 1.15rem;
+          height: 1.15rem;
+        }
+        .stepper-extra-tab-label--full { display: none; }
+        .stepper-extra-tab-label--short { display: inline; }
+      }
       .stepper-extra-tab-icon svg,
       .stepper-setting-icon svg { width:100%; height:100%; }
       .stepper-note-badge {
@@ -2456,10 +2493,14 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     footerWrap = mainEl && mainEl.parentElement ? Array.from(mainEl.parentElement.querySelectorAll('div')).find(node => { const cls = node.className || ''; return typeof cls === 'string' && cls.includes('max-w-4xl') && cls.includes('mx-auto') && cls.includes('px-3') && cls.includes('pb-10'); }) || null : null;
     if (!tabStrip || !mainEl) return false;
     tabStrip.classList.remove('stepper-tab-strip-scroll');
-    tabStrip.style.maxWidth = '';
-    tabStrip.style.width = '';
-    tabStrip.style.paddingRight = '';
-    tabStrip.style.gap = '';
+    tabStrip.classList.add('stepper-tab-strip-mobile-fix');
+    tabStrip.style.maxWidth = '100%';
+    tabStrip.style.width = '100%';
+    tabStrip.style.paddingRight = '.25rem';
+    tabStrip.style.gap = '.5rem';
+    tabStrip.style.overflowX = 'auto';
+    tabStrip.style.overflowY = 'hidden';
+    tabStrip.style.flexWrap = 'nowrap';
     if (tabStrip.parentElement) tabStrip.parentElement.style.minWidth = '0';
     if (buildBtn && !buildBtn.__stepperScrollWired) {
       buildBtn.__stepperScrollWired = true;
