@@ -5,6 +5,7 @@
   var FRAME_COUNT = 96;
   var FALLBACK_TOTAL_DURATION_MS = 8411;
   var FRAME_FOLDER = './snake-logo-animation-frames';
+  var FRAME_ASSET_VERSION = '20260327-startup-refresh-1';
 
   function resolveAsset(path){
     try {
@@ -14,7 +15,7 @@
   }
 
   function frameSrc(index){
-    return resolveAsset(FRAME_FOLDER + '/wide_frame_' + String(index).padStart(3, '0') + '.png');
+    return resolveAsset(FRAME_FOLDER + '/wide_frame_' + String(index).padStart(3, '0') + '.png?v=' + FRAME_ASSET_VERSION);
   }
 
   function primeFrames(srcs){
