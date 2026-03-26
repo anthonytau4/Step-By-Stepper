@@ -192,6 +192,87 @@
 }
 
 </style>
+
+<style id="stepper-startup-video-overlay-style">
+  .stepper-static-startup__playback{position:relative;}
+  .stepper-static-startup__startup-video{
+    position:absolute;
+    inset:50% auto auto 50%;
+    transform:translate(-50%,-50%);
+    width:min(88vw,620px);
+    height:min(88vw,620px);
+    object-fit:contain;
+    z-index:3;
+    pointer-events:none;
+    filter:drop-shadow(0 28px 60px rgba(0,0,0,.42));
+    background:transparent;
+  }
+  .stepper-static-startup__startup-video.is-done{
+    opacity:0;
+    transition:opacity 220ms ease;
+  }
+  @media (max-width: 900px), (max-height: 860px){
+    .stepper-static-startup__startup-video{
+      width:min(42vw,180px);
+      height:min(42vw,180px);
+    }
+  }
+  @media (max-height: 700px){
+    .stepper-static-startup__startup-video{
+      width:min(34vw,140px);
+      height:min(34vw,140px);
+    }
+  }
+</style>
+<script id="stepper-startup-video-overlay-script">
+(function(){
+  function setupStartupVideo(){
+    var videos = document.querySelectorAll('.stepper-static-startup__startup-video');
+    if (!videos.length) return;
+    videos.forEach(function(video){
+      if (video.dataset.startupBound === '1') return;
+      video.dataset.startupBound = '1';
+      try {
+        if (window.__stepperResolveAssetUrl) {
+          video.src = window.__stepperResolveAssetUrl('./Snake_Logo_Animation_With_Shine.mp4');
+        }
+      } catch (e) {}
+      var finish = function(){
+        video.classList.add('is-done');
+        setTimeout(function(){
+          if (video && video.parentNode) video.parentNode.removeChild(video);
+        }, 260);
+      };
+      video.addEventListener('ended', finish, { once:true });
+      video.addEventListener('error', finish, { once:true });
+      var playAttempt = function(){
+        try {
+          var promise = video.play();
+          if (promise && typeof promise.catch === 'function') {
+            promise.catch(function(){});
+          }
+        } catch (e) {}
+      };
+      playAttempt();
+      var unlock = function(){
+        playAttempt();
+        window.removeEventListener('pointerdown', unlock, true);
+        window.removeEventListener('touchstart', unlock, true);
+        window.removeEventListener('keydown', unlock, true);
+      };
+      window.addEventListener('pointerdown', unlock, true);
+      window.addEventListener('touchstart', unlock, true);
+      window.addEventListener('keydown', unlock, true);
+    });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupStartupVideo);
+  } else {
+    setupStartupVideo();
+  }
+})();
+</script>
+
 </head>
   <body>
 
