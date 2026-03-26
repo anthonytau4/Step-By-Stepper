@@ -40,7 +40,7 @@
   .stepper-static-startup__bg::before,.stepper-static-startup__bg::after{content:'';position:absolute;border-radius:999px;filter:blur(18px);opacity:.5;}
   .stepper-static-startup__bg::before{width:38vmax;height:38vmax;right:-12vmax;top:-10vmax;background:radial-gradient(circle, rgba(79,70,229,.4), rgba(79,70,229,0));}
   .stepper-static-startup__bg::after{width:30vmax;height:30vmax;left:-8vmax;bottom:-10vmax;background:radial-gradient(circle, rgba(34,211,238,.26), rgba(34,211,238,0));}
-  .stepper-static-startup__shell{position:relative;z-index:1;width:min(1200px,100%);min-height:100%;max-height:100svh;display:grid;grid-template-columns:minmax(0,1.08fr) minmax(280px,.92fr);gap:clamp(18px,3vw,40px);align-items:center;padding:clamp(12px,2.4vh,24px);}
+  .stepper-static-startup__shell{position:relative;z-index:1;width:min(1600px,100%);min-height:100%;max-height:100svh;display:grid;grid-template-columns:minmax(0,.72fr) minmax(560px,1.48fr);gap:clamp(12px,3vw,40px);align-items:center;padding:clamp(8px,1.8vh,18px);}
   .stepper-static-startup__card{border-radius:36px;padding:clamp(26px,4vw,42px);background:linear-gradient(180deg, rgba(18,20,28,.84), rgba(10,10,14,.92));border:1px solid rgba(165,180,252,.28);box-shadow:0 30px 100px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.07);backdrop-filter:blur(10px);}
   .stepper-static-startup__kicker{display:inline-flex;align-items:center;gap:10px;margin:0 0 16px;padding:10px 14px;border-radius:999px;font-size:clamp(11px,2vw,13px);font-weight:900;letter-spacing:.22em;text-transform:uppercase;color:rgba(224,231,255,.96);background:rgba(99,102,241,.14);border:1px solid rgba(165,180,252,.2);}
   .stepper-static-startup__title{margin:0;font-size:clamp(40px,7vw,74px);line-height:.92;font-weight:950;letter-spacing:-.05em;text-wrap:balance;}
@@ -52,15 +52,15 @@
   .stepper-static-startup__button{min-width:220px;border:0;border-radius:999px;padding:16px 26px;font-size:16px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:#fff;background:linear-gradient(135deg,#6366f1 0%,#4f46e5 48%,#7c3aed 100%);box-shadow:0 20px 44px rgba(79,70,229,.42);cursor:pointer;}
   .stepper-static-startup__button:active{transform:translateY(1px) scale(.99);}
   .stepper-static-startup__sub{font-size:13px;font-weight:700;letter-spacing:.04em;color:rgba(224,231,255,.82);}
-  .stepper-static-startup__stage{position:relative;min-height:min(74vh,680px);display:flex;align-items:center;justify-content:center;}
-  .stepper-static-startup__stage::before{content:'';position:absolute;width:min(70vw,700px);height:min(70vw,700px);border-radius:50%;background:radial-gradient(circle, rgba(99,102,241,.22) 0%, rgba(99,102,241,.08) 34%, rgba(0,0,0,0) 68%);filter:blur(8px);opacity:.95;}
-  .stepper-static-startup__stage::after{content:'';position:absolute;width:min(60vw,560px);height:min(60vw,560px);border-radius:50%;border:1px solid rgba(165,180,252,.22);box-shadow:inset 0 0 0 1px rgba(255,255,255,.03), 0 0 60px rgba(99,102,241,.16);}
-  .stepper-static-startup__logo{position:relative;z-index:1;width:min(84vw,620px);height:min(84vw,620px);max-width:none;max-height:none;object-fit:contain;filter:drop-shadow(0 28px 60px rgba(0,0,0,.42));transform:scale(.98);opacity:.95;}
+  .stepper-static-startup__stage{position:relative;min-height:min(92vh,1080px);display:flex;align-items:center;justify-content:center;}
+  .stepper-static-startup__stage::before{content:'';position:absolute;width:min(108vw,1320px);height:min(108vw,1320px);border-radius:50%;background:radial-gradient(circle, rgba(99,102,241,.22) 0%, rgba(99,102,241,.08) 34%, rgba(0,0,0,0) 68%);filter:blur(8px);opacity:.95;}
+  .stepper-static-startup__stage::after{content:'';position:absolute;width:min(92vw,1100px);height:min(92vw,1100px);border-radius:50%;border:1px solid rgba(165,180,252,.22);box-shadow:inset 0 0 0 1px rgba(255,255,255,.03), 0 0 60px rgba(99,102,241,.16);}
+  .stepper-static-startup__logo{position:relative;z-index:1;width:min(118vw,1480px);height:min(92vh,1060px);max-width:none;max-height:none;object-fit:contain;filter:drop-shadow(0 28px 60px rgba(0,0,0,.42));transform:scale(.985);opacity:.97;}
   .stepper-static-startup.is-playing .stepper-static-startup__intro{opacity:0;transform:scale(.985);pointer-events:none;}
   .stepper-static-startup__intro{position:absolute;inset:0;display:flex;align-items:stretch;justify-content:center;transition:opacity 200ms ease, transform 200ms ease;overflow-y:auto;}
   .stepper-static-startup__playback{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity 180ms ease;}
   .stepper-static-startup.is-playing .stepper-static-startup__playback{opacity:1;}
-  .stepper-static-startup__playback-logo{width:min(88vw,620px);height:min(88vw,620px);object-fit:contain;filter:drop-shadow(0 28px 60px rgba(0,0,0,.42));}
+  .stepper-static-startup__playback-logo{width:min(118vw,1520px);height:min(96vh,1120px);object-fit:contain;filter:drop-shadow(0 28px 60px rgba(0,0,0,.42));}
   .stepper-static-startup.is-leaving{animation:stepperStaticStartupFade 320ms ease forwards;}
   @keyframes stepperStaticStartupFade{from{opacity:1}to{opacity:0}}
   @media (max-width: 900px), (max-height: 860px){
@@ -75,17 +75,17 @@
     .stepper-static-startup__actions{margin-top:16px;}
     .stepper-static-startup__button{min-width:0;width:100%;max-width:320px;padding:14px 20px;}
     .stepper-static-startup__sub{font-size:12px;}
-    .stepper-static-startup__stage{min-height:min(22vh,180px);max-height:26vh;order:-1;}
-    .stepper-static-startup__stage::before{width:min(54vw,220px);height:min(54vw,220px);}
-    .stepper-static-startup__stage::after{width:min(42vw,180px);height:min(42vw,180px);}
-    .stepper-static-startup__logo,.stepper-static-startup__playback-logo{width:min(42vw,180px);height:min(42vw,180px);}
+    .stepper-static-startup__stage{min-height:min(52vh,460px);max-height:60vh;order:-1;}
+    .stepper-static-startup__stage::before{width:min(104vw,620px);height:min(104vw,620px);}
+    .stepper-static-startup__stage::after{width:min(90vw,520px);height:min(90vw,520px);}
+    .stepper-static-startup__logo,.stepper-static-startup__playback-logo{width:min(98vw,760px);height:min(52vh,460px);}
   }
   @media (max-height: 700px){
     .stepper-static-startup__title{font-size:clamp(26px,8vw,44px);}
     .stepper-static-startup__copy{font-size:13px;line-height:1.4;}
     .stepper-static-startup__kicker{margin-bottom:10px;padding:8px 12px;font-size:11px;}
-    .stepper-static-startup__stage{min-height:110px;max-height:140px;}
-    .stepper-static-startup__logo,.stepper-static-startup__playback-logo{width:min(34vw,140px);height:min(34vw,140px);}
+    .stepper-static-startup__stage{min-height:220px;max-height:300px;}
+    .stepper-static-startup__logo,.stepper-static-startup__playback-logo{width:min(96vw,520px);height:min(42vh,300px);}
   }
 </style>
 <script>
@@ -707,13 +707,13 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   const FADE_MS = 180;
   const TOTAL_MS = GIF_PLAY_MS + HOLD_MS + FADE_MS;
   const CHANGE_MS = GIF_PLAY_MS;
-  const STARTUP_AUDIO_MS = 4064;
+  const STARTUP_AUDIO_MS = 8650;
   const STARTUP_BASE_MS = 1830;
   const STARTUP_MS = Math.max(STARTUP_BASE_MS + 220, STARTUP_AUDIO_MS + 260);
   const overlayId = 'stepper-snake-transition-overlay';
   const transitionGifSrc = window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./stepper_loading_bar_dark_preview.gif') : './stepper_loading_bar_dark_preview.gif';
   const transitionEndFrameSrc = window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./stepper_loading_bar_dark_end.png') : './stepper_loading_bar_dark_end.png';
-  const startupSongSrc = window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./startup-song.m4a') : './startup-song.m4a';
+  const startupSongSrc = window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./startup-song.mp3') : './startup-song.mp3';
   const loadingSongSrc = window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./loading-screen-song.m4a') : './loading-screen-song.m4a';
   const SETTINGS_KEY = 'stepper_sound_settings_v1';
   const TRANSITION_MESSAGE_SETS = {
@@ -1580,6 +1580,8 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     'New: the main pages now have their own web paths like /editor/, /sheet/ and /whats-new/ so each area has a direct link.',
     'New: Settings and Choreography now sit above the editor, keeping the main build tools closer to where the work happens.',
     'New: Choreography surfaces dances built on this device so in-progress work is easier to reach.',
+    'New: the startup snake logo now plays almost full screen, so the intro is much easier to see when you open the app.',
+    'New: the startup song now uses the longer Step By Stepper track, so the intro has more time to play before the app opens.',
     'Fix: pages are less likely to interrupt typing while you work through longer edits.',
     'Fix: Thinking Music no longer keeps restarting itself, the title screen fits short phone screens better, and the page-switch GIF behaves properly on Android.'
   ];

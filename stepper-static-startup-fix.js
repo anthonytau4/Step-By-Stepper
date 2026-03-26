@@ -1,12 +1,13 @@
 (function(){
   if (window.__stepperStaticStartupInstalled) return;
   window.__stepperStaticStartupInstalled = true;
-  const STARTUP_MIN_MS = 3600;
+  const STARTUP_MIN_MS = 8400;
+  const STARTUP_FALLBACK_MS = 9800;
   const STARTUP_FADE_MS = 340;
   const SETTINGS_KEY = 'stepper_sound_settings_v1';
   const STARTUP_AUDIO_SOURCES = [
-    (window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./startup-song.m4a') : './startup-song.m4a'),
-    (window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./startup-song.mp3') : './startup-song.mp3')
+    (window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./startup-song.mp3') : './startup-song.mp3'),
+    (window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./startup-song.m4a') : './startup-song.m4a')
   ];
   function readSettings(){
     try {
@@ -36,6 +37,7 @@
       source.type = type;
       audio.appendChild(source);
     });
+    try { audio.load(); } catch {}
     return audio;
   }
   function init(){
@@ -56,16 +58,22 @@
         splash.remove();
       }, STARTUP_FADE_MS);
     }
+    function getDurationMs(){
+      const duration = Number(audio.duration);
+      if (Number.isFinite(duration) && duration > 0) return Math.max(STARTUP_MIN_MS, Math.round(duration * 1000) + 240);
+      return STARTUP_FALLBACK_MS;
+    }
     function queueLeave(){
-      const durationMs = Number.isFinite(audio.duration) && audio.duration > 0 ? Math.max(STARTUP_MIN_MS, Math.round(audio.duration * 1000) + 180) : STARTUP_MIN_MS;
       if (fallbackTimer) window.clearTimeout(fallbackTimer);
-      fallbackTimer = window.setTimeout(leave, durationMs);
+      fallbackTimer = window.setTimeout(leave, getDurationMs());
     }
     function begin(){
       if (started) return;
       started = true;
       splash.classList.add('is-playing');
       audio.addEventListener('ended', leave, { once: true });
+      audio.addEventListener('loadedmetadata', queueLeave, { once: true });
+      audio.addEventListener('durationchange', queueLeave);
       try {
         audio.pause();
         audio.currentTime = 0;
