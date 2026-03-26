@@ -4,6 +4,7 @@
   const STARTUP_MIN_MS = 8400;
   const STARTUP_FALLBACK_MS = 9800;
   const STARTUP_FADE_MS = 340;
+  const STARTUP_AUDIO_FALLBACK_DURATION_MS = 8411;
   const SETTINGS_KEY = 'stepper_sound_settings_v1';
   const STARTUP_AUDIO_SOURCES = [
     (window.__stepperResolveAssetUrl ? window.__stepperResolveAssetUrl('./startup-song.mp3') : './startup-song.mp3'),
@@ -45,6 +46,11 @@
     if (!splash) return;
     const button = splash.querySelector('.stepper-static-startup__button');
     const audio = buildStartupAudio();
+    window.__stepperStartupAudio = audio;
+    window.__stepperGetStartupAudioDurationMs = function(){
+      const duration = Number(audio.duration);
+      return Number.isFinite(duration) && duration > 0 ? Math.round(duration * 1000) : STARTUP_AUDIO_FALLBACK_DURATION_MS;
+    };
     let started = false;
     let leaving = false;
     let fallbackTimer = null;
