@@ -1422,6 +1422,8 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     'New: right-clicking between steps now shows Split Section Here under Paste, so you can break a section into a brand new section exactly where you clicked.',
     'New: PDF imports now auto-split into new sections every 8 counts, or every 6 counts when the dance is recognised as a waltz.',
     'Fix: Build and Sheet no longer keep hanging around at the top when you open the other in-app tabs.',
+    'New: the Editor now has Undo and Redo icon buttons at the top of the sections, plus Ctrl+Z undo while you work.',
+    'Fix: Sign In, Subscription, Admin, and Moderator now hide the sheet/editor surface properly, and Phrased plus Settings stay visible on the Editor again.',
     'Fix: pages are less likely to interrupt typing while you work through longer edits.',
     'Fix: Thinking Music no longer keeps restarting itself, the title screen fits short phone screens better, and the page-switch GIF behaves properly on Android.'
   ];
@@ -2329,6 +2331,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
 
   function renderInlineEditorPanels(){
     ensureInlineHost();
+    if (typeof renderPhrasedPanel === 'function') renderPhrasedPanel();
     renderChoreographyPanel(CHOREO_PANEL_ID);
     renderSettingsPanel(SETTINGS_PANEL_ID);
     syncInlineHostVisibility();
@@ -2860,6 +2863,8 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     'New: right-clicking between steps now shows Split Section Here under Paste, so you can break a section into a brand new section exactly where you clicked.',
     'New: PDF imports now auto-split into new sections every 8 counts, or every 6 counts when the dance is recognised as a waltz.',
     'Fix: Build and Sheet no longer keep hanging around at the top when you open the other in-app tabs.',
+    'New: the Editor now has Undo and Redo icon buttons at the top of the sections, plus Ctrl+Z undo while you work.',
+    'Fix: Sign In, Subscription, Admin, and Moderator now hide the sheet/editor surface properly, and Phrased plus Settings stay visible on the Editor again.',
     'Fix: pages are less likely to interrupt typing while you work through longer edits.',
     'Fix: Thinking Music no longer keeps restarting itself, the title screen fits short phone screens better, and the page-switch GIF behaves properly on Android.'
   ];
@@ -4513,6 +4518,8 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     'New: right-clicking between steps now shows Split Section Here under Paste, so you can break a section into a brand new section exactly where you clicked.',
     'New: PDF imports now auto-split into new sections every 8 counts, or every 6 counts when the dance is recognised as a waltz.',
     'Fix: Build and Sheet no longer keep hanging around at the top when you open the other in-app tabs.',
+    'New: the Editor now has Undo and Redo icon buttons at the top of the sections, plus Ctrl+Z undo while you work.',
+    'Fix: Sign In, Subscription, Admin, and Moderator now hide the sheet/editor surface properly, and Phrased plus Settings stay visible on the Editor again.',
     'Fix: pages are less likely to interrupt typing while you work through longer edits.',
     'Fix: Thinking Music no longer keeps restarting itself, the title screen fits short phone screens better, and the page-switch GIF behaves properly on Android.'
   ];
@@ -6040,6 +6047,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
 </script>
 
 <script src="./stepper-route-paths.js?v=20260319-paths-phrased-1"></script>
+<script src="../stepper-history-undo-redo.js?v=20260327-undo-redo-1"></script>
 
 <script>window.STEPPER_API_BASE = "https://step-by-stepper.onrender.com";</script>
 <script src="./stepper-google-admin.ai-hardstop.js?v=20260318-db-lockdown-13"></script>

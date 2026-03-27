@@ -550,7 +550,7 @@
       tabStrip.addEventListener('click', (event) => {
         const button = event.target.closest('button');
         if (!button) return;
-        const own = button.id === SIGNIN_TAB_ID || button.id === SUBSCRIPTION_TAB_ID || button.id === ADMIN_TAB_ID;
+        const own = button.id === SIGNIN_TAB_ID || button.id === SUBSCRIPTION_TAB_ID || button.id === ADMIN_TAB_ID || button.id === MODERATOR_TAB_ID;
         if (!own && state.activePage) closePages();
       }, true);
     }
@@ -616,8 +616,8 @@
     host.hidden = false;
     host.style.display = '';
     hideNativeExtraHost();
-    if (state.ui.mainEl) state.ui.mainEl.style.display = '';
-    if (state.ui.footerWrap) state.ui.footerWrap.style.display = ''; // keep native layout stable; extra pages render inline without blanking the app
+    if (state.ui.mainEl) state.ui.mainEl.style.display = 'none';
+    if (state.ui.footerWrap) state.ui.footerWrap.style.display = 'none';
     renderPages();
     updateTabButtons();
     refreshLiveQueues().then(() => {
@@ -2495,8 +2495,8 @@
       if (state.ui.footerWrap) state.ui.footerWrap.style.display = '';
     } else {
       hideNativeExtraHost();
-      if (state.ui.mainEl) state.ui.mainEl.style.display = '';
-      if (state.ui.footerWrap) state.ui.footerWrap.style.display = '';
+      if (state.ui.mainEl) state.ui.mainEl.style.display = 'none';
+      if (state.ui.footerWrap) state.ui.footerWrap.style.display = 'none';
     }
   }
 
