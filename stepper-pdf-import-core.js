@@ -249,6 +249,96 @@
     return hit && text ? `AI helper memory: ${hit.slice(0, 220)}` : '';
   }
 
+
+  function toEditorMarker(step) {
+    const kind = /restart/i.test(String(step && (step.markerType || step.name || step.description || '') || '')) ? 'restart' : 'tag';
+    return {
+      id: makeId(),
+      type: 'marker',
+      markerType: kind,
+      wall: '',
+      showNote: false,
+      note: ''
+    };
+  }
+
+  function toEditorStep(step, fallbackCount) {
+    const foot = normalizeEditorFoot(step && step.foot);
+    return {
+      id: makeId(),
+      type: 'step',
+      count: String(step && (step.count || step.counts) || fallbackCount || '').trim(),
+      counts: String(step && (step.counts || step.count) || fallbackCount || '').trim(),
+      name: String(step && step.name || '').trim(),
+      description: String(step && (step.description || step.name) || '').trim(),
+      foot,
+      weight: foot === 'L' || foot === 'R',
+      showNote: !!(step && step.note),
+      note: String(step && step.note || '').trim()
+    };
+  }
+
+  function parseCountCeiling(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return 0;
+    const matches = [...raw.matchAll(/\d+/g)].map((match) => Number(match[0])).filter(Number.isFinite);
+    return matches.length ? Math.max(...matches) : 0;
+  }
+
+  function autoSectionizeImportedSteps(steps, phraseCounts) {
+    const source = Array.isArray(steps) ? steps.slice() : [];
+    const size = Math.max(1, Number(phraseCounts) || 8);
+    if (!source.length) return [];
+    const sections = [];
+    let current = [];
+    let boundary = size;
+    source.forEach((step, index) => {
+      current.push(step);
+      const countText = String(step && (step.counts || step.count) || '');
+      const ceiling = parseCountCeiling(countText);
+      const reachedBoundary = current.length > 0 && (
+        ceiling >= boundary ||
+        new RegExp('(?:^|\D)' + boundary + '(?:\D|$)').test(countText)
+      );
+      const isLast = index === source.length - 1;
+      if (reachedBoundary || isLast) {
+        sections.push({ id: makeId(), name: '', steps: current.map((item, itemIndex) => toEditorStep(item, itemIndex + 1)) });
+        current = [];
+        boundary += size;
+      }
+    });
+    return sections.filter((section) => Array.isArray(section.steps) && section.steps.length);
+  }
+
+  function buildImportedSections(data, importedSteps) {
+    const phraseCounts = /waltz/i.test(String(data && (data.danceFeel || data.type) || '')) ? 6 : Number(data && data.phraseCounts) || 8;
+    const explicitSections = Array.isArray(data && data.sections) ? data.sections : [];
+    if (explicitSections.length) {
+      let stepCursor = 0;
+      const sections = explicitSections.map((section) => {
+        const rawSteps = Array.isArray(section && section.steps) ? section.steps : [];
+        const mappedSteps = rawSteps.map((rawStep) => {
+          if (rawStep && (rawStep.marker || rawStep.markerType)) return toEditorMarker(rawStep);
+          const source = importedSteps[stepCursor] || rawStep || {};
+          stepCursor += 1;
+          return toEditorStep(source, stepCursor);
+        }).filter(Boolean);
+        return {
+          id: makeId(),
+          name: String(section && (section.title || section.name) || '').trim(),
+          steps: mappedSteps
+        };
+      }).filter((section) => Array.isArray(section.steps) && section.steps.length);
+      if (stepCursor < importedSteps.length) {
+        const tail = importedSteps.slice(stepCursor).map((step, index) => toEditorStep(step, stepCursor + index + 1));
+        if (sections.length) sections[sections.length - 1].steps = sections[sections.length - 1].steps.concat(tail);
+        else sections.push({ id: makeId(), name: '', steps: tail });
+      }
+      return sections;
+    }
+    return autoSectionizeImportedSteps(importedSteps, phraseCounts);
+  }
+
   function buildEditorSnapshot(data) {
     const existing = readEditorSnapshot() || {};
     const meta = Object.assign({}, existing.meta || {}, {
@@ -257,16 +347,19 @@
       music: String(data && data.music || '').trim(),
       level: String(data && data.level || (existing.meta && existing.meta.level) || '').trim(),
       counts: String(data && (data.count || data.counts) || (existing.meta && existing.meta.counts) || '').trim(),
-      walls: String(data && data.wall || (existing.meta && existing.meta.walls) || '').trim()
+      walls: String(data && data.wall || (existing.meta && existing.meta.walls) || '').trim(),
+      type: /waltz/i.test(String(data && (data.danceFeel || data.type) || '')) ? 'waltz' : String(existing.meta && existing.meta.type || '8-count').trim() || '8-count'
     });
     const importedSteps = Array.isArray(data && data.steps) ? data.steps : [];
-    const sections = [{
-      id: makeId(),
-      name: String(data && data.title || 'Imported PDF').trim(),
-      steps: importedSteps.length
-        ? importedSteps
-        : [{ id: makeId(), type: 'step', count: '', name: '', description: '', foot: 'Either', weight: false, showNote: false, note: '' }]
-    }];
+    const sections = buildImportedSections(data, importedSteps);
+    if (!sections.length) {
+      sections.push({
+        id: makeId(),
+        name: String(data && data.title || 'Imported PDF').trim(),
+        steps: [{ id: makeId(), type: 'step', count: '', name: '', description: '', foot: 'Either', weight: false, showNote: false, note: '' }]
+      });
+    }
+    if (sections.length === 1 && !String(sections[0].name || '').trim()) sections[0].name = String(data && data.title || 'Imported PDF').trim();
     return {
       meta,
       sections,
