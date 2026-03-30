@@ -67,28 +67,25 @@
     return raw.endsWith('/') ? raw : raw + '/';
   }
 
-  function inferRouteFromPath(pathname){
-    const path = String(pathname || '/').replace(/\\/g, '/').toLowerCase();
-    const normalized = normalizePath(path);
-    return PATH_TO_ROUTE[path]
-      || PATH_TO_ROUTE[normalized]
-      || (/\/sheet(?:\/index\.html)?\/?$/.test(path) ? 'preview' : null)
-      || (/\/editor(?:\/index\.html)?\/?$/.test(path) ? 'editor' : null)
-      || (/\/whats-new(?:\/index\.html)?\/?$/.test(path) ? 'whatsnew' : null)
-      || (/\/my-saved-dances(?:\/index\.html)?\/?$/.test(path) ? 'saveddances' : null)
-      || (/\/featured-choreo(?:\/index\.html)?\/?$/.test(path) ? 'featured' : null)
-      || null;
+  function isLocalFileRoute(){
+    return String(window.location.protocol || '').toLowerCase() === 'file:';
   }
 
-  function isFileProtocol(){
-    return String(window.location.protocol || '').toLowerCase() === 'file:';
+  function inferRouteFromLoosePath(pathname){
+    const path = normalizePath(String(pathname || '/')).toLowerCase();
+    if (path.includes('/sheet/') || path.endsWith('/sheet/index.html/')) return 'preview';
+    if (path.includes('/whats-new/') || path.endsWith('/whats-new/index.html/')) return 'whatsnew';
+    if (path.includes('/my-saved-dances/') || path.endsWith('/my-saved-dances/index.html/')) return 'saveddances';
+    if (path.includes('/featured-choreo/') || path.endsWith('/featured-choreo/index.html/')) return 'featured';
+    if (path.includes('/editor/') || path.endsWith('/editor/index.html/')) return 'editor';
+    return null;
   }
 
   function currentRouteFromPath(){
     const bootstrap = readBootstrapRoute();
     if (bootstrap) return bootstrap;
     const path = window.location.pathname || '/';
-    return inferRouteFromPath(path);
+    return inferRouteFromLoosePath(path) || PATH_TO_ROUTE[path] || PATH_TO_ROUTE[normalizePath(path)] || null;
   }
 
   function reflectRouteState(routeName){
@@ -98,16 +95,12 @@
   }
 
   function canonicalPathFor(routeName){
-    if (isFileProtocol()) return window.location.pathname || '';
     return ROUTES[routeName] || ROUTES.editor;
   }
 
   function setCanonicalPath(routeName, replace){
     reflectRouteState(routeName);
-    if (isFileProtocol()) {
-      try { history.replaceState({ stepperRoute: routeName }, '', window.location.href); } catch {}
-      return;
-    }
+    if (isLocalFileRoute()) return;
     const target = canonicalPathFor(routeName);
     if (!target) return;
     const current = normalizePath(window.location.pathname || '/');

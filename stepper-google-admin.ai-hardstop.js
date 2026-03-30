@@ -55,6 +55,7 @@
     chatBusy: false,
     chatMessages: [],
     chatDraft: '',
+    chatPending: null,
     lastSyncedSignature: '',
     lastSavedSignature: String(localStorage.getItem(LAST_SAVED_SIGNATURE_KEY) || ''),
     ui: {
@@ -272,6 +273,253 @@
       showNote: !!(step && step.note),
       note: String(step && step.note || '').trim()
     };
+  }
+
+  function compactWhitespace(value){
+    return String(value || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function titleCaseWords(value){
+    return compactWhitespace(value).replace(/\b([a-z])/g, (match, char) => char.toUpperCase());
+  }
+
+  function isCompactViewport(){
+    return window.innerWidth < 980;
+  }
+
+  function getHelperDockTopPx(){
+    const strip = state.ui && state.ui.tabStrip ? state.ui.tabStrip : null;
+    if (strip && strip.getBoundingClientRect) {
+      const rect = strip.getBoundingClientRect();
+      return Math.max(18, Math.round(rect.bottom + 12));
+    }
+    return 96;
+  }
+
+  function placeFloatingHost(host, side){
+    if (!host) return;
+    host.style.position = 'fixed';
+    host.style.top = `${getHelperDockTopPx()}px`;
+    host.style.bottom = 'auto';
+    host.style.left = side === 'left' ? '12px' : 'auto';
+    host.style.right = side === 'right' ? '12px' : 'auto';
+    host.style.zIndex = side === 'right' ? '8700' : '8600';
+    host.style.maxWidth = 'calc(100vw - 24px)';
+  }
+
+  function stabilizeTabStrip(){
+    const strip = state.ui && state.ui.tabStrip ? state.ui.tabStrip : null;
+    if (!strip) return false;
+    const savedLeft = Number(strip.dataset.stepperScrollLeft || strip.scrollLeft || 0) || 0;
+    strip.dataset.stepperUnsmooshed = '1';
+    strip.style.display = 'flex';
+    strip.style.flexWrap = 'nowrap';
+    strip.style.alignItems = 'stretch';
+    strip.style.gap = window.innerWidth < 640 ? '8px' : '10px';
+    strip.style.overflowX = 'auto';
+    strip.style.overflowY = 'hidden';
+    strip.style.webkitOverflowScrolling = 'touch';
+    strip.style.whiteSpace = 'nowrap';
+    strip.style.maxWidth = '100%';
+    strip.style.minWidth = '0';
+    strip.style.width = '100%';
+    strip.style.paddingBottom = '2px';
+    strip.style.scrollbarWidth = 'none';
+    strip.querySelectorAll('button, a, [role="tab"]').forEach((button) => {
+      button.style.flex = '0 0 auto';
+      button.style.minWidth = window.innerWidth < 640 ? '92px' : '104px';
+      button.style.maxWidth = 'none';
+      button.style.whiteSpace = 'nowrap';
+    });
+    if (!strip.__stepperUnsmooshScrollBound) {
+      strip.__stepperUnsmooshScrollBound = true;
+      strip.addEventListener('scroll', () => {
+        strip.dataset.stepperScrollLeft = String(strip.scrollLeft || 0);
+      }, { passive: true });
+    }
+    window.requestAnimationFrame(() => {
+      try { strip.scrollLeft = savedLeft; } catch {}
+    });
+    return true;
+  }
+
+  function extractHelperMeta(text){
+    const source = String(text || '');
+    const meta = {};
+    const titleMatch = source.match(/\b(?:called|named|title(?:d)?|dance name is|name is)\s+"?([^"\n,.!?]+)"?/i);
+    if (titleMatch && titleMatch[1]) meta.title = titleCaseWords(titleMatch[1]);
+    const countsMatch = source.match(/\b(\d{1,3})\s*counts?\b/i);
+    if (countsMatch) meta.counts = String(countsMatch[1]);
+    const wallsMatch = source.match(/\b(\d{1,2})\s*walls?\b/i);
+    if (wallsMatch) {
+      meta.walls = String(wallsMatch[1]);
+      meta.type = `${meta.walls}-Wall`;
+    }
+    const levelMatch = source.match(/\b(beginner|improver|intermediate|advanced)\b/i);
+    if (levelMatch) meta.level = titleCaseWords(levelMatch[1]);
+    return meta;
+  }
+
+  function cleanStepIdeaToken(token){
+    let value = compactWhitespace(token);
+    value = value.replace(/^[\-•*]+\s*/, '');
+    value = value.replace(/^\d+[.)]\s*/, '');
+    value = value.replace(/^(please\s+)?(?:can you\s+)?(?:help me\s+)?(?:add|put in|put|insert|make|create|build|write|give me)\s+/i, '');
+    value = value.replace(/^(?:a|an|the)\s+/i, '');
+    value = value.replace(/\b(?:for the dance|to the dance|into the dance|to the worksheet|into the worksheet|please|thanks|babes)\b/ig, '');
+    return compactWhitespace(value.replace(/[.]+$/g, ''));
+  }
+
+  function splitStepIdeasFromText(text){
+    const source = String(text || '');
+    if (!source.trim()) return [];
+    let candidate = source;
+    const stepsLabelMatch = candidate.match(/\b(?:steps?|sequence|section)\s*[:\-]\s*([\s\S]+)$/i);
+    if (stepsLabelMatch && stepsLabelMatch[1]) candidate = stepsLabelMatch[1];
+    candidate = candidate
+      .replace(/\band then\b/ig, ',')
+      .replace(/\bthen\b/ig, ',')
+      .replace(/\bafter that\b/ig, ',')
+      .replace(/\bnext\b/ig, ',')
+      .replace(/[|]/g, ',');
+    const rawTokens = candidate.split(/[\n;,]+/).map(cleanStepIdeaToken).filter(Boolean);
+    const glossary = Array.isArray(state.glossaryApproved) ? state.glossaryApproved : [];
+    const glossaryMap = new Map(glossary.map((item) => [compactWhitespace(item && item.name).toLowerCase(), item]));
+    const actionWord = /\b(step|rock|recover|vine|grapevine|shuffle|triple|stomp|clap|kick|toe|heel|cross|side|back|forward|turn|pivot|coaster|sailor|weave|mambo|swivel|skate|scuff|brush|hitch|hop|touch|monterey|jazz box|rumba box|charleston|syncopated)\b/i;
+    return rawTokens.map((token) => {
+      const countMatch = token.match(/^(\d+(?:\s*(?:-|to|&)\s*\d+)?)\s*[:.)-]?\s+(.+)$/i);
+      const body = compactWhitespace(countMatch ? countMatch[2] : token);
+      if (!body) return null;
+      const glossaryItem = glossaryMap.get(body.toLowerCase());
+      if (glossaryItem) {
+        return {
+          name: compactWhitespace(glossaryItem.name || body),
+          description: compactWhitespace(glossaryItem.description || glossaryItem.desc || body),
+          count: compactWhitespace(countMatch ? countMatch[1] : (glossaryItem.counts || glossaryItem.count || '1')) || '1',
+          foot: compactWhitespace(glossaryItem.foot || ''),
+          fromGlossary: true
+        };
+      }
+      if (!actionWord.test(body) && rawTokens.length === 1) return null;
+      const count = compactWhitespace(countMatch ? countMatch[1] : '1') || '1';
+      const name = titleCaseWords(body.split(/\s+/).slice(0, 4).join(' '));
+      return {
+        name: name || 'Custom Step',
+        description: compactWhitespace(body),
+        count,
+        foot: '',
+        fromGlossary: false
+      };
+    }).filter(Boolean);
+  }
+
+  function looksLikeDanceBuildPrompt(text){
+    const value = String(text || '').toLowerCase();
+    if (/^\s*(how|where|what|which|why|can i|do i|is there|when)\b/.test(value)) return false;
+    if (!/(add|insert|put|make|create|build|write|start|give me)/.test(value)) return false;
+    if (/(dance|worksheet|section|part|steps?|sequence|count)/.test(value)) return true;
+    return splitStepIdeasFromText(value).length > 0;
+  }
+
+  function currentWorksheetHasSteps(){
+    const data = readAppData();
+    return !!(data && Array.isArray(data.sections) && data.sections.some((section) => Array.isArray(section && section.steps) && section.steps.length));
+  }
+
+  function shouldStartFreshWorksheet(text){
+    const value = String(text || '').toLowerCase();
+    return /\b(new dance|new worksheet|fresh dance|fresh worksheet|start a dance|create a dance|build a dance)\b/.test(value);
+  }
+
+  function applyHelperPlanToWorksheet(plan){
+    if (!plan || !Array.isArray(plan.steps) || !plan.steps.length) return { applied: false, message: '' };
+    let data = ensureAppData();
+    if (shouldStartFreshWorksheet(plan.prompt) && !currentWorksheetHasSteps()) {
+      data = createBlankAppData();
+    }
+    if (!data.meta || typeof data.meta !== 'object') data.meta = createBlankAppData().meta;
+    if (!Array.isArray(data.sections)) data.sections = [];
+    if (!data.sections.length) data.sections.push({ id:createLocalId('section'), name:'Section 1', steps:[] });
+    if (plan.meta && typeof plan.meta === 'object') {
+      if (plan.meta.title) data.meta.title = plan.meta.title;
+      if (plan.meta.counts) data.meta.counts = plan.meta.counts;
+      if (plan.meta.walls) data.meta.walls = plan.meta.walls;
+      if (plan.meta.type) data.meta.type = plan.meta.type;
+      if (plan.meta.level) data.meta.level = plan.meta.level;
+    }
+    let target = data.sections[data.sections.length - 1];
+    const wantsNewSection = /\b(new section|add a section|another section|new part|add a part)\b/i.test(String(plan.prompt || ''));
+    if (!target || wantsNewSection) {
+      target = { id:createLocalId('section'), name:`Section ${data.sections.length + 1}`, steps:[] };
+      data.sections.push(target);
+    }
+    if (!Array.isArray(target.steps)) target.steps = [];
+    plan.steps.forEach((step) => {
+      target.steps.push(buildGlossaryApplyStep(step));
+    });
+    writeAppData(data);
+    updateSavedSignature('');
+    renderPages();
+    openBuildWorksheet();
+    const customCount = plan.steps.filter((step) => !step.fromGlossary).length;
+    const summary = plan.steps.slice(0, 6).map((step) => step.name).join(', ');
+    const bits = [`Done. I added ${plan.steps.length} step${plan.steps.length === 1 ? '' : 's'} to ${target.name}.`];
+    if (plan.meta && plan.meta.title) bits.push(`Dance name set to ${plan.meta.title}.`);
+    if (plan.meta && plan.meta.counts) bits.push(`Counts set to ${plan.meta.counts}.`);
+    if (plan.meta && plan.meta.walls) bits.push(`Walls set to ${plan.meta.walls}.`);
+    if (summary) bits.push(`Added: ${summary}${plan.steps.length > 6 ? ', …' : '.'}`);
+    if (customCount) bits.push(`${customCount} of those step${customCount === 1 ? ' was' : 's were'} added as custom worksheet step${customCount === 1 ? '' : 's'} rather than glossary matches.`);
+    return { applied: true, message: bits.join(' ') };
+  }
+
+  function buildHelperFollowUp(plan){
+    const needs = Array.isArray(plan && plan.needs) ? plan.needs : [];
+    if (!needs.length) return 'Tell me the dance name, counts, walls, and the step pattern you want added.';
+    const labels = {
+      title: 'dance name',
+      counts: 'counts',
+      walls: 'walls',
+      steps: 'step pattern'
+    };
+    const readable = needs.map((key) => labels[key] || key);
+    const joined = readable.length === 1
+      ? readable[0]
+      : `${readable.slice(0, -1).join(', ')} and ${readable[readable.length - 1]}`;
+    return `I can build that, but I still need the ${joined}. Send it like: Name: Midnight Run. Counts: 32. Walls: 4. Steps: vine right, vine left, rock back recover, coaster step.`;
+  }
+
+  function resolveHelperWorksheetIntent(input){
+    const prompt = compactWhitespace(input);
+    if (!prompt) return null;
+    const pending = state.chatPending && state.chatPending.type === 'worksheet-build' ? state.chatPending : null;
+    const mergedPrompt = pending ? compactWhitespace(`${pending.prompt} ${prompt}`) : prompt;
+    const meta = Object.assign({}, pending && pending.meta ? pending.meta : {}, extractHelperMeta(mergedPrompt));
+    const steps = splitStepIdeasFromText(mergedPrompt);
+    const creatingDance = shouldStartFreshWorksheet(mergedPrompt) || /\b(make|create|build)\b.*\bdance\b/i.test(mergedPrompt);
+    const needs = [];
+    if (creatingDance && !meta.title) needs.push('title');
+    if (creatingDance && !meta.counts) needs.push('counts');
+    if (creatingDance && !meta.walls) needs.push('walls');
+    if (!steps.length) needs.push('steps');
+    if (needs.length) {
+      const plan = { type:'worksheet-build', prompt: mergedPrompt, meta, needs };
+      state.chatPending = plan;
+      return { handled: true, message: buildHelperFollowUp(plan), applied: false };
+    }
+    state.chatPending = null;
+    const result = applyHelperPlanToWorksheet({ prompt: mergedPrompt, meta, steps });
+    return { handled: !!result.applied, message: result.message, applied: !!result.applied };
+  }
+
+  function tryHandleSiteHelperLocally(question){
+    const prompt = compactWhitespace(question);
+    const hasPending = !!(state.chatPending && state.chatPending.type === 'worksheet-build');
+    if (!prompt) return null;
+    if (hasPending || looksLikeDanceBuildPrompt(prompt)) {
+      const result = resolveHelperWorksheetIntent(prompt);
+      if (result && result.handled) return result;
+    }
+    return null;
   }
 
 
@@ -665,10 +913,14 @@
       .stepper-google-muted-list { display:grid; gap:.85rem; }
       .stepper-google-member-item { display:flex; align-items:center; justify-content:space-between; gap:1rem; }
       .stepper-google-google-btn > div { display:flex; justify-content:center; }
-      .stepper-extra-tab { min-width: 114px; justify-content:center; font-weight:900; }
+      .stepper-extra-tab { min-width: 108px; justify-content:center; font-weight:900; }
       .dark .stepper-extra-tab { color:#f5f5f5 !important; }
       .stepper-extra-tab-icon svg { width:18px; height:18px; }
-      @media (max-width: 640px) { .stepper-extra-tab { min-width: 104px; } }
+      #stepper-site-helper-host, #stepper-community-glossary-host { max-width: calc(100vw - 24px); }
+      @media (max-width: 980px) {
+        .stepper-extra-tab { min-width: 94px; }
+      }
+      @media (max-width: 640px) { .stepper-extra-tab { min-width: 88px; } }
     `;
     document.head.appendChild(style);
   }
@@ -722,6 +974,7 @@
       }, true);
     }
 
+    stabilizeTabStrip();
     updateAdminTabVisibility();
     updateTabButtons();
     return true;
@@ -1807,13 +2060,10 @@
     if (!host) {
       host = document.createElement('div');
       host.id = 'stepper-community-glossary-host';
-      host.style.position = 'fixed';
-      host.style.left = '14px';
-      host.style.bottom = '18px';
-      host.style.zIndex = '8600';
       document.body.appendChild(host);
     }
-    if (state.activePage || state.chatOpen || window.innerWidth < 900) {
+    placeFloatingHost(host, 'left');
+    if (state.activePage) {
       host.style.display = 'none';
       host.innerHTML = '';
       return;
@@ -1822,7 +2072,7 @@
     if (!state.communityGlossaryOpen) {
       host.innerHTML = `<button type="button" data-open-community-glossary="1" style="border:1px solid rgba(99,102,241,.18);background:#fff;color:#111827;padding:.8rem 1rem;border-radius:999px;font-weight:900;box-shadow:0 12px 30px rgba(0,0,0,.14);">Glossary+</button>`;
       const btn = host.querySelector('[data-open-community-glossary="1"]');
-      if (btn) btn.addEventListener('click', ()=>{ state.communityGlossaryOpen = true; renderCommunityGlossary(); });
+      if (btn) btn.addEventListener('click', ()=>{ if (isCompactViewport()) state.chatOpen = false; state.communityGlossaryOpen = true; renderSiteHelper(); renderCommunityGlossary(); });
       return;
     }
     const items = (state.glossaryApproved || []).slice(0, 18);
@@ -1868,6 +2118,14 @@
   async function askSiteHelper(question){
     const prompt = String(question || '').trim();
     if (!prompt) return;
+    const localHandled = tryHandleSiteHelperLocally(prompt);
+    if (localHandled && localHandled.handled) {
+      state.chatMessages.push({ role:'assistant', text: localHandled.message || 'Done.' });
+      state.chatBusy = false;
+      renderCommunityGlossary();
+      renderSiteHelper();
+      return;
+    }
     state.chatBusy = true;
     renderSiteHelper();
     const currentTab = state.activePage || 'main';
@@ -1915,12 +2173,7 @@
   }
 
   function getSiteHelperTopOffset(){
-    const strip = state.ui && state.ui.tabStrip ? state.ui.tabStrip : null;
-    if (strip && strip.getBoundingClientRect) {
-      const rect = strip.getBoundingClientRect();
-      return `${Math.max(18, Math.round(rect.bottom + 12))}px`;
-    }
-    return '96px';
+    return `${getHelperDockTopPx()}px`;
   }
 
   function ensureSiteHelperHost(){
@@ -1928,11 +2181,6 @@
     if (host) return host;
     host = document.createElement('div');
     host.id = 'stepper-site-helper-host';
-    host.style.position = 'fixed';
-    host.style.right = '14px';
-    host.style.top = getSiteHelperTopOffset();
-    host.style.bottom = 'auto';
-    host.style.zIndex = '8700';
     document.body.appendChild(host);
     return host;
   }
@@ -1941,13 +2189,10 @@
     const activeInput = document.activeElement;
     if (state.chatOpen && activeInput && activeInput.matches && activeInput.matches('[data-chat-input=\"1\"]')) return;
     const host = ensureSiteHelperHost();
-    host.style.right = '14px';
-    host.style.top = getSiteHelperTopOffset();
-    host.style.bottom = 'auto';
-    host.style.zIndex = '8700';
+    placeFloatingHost(host, 'right');
     if (!state.chatOpen) {
       host.innerHTML = `<button type="button" data-chat-open="1" aria-label="Open site helper" style="border:none;background:#4f46e5;color:#fff;width:58px;height:58px;border-radius:999px;font-size:26px;box-shadow:0 12px 30px rgba(0,0,0,.18);">💬</button>`;
-      host.querySelector('[data-chat-open="1"]').addEventListener('click', ()=>{ state.chatOpen = true; renderSiteHelper(); });
+      host.querySelector('[data-chat-open="1"]').addEventListener('click', ()=>{ if (isCompactViewport()) state.communityGlossaryOpen = false; state.chatOpen = true; renderCommunityGlossary(); renderSiteHelper(); });
       return;
     }
     const messages = state.chatMessages.length ? state.chatMessages.slice(-10).map(msg => `<div style="align-self:${msg.role==='user'?'flex-end':'stretch'};max-width:100%;background:${msg.role==='user'?'#4f46e5':'#ffffff'};color:${msg.role==='user'?'#ffffff':'#111827'};border:1px solid rgba(79,70,229,.12);padding:.75rem .85rem;border-radius:18px;font-size:14px;line-height:1.45;box-shadow:0 8px 24px rgba(0,0,0,.08);word-break:break-word;">${escapeHtml(msg.text)}</div>`).join('') : `<div style="font-size:13px;color:#6b7280;background:#ffffff;border:1px dashed rgba(99,102,241,.18);padding:.8rem .9rem;border-radius:16px;">Ask what button to press, where to save, how featuring works, or anything else about the site.</div>`;
