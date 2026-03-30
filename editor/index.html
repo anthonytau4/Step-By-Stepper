@@ -1356,9 +1356,6 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   let featuredBtn = null;
   let settingsBtn = null;
   let dragState = null;
-  let locateUiTimer = 0;
-  let uiObserver = null;
-  let lastTabStripScrollLeft = 0;
   let mainEl = null;
   let footerWrap = null;
   let host = null;
@@ -1366,6 +1363,8 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   let thinkingAudio = null;
   let lastSyncedSignature = '';
   let extraRenderTimer = null;
+  let lastTabStripScrollLeft = 0;
+  let tabRepairQueued = false;
 
   function readAppData(){
     try {
@@ -2371,11 +2370,55 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   }
 
   function scrollButtonIntoView(button){
-    if (!button || typeof button.scrollIntoView !== 'function') return;
-    const inlineMode = window.innerWidth <= 640 ? 'nearest' : 'center';
+    if (!button) return;
+    const strip = (tabStrip && tabStrip.contains(button)) ? tabStrip : (button.parentElement || null);
+    if (!strip) return;
+    const left = button.offsetLeft;
+    const right = left + button.offsetWidth;
+    const currentLeft = strip.scrollLeft || 0;
+    const visibleRight = currentLeft + strip.clientWidth;
+    let nextLeft = currentLeft;
+    if (left < currentLeft + 8) nextLeft = Math.max(0, left - 8);
+    else if (right > visibleRight - 8) nextLeft = Math.max(0, right - strip.clientWidth + 8);
+    if (nextLeft === currentLeft) return;
     try {
-      button.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: inlineMode });
-    } catch {}
+      if (typeof strip.scrollTo === 'function') strip.scrollTo({ left: nextLeft, behavior: 'smooth' });
+      else strip.scrollLeft = nextLeft;
+    } catch {
+      strip.scrollLeft = nextLeft;
+    }
+  }
+
+  function wireTabStripScrollMemory(){
+    if (!tabStrip || tabStrip.__stepperScrollMemoryWired) return;
+    tabStrip.__stepperScrollMemoryWired = true;
+    lastTabStripScrollLeft = tabStrip.scrollLeft || 0;
+    tabStrip.addEventListener('scroll', () => {
+      lastTabStripScrollLeft = tabStrip ? (tabStrip.scrollLeft || 0) : lastTabStripScrollLeft;
+    }, { passive: true });
+  }
+
+  function restoreTabStripScroll(){
+    if (!tabStrip) return;
+    const max = Math.max(0, (tabStrip.scrollWidth || 0) - (tabStrip.clientWidth || 0));
+    const nextLeft = Math.max(0, Math.min(lastTabStripScrollLeft || 0, max));
+    if (Math.abs((tabStrip.scrollLeft || 0) - nextLeft) < 1) return;
+    tabStrip.scrollLeft = nextLeft;
+  }
+
+  function scheduleTabRepair(){
+    if (tabRepairQueued) return;
+    tabRepairQueued = true;
+    const runner = () => {
+      tabRepairQueued = false;
+      const ready = locateUi();
+      if (!ready) return;
+      wireTabStripScrollMemory();
+      restoreTabStripScroll();
+      updateButtonState();
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(runner);
+    else setTimeout(runner, 16);
   }
 
   function openExtraPage(pageName, button){
@@ -2440,19 +2483,8 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       .stepper-setting-icon { display:inline-flex; align-items:center; justify-content:center; width:1.4rem; height:1.4rem; flex:0 0 auto; }
       .stepper-extra-tab { min-width: 0; flex: 0 0 auto; }
       .stepper-extra-tab-label--short { display: none; }
-      .stepper-tab-controls-mobile-fix {
-        flex: 1 1 auto !important;
-        min-width: 0 !important;
-        max-width: 100% !important;
-        width: 100% !important;
-        overflow: hidden !important;
-      }
-      .stepper-tab-controls-mobile-fix > button {
-        flex: 0 0 auto;
-      }
       .stepper-tab-strip-mobile-fix {
         display: flex !important;
-        flex: 1 1 auto !important;
         flex-wrap: nowrap !important;
         overflow-x: auto !important;
         overflow-y: hidden !important;
@@ -2461,25 +2493,16 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
         touch-action: pan-x;
         scrollbar-width: thin;
         gap: .5rem !important;
-        max-width: none !important;
-        width: auto !important;
-        min-width: 0 !important;
-        padding-right: .25rem !important;
-        scroll-padding-inline: .25rem;
+        max-width: 100%;
+        min-width: 0;
+        padding-right: .35rem !important;
+        scroll-behavior: smooth;
+        scroll-padding-inline: .5rem;
       }
       .stepper-tab-strip-mobile-fix::-webkit-scrollbar { height: 6px; }
       .stepper-tab-strip-mobile-fix::-webkit-scrollbar-thumb { background: rgba(148,163,184,.45); border-radius: 999px; }
-      .stepper-tab-strip-edge-spacer {
-        display: block;
-        flex: 0 0 .5rem;
-        width: .5rem;
-        height: 1px;
-        pointer-events: none;
-      }
+      .stepper-tab-strip-mobile-fix > * { flex: 0 0 auto; }
       @media (max-width: 640px) {
-        .stepper-tab-controls-mobile-fix {
-          gap: .35rem !important;
-        }
         .stepper-extra-tab {
           padding: .55rem .7rem !important;
           gap: .4rem !important;
@@ -2492,10 +2515,6 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
         }
         .stepper-extra-tab-label--full { display: none; }
         .stepper-extra-tab-label--short { display: inline; }
-        .stepper-tab-strip-edge-spacer {
-          flex-basis: .75rem;
-          width: .75rem;
-        }
       }
       .stepper-extra-tab-icon svg,
       .stepper-setting-icon svg { width:100%; height:100%; }
@@ -2592,42 +2611,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     }, true);
   }
 
-
-  function ensureTabStripEdgeSpacer(){
-    if (!tabStrip) return;
-    let spacer = tabStrip.querySelector('.stepper-tab-strip-edge-spacer');
-    if (!spacer) {
-      spacer = document.createElement('span');
-      spacer.className = 'stepper-tab-strip-edge-spacer';
-      spacer.setAttribute('aria-hidden', 'true');
-    }
-    if (tabStrip.lastElementChild !== spacer) tabStrip.appendChild(spacer);
-  }
-
-  function scheduleLocateUi(delay = 0){
-    window.clearTimeout(locateUiTimer);
-    locateUiTimer = window.setTimeout(() => {
-      locateUi();
-      injectWhatsNewNotes();
-      syncInlineHostVisibility();
-    }, delay);
-  }
-
-  function ensureUiObserver(){
-    if (uiObserver || typeof MutationObserver !== 'function' || !document.body) return;
-    uiObserver = new MutationObserver((mutations) => {
-      for (const mutation of mutations) {
-        if (mutation.type !== 'childList') continue;
-        if (!mutation.addedNodes.length && !mutation.removedNodes.length) continue;
-        scheduleLocateUi(60);
-        break;
-      }
-    });
-    uiObserver.observe(document.body, { childList: true, subtree: true });
-  }
-
   function locateUi(){
-    if (tabStrip && typeof tabStrip.scrollLeft === 'number') lastTabStripScrollLeft = tabStrip.scrollLeft;
     buildBtn = Array.from(document.querySelectorAll('button')).find(btn => (btn.textContent || '').trim() === 'Build') || null;
     sheetBtn = Array.from(document.querySelectorAll('button')).find(btn => (btn.textContent || '').trim() === 'Sheet') || null;
     whatsNewBtn = Array.from(document.querySelectorAll('button')).find(btn => (btn.textContent || '').trim() === "What's New") || null;
@@ -2635,32 +2619,19 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     mainEl = document.querySelector('main');
     footerWrap = mainEl && mainEl.parentElement ? Array.from(mainEl.parentElement.querySelectorAll('div')).find(node => { const cls = node.className || ''; return typeof cls === 'string' && cls.includes('max-w-4xl') && cls.includes('mx-auto') && cls.includes('px-3') && cls.includes('pb-10'); }) || null : null;
     if (!tabStrip || !mainEl) return false;
-    const controlsWrap = tabStrip.parentElement;
     tabStrip.classList.remove('stepper-tab-strip-scroll');
     tabStrip.classList.add('stepper-tab-strip-mobile-fix');
-    tabStrip.style.maxWidth = 'none';
-    tabStrip.style.width = 'auto';
     tabStrip.style.flex = '1 1 auto';
-    tabStrip.style.minWidth = '0';
-    tabStrip.style.paddingRight = '.25rem';
+    tabStrip.style.maxWidth = '100%';
+    tabStrip.style.width = '';
+    tabStrip.style.paddingRight = '.35rem';
     tabStrip.style.gap = '.5rem';
     tabStrip.style.overflowX = 'auto';
     tabStrip.style.overflowY = 'hidden';
     tabStrip.style.flexWrap = 'nowrap';
-    tabStrip.style.overscrollBehaviorX = 'contain';
     tabStrip.style.touchAction = 'pan-x';
-    if (controlsWrap) {
-      controlsWrap.classList.add('stepper-tab-controls-mobile-fix');
-      controlsWrap.style.minWidth = '0';
-      controlsWrap.style.flex = '1 1 auto';
-      controlsWrap.style.width = '100%';
-      controlsWrap.style.maxWidth = '100%';
-      controlsWrap.style.overflow = 'hidden';
-      Array.from(controlsWrap.children).forEach(child => {
-        if (child === tabStrip) return;
-        child.style.flex = '0 0 auto';
-      });
-    }
+    if (tabStrip.parentElement) tabStrip.parentElement.style.minWidth = '0';
+    wireTabStripScrollMemory();
     if (buildBtn && !buildBtn.__stepperScrollWired) {
       buildBtn.__stepperScrollWired = true;
       buildBtn.addEventListener('click', () => scrollButtonIntoView(buildBtn));
@@ -2703,21 +2674,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     settingsBtn = null;
     ensureHost();
     ensureInlineHost();
-    ensureTabStripEdgeSpacer();
-    wireStripDragScroll();
     wireNativeTabClose();
-    if (!tabStrip.__stepperScrollMemoryWired) {
-      const strip = tabStrip;
-      strip.__stepperScrollMemoryWired = true;
-      strip.addEventListener('scroll', () => {
-        lastTabStripScrollLeft = strip.scrollLeft;
-      }, { passive: true });
-    }
-    window.requestAnimationFrame(() => {
-      if (tabStrip && Math.abs(tabStrip.scrollLeft - lastTabStripScrollLeft) > 1) {
-        tabStrip.scrollLeft = lastTabStripScrollLeft;
-      }
-    });
     renderExtraPages();
     return true;
   }
@@ -2727,7 +2684,6 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     ensureAudioPatch();
     applyThinkingMusic();
     saveFeaturedSnapshot();
-    ensureUiObserver();
 
     const primeStartupPanels = () => {
       const ready = locateUi();
@@ -2738,6 +2694,33 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
 
     primeStartupPanels();
 
+    if (!document.body.__stepperTabRepairObserver) {
+      const observer = new MutationObserver((mutations) => {
+        const relevant = mutations.some((mutation) => {
+          const nodes = [mutation.target, ...(mutation.addedNodes || []), ...(mutation.removedNodes || [])];
+          return nodes.some((node) => {
+            const el = node && node.nodeType === 1 ? node : null;
+            if (!el) return false;
+            if (el.id === 'stepper-extra-page-host' || el.id === INLINE_HOST_ID) return false;
+            if (typeof el.closest === 'function' && (el.closest('#stepper-extra-page-host') || el.closest('#' + INLINE_HOST_ID))) return false;
+            if (typeof el.matches === 'function' && el.matches('[role="tablist"]')) return true;
+            if (typeof el.querySelector === 'function' && el.querySelector('[role="tablist"]')) return true;
+            const text = (el.textContent || '').trim();
+            return /(^|\b)(Build|Sheet|What'?s New)(\b|$)/.test(text);
+          });
+        });
+        if (relevant) scheduleTabRepair();
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+      document.body.__stepperTabRepairObserver = observer;
+    }
+
+    if (!window.__stepperTabRepairResizeWired) {
+      window.__stepperTabRepairResizeWired = true;
+      window.addEventListener('resize', scheduleTabRepair);
+      window.addEventListener('orientationchange', scheduleTabRepair);
+    }
+
     let tries = 0;
     const timer = setInterval(() => {
       tries += 1;
@@ -2746,7 +2729,6 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       if (tries > 40) clearInterval(timer);
     }, 500);
     setInterval(() => {
-      locateUi();
       saveFeaturedSnapshot();
       applyThinkingMusic();
       scheduleRenderExtraPages(2000);
@@ -2754,15 +2736,12 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       syncInlineHostVisibility();
     }, 1800);
     window.addEventListener('storage', () => {
-      locateUi();
       saveFeaturedSnapshot();
       applyThinkingMusic();
       scheduleRenderExtraPages(2000);
       injectWhatsNewNotes();
       syncInlineHostVisibility();
     });
-    window.addEventListener('resize', () => scheduleLocateUi(80), { passive: true });
-    window.addEventListener('orientationchange', () => scheduleLocateUi(120), { passive: true });
   }
 
   if (document.readyState === 'loading') {
@@ -4384,7 +4363,6 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     ensureAudioPatch();
     applyThinkingMusic();
     saveFeaturedSnapshot();
-    ensureUiObserver();
 
     const primeStartupPanels = () => {
       const ready = locateUi();
@@ -4395,6 +4373,33 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
 
     primeStartupPanels();
 
+    if (!document.body.__stepperTabRepairObserver) {
+      const observer = new MutationObserver((mutations) => {
+        const relevant = mutations.some((mutation) => {
+          const nodes = [mutation.target, ...(mutation.addedNodes || []), ...(mutation.removedNodes || [])];
+          return nodes.some((node) => {
+            const el = node && node.nodeType === 1 ? node : null;
+            if (!el) return false;
+            if (el.id === 'stepper-extra-page-host' || el.id === INLINE_HOST_ID) return false;
+            if (typeof el.closest === 'function' && (el.closest('#stepper-extra-page-host') || el.closest('#' + INLINE_HOST_ID))) return false;
+            if (typeof el.matches === 'function' && el.matches('[role="tablist"]')) return true;
+            if (typeof el.querySelector === 'function' && el.querySelector('[role="tablist"]')) return true;
+            const text = (el.textContent || '').trim();
+            return /(^|\b)(Build|Sheet|What'?s New)(\b|$)/.test(text);
+          });
+        });
+        if (relevant) scheduleTabRepair();
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+      document.body.__stepperTabRepairObserver = observer;
+    }
+
+    if (!window.__stepperTabRepairResizeWired) {
+      window.__stepperTabRepairResizeWired = true;
+      window.addEventListener('resize', scheduleTabRepair);
+      window.addEventListener('orientationchange', scheduleTabRepair);
+    }
+
     let tries = 0;
     const timer = setInterval(() => {
       tries += 1;
@@ -4403,7 +4408,6 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       if (tries > 40) clearInterval(timer);
     }, 500);
     setInterval(() => {
-      locateUi();
       saveFeaturedSnapshot();
       applyThinkingMusic();
       scheduleRenderExtraPages(2000);
@@ -4411,15 +4415,12 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       syncInlineHostVisibility();
     }, 1800);
     window.addEventListener('storage', () => {
-      locateUi();
       saveFeaturedSnapshot();
       applyThinkingMusic();
       scheduleRenderExtraPages(2000);
       injectWhatsNewNotes();
       syncInlineHostVisibility();
     });
-    window.addEventListener('resize', () => scheduleLocateUi(80), { passive: true });
-    window.addEventListener('orientationchange', () => scheduleLocateUi(120), { passive: true });
   }
 
   if (document.readyState === 'loading') {
@@ -6058,50 +6059,6 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
 <script>window.STEPPER_API_BASE = "https://step-by-stepper.onrender.com";</script>
 <script src="./stepper-google-admin.ai-hardstop.js?v=20260318-db-lockdown-13"></script>
 
-
-<script id="android-tab-unsmoosh-patch">
-(function () {
-  function patchStrip(strip) {
-    if (!strip || strip.dataset.unsmooshed === '1') return;
-    strip.dataset.unsmooshed = '1';
-    strip.style.display = 'flex';
-    strip.style.flexWrap = 'nowrap';
-    strip.style.overflowX = 'auto';
-    strip.style.overflowY = 'hidden';
-    strip.style.webkitOverflowScrolling = 'touch';
-    strip.style.gap = '8px';
-    strip.style.whiteSpace = 'nowrap';
-    Array.from(strip.children).forEach(function (el) {
-      el.style.flex = '0 0 auto';
-      el.style.minWidth = 'max-content';
-      el.style.width = 'auto';
-      el.style.maxWidth = 'none';
-    });
-    strip.querySelectorAll('a,button,.tab,[role="tab"]').forEach(function (el) {
-      el.style.flex = '0 0 auto';
-      el.style.minWidth = 'max-content';
-      el.style.width = 'auto';
-      el.style.whiteSpace = 'nowrap';
-    });
-  }
-  function patchAll() {
-    var selectors = [
-      '.tab-strip','.tabs-strip','.top-tabs','.nav-tabs','.main-tabs','.extra-tabs','.tab-row',
-      '[data-tab-strip]','[role="tablist"]'
-    ];
-    selectors.forEach(function (sel) {
-      document.querySelectorAll(sel).forEach(patchStrip);
-    });
-  }
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', patchAll);
-  } else {
-    patchAll();
-  }
-  window.addEventListener('resize', patchAll);
-  setTimeout(patchAll, 300);
-})();
-</script>
 
 </body>
 </html>
