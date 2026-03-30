@@ -67,11 +67,28 @@
     return raw.endsWith('/') ? raw : raw + '/';
   }
 
+  function inferRouteFromPath(pathname){
+    const path = String(pathname || '/').replace(/\\/g, '/').toLowerCase();
+    const normalized = normalizePath(path);
+    return PATH_TO_ROUTE[path]
+      || PATH_TO_ROUTE[normalized]
+      || (/\/sheet(?:\/index\.html)?\/?$/.test(path) ? 'preview' : null)
+      || (/\/editor(?:\/index\.html)?\/?$/.test(path) ? 'editor' : null)
+      || (/\/whats-new(?:\/index\.html)?\/?$/.test(path) ? 'whatsnew' : null)
+      || (/\/my-saved-dances(?:\/index\.html)?\/?$/.test(path) ? 'saveddances' : null)
+      || (/\/featured-choreo(?:\/index\.html)?\/?$/.test(path) ? 'featured' : null)
+      || null;
+  }
+
+  function isFileProtocol(){
+    return String(window.location.protocol || '').toLowerCase() === 'file:';
+  }
+
   function currentRouteFromPath(){
     const bootstrap = readBootstrapRoute();
     if (bootstrap) return bootstrap;
     const path = window.location.pathname || '/';
-    return PATH_TO_ROUTE[path] || PATH_TO_ROUTE[normalizePath(path)] || null;
+    return inferRouteFromPath(path);
   }
 
   function reflectRouteState(routeName){
@@ -81,11 +98,16 @@
   }
 
   function canonicalPathFor(routeName){
+    if (isFileProtocol()) return window.location.pathname || '';
     return ROUTES[routeName] || ROUTES.editor;
   }
 
   function setCanonicalPath(routeName, replace){
     reflectRouteState(routeName);
+    if (isFileProtocol()) {
+      try { history.replaceState({ stepperRoute: routeName }, '', window.location.href); } catch {}
+      return;
+    }
     const target = canonicalPathFor(routeName);
     if (!target) return;
     const current = normalizePath(window.location.pathname || '/');

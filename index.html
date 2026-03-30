@@ -1524,8 +1524,6 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   let thinkingAudio = null;
   let lastSyncedSignature = '';
   let extraRenderTimer = null;
-  let lastTabStripScrollLeft = 0;
-  let tabRepairQueued = false;
 
   function readAppData(){
     try {
@@ -2532,55 +2530,10 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   }
 
   function scrollButtonIntoView(button){
-    if (!button) return;
-    const strip = (tabStrip && tabStrip.contains(button)) ? tabStrip : (button.parentElement || null);
-    if (!strip) return;
-    const left = button.offsetLeft;
-    const right = left + button.offsetWidth;
-    const currentLeft = strip.scrollLeft || 0;
-    const visibleRight = currentLeft + strip.clientWidth;
-    let nextLeft = currentLeft;
-    if (left < currentLeft + 8) nextLeft = Math.max(0, left - 8);
-    else if (right > visibleRight - 8) nextLeft = Math.max(0, right - strip.clientWidth + 8);
-    if (nextLeft === currentLeft) return;
+    if (!button || typeof button.scrollIntoView !== 'function') return;
     try {
-      if (typeof strip.scrollTo === 'function') strip.scrollTo({ left: nextLeft, behavior: 'smooth' });
-      else strip.scrollLeft = nextLeft;
-    } catch {
-      strip.scrollLeft = nextLeft;
-    }
-  }
-
-  function wireTabStripScrollMemory(){
-    if (!tabStrip || tabStrip.__stepperScrollMemoryWired) return;
-    tabStrip.__stepperScrollMemoryWired = true;
-    lastTabStripScrollLeft = tabStrip.scrollLeft || 0;
-    tabStrip.addEventListener('scroll', () => {
-      lastTabStripScrollLeft = tabStrip ? (tabStrip.scrollLeft || 0) : lastTabStripScrollLeft;
-    }, { passive: true });
-  }
-
-  function restoreTabStripScroll(){
-    if (!tabStrip) return;
-    const max = Math.max(0, (tabStrip.scrollWidth || 0) - (tabStrip.clientWidth || 0));
-    const nextLeft = Math.max(0, Math.min(lastTabStripScrollLeft || 0, max));
-    if (Math.abs((tabStrip.scrollLeft || 0) - nextLeft) < 1) return;
-    tabStrip.scrollLeft = nextLeft;
-  }
-
-  function scheduleTabRepair(){
-    if (tabRepairQueued) return;
-    tabRepairQueued = true;
-    const runner = () => {
-      tabRepairQueued = false;
-      const ready = locateUi();
-      if (!ready) return;
-      wireTabStripScrollMemory();
-      restoreTabStripScroll();
-      updateButtonState();
-    };
-    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(runner);
-    else setTimeout(runner, 16);
+      button.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+    } catch {}
   }
 
   function openExtraPage(pageName, button){
@@ -2651,19 +2604,15 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
         overflow-x: auto !important;
         overflow-y: hidden !important;
         -webkit-overflow-scrolling: touch;
-        overscroll-behavior-x: contain;
-        touch-action: pan-x;
         scrollbar-width: thin;
         gap: .5rem !important;
         max-width: 100%;
+        width: 100%;
         min-width: 0;
-        padding-right: .35rem !important;
-        scroll-behavior: smooth;
-        scroll-padding-inline: .5rem;
+        padding-right: .25rem !important;
       }
       .stepper-tab-strip-mobile-fix::-webkit-scrollbar { height: 6px; }
       .stepper-tab-strip-mobile-fix::-webkit-scrollbar-thumb { background: rgba(148,163,184,.45); border-radius: 999px; }
-      .stepper-tab-strip-mobile-fix > * { flex: 0 0 auto; }
       @media (max-width: 640px) {
         .stepper-extra-tab {
           padding: .55rem .7rem !important;
@@ -2783,17 +2732,14 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     if (!tabStrip || !mainEl) return false;
     tabStrip.classList.remove('stepper-tab-strip-scroll');
     tabStrip.classList.add('stepper-tab-strip-mobile-fix');
-    tabStrip.style.flex = '1 1 auto';
     tabStrip.style.maxWidth = '100%';
-    tabStrip.style.width = '';
-    tabStrip.style.paddingRight = '.35rem';
+    tabStrip.style.width = '100%';
+    tabStrip.style.paddingRight = '.25rem';
     tabStrip.style.gap = '.5rem';
     tabStrip.style.overflowX = 'auto';
     tabStrip.style.overflowY = 'hidden';
     tabStrip.style.flexWrap = 'nowrap';
-    tabStrip.style.touchAction = 'pan-x';
     if (tabStrip.parentElement) tabStrip.parentElement.style.minWidth = '0';
-    wireTabStripScrollMemory();
     if (buildBtn && !buildBtn.__stepperScrollWired) {
       buildBtn.__stepperScrollWired = true;
       buildBtn.addEventListener('click', () => scrollButtonIntoView(buildBtn));
@@ -2856,33 +2802,6 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
 
     primeStartupPanels();
 
-    if (!document.body.__stepperTabRepairObserver) {
-      const observer = new MutationObserver((mutations) => {
-        const relevant = mutations.some((mutation) => {
-          const nodes = [mutation.target, ...(mutation.addedNodes || []), ...(mutation.removedNodes || [])];
-          return nodes.some((node) => {
-            const el = node && node.nodeType === 1 ? node : null;
-            if (!el) return false;
-            if (el.id === 'stepper-extra-page-host' || el.id === INLINE_HOST_ID) return false;
-            if (typeof el.closest === 'function' && (el.closest('#stepper-extra-page-host') || el.closest('#' + INLINE_HOST_ID))) return false;
-            if (typeof el.matches === 'function' && el.matches('[role="tablist"]')) return true;
-            if (typeof el.querySelector === 'function' && el.querySelector('[role="tablist"]')) return true;
-            const text = (el.textContent || '').trim();
-            return /(^|\b)(Build|Sheet|What'?s New)(\b|$)/.test(text);
-          });
-        });
-        if (relevant) scheduleTabRepair();
-      });
-      observer.observe(document.body, { childList: true, subtree: true });
-      document.body.__stepperTabRepairObserver = observer;
-    }
-
-    if (!window.__stepperTabRepairResizeWired) {
-      window.__stepperTabRepairResizeWired = true;
-      window.addEventListener('resize', scheduleTabRepair);
-      window.addEventListener('orientationchange', scheduleTabRepair);
-    }
-
     let tries = 0;
     const timer = setInterval(() => {
       tries += 1;
@@ -2928,7 +2847,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
 <script src="./stepper-runtime-recovery.js?v=20260320-recovery-6"></script>
 <script src="./stepper-static-startup-fix.js?v=20260320-startup-fix-6"></script>
 <script src="./stepper-phrased-tools-fix.js?v=20260319-phrased-fix-1"></script>
-<script src="./stepper-route-paths.js?v=20260320-paths-2"></script>
+<script src="./stepper-route-paths.js?v=20260331-android-file-fix-1"></script>
 <script src="./stepper-editor-phrasing-repair.js?v=20260320-phrasing-repair-2"></script>
 
 <script>
