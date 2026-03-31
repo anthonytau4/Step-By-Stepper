@@ -79,3 +79,39 @@ The Python service exposes:
 - `POST /parse`
 
 When `PDF_PARSER_URL` exists, `backend/server.mjs` will call the Python service for PDF text extraction instead of spawning local Python.
+
+
+## Controlled Python worksheet builder
+
+The site helper can now use a controlled Python worker for dance-building requests.
+This is for structured worksheet edits only — not arbitrary shell access.
+
+New endpoint:
+- `POST /api/ai/worksheet-builder`
+
+What it does:
+- reads the helper prompt plus the current worksheet snapshot
+- follows up when name/counts/walls/steps are missing
+- returns structured worksheet changes such as meta updates and step inserts
+- writes descriptions for custom steps when they are not in the glossary
+
+### Deploying it on Render with Python enabled
+
+If you want the helper to use the Python worker reliably, run the backend through the FastAPI wrapper in `backend/server.py`.
+That wrapper starts the Node API as a subprocess and keeps Python available for the worksheet builder and PDF tools.
+
+Suggested Render backend service root: `backend/`
+
+**Build Command**
+```bash
+npm install && python3 -m pip install -r requirements.txt
+```
+
+**Start Command**
+```bash
+./render-start.sh
+```
+
+Optional environment variables:
+- `PYTHON_BIN=python3`
+- `AI_STEP_HELPER_URL=` if you later move the worksheet builder to a separate Python service

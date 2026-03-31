@@ -1252,6 +1252,36 @@ function parseJsonFromAiText(text) {
 }
 
 
+
+async function runWorksheetBuilderPython(payload = {}) {
+  const helperUrl = String(process.env.AI_STEP_HELPER_URL || '').trim().replace(/\/$/, '');
+  if (helperUrl) {
+    const response = await fetch(`${helperUrl}/plan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const raw = await response.text();
+    let data = null;
+    try { data = raw ? JSON.parse(raw) : null; } catch { data = null; }
+    if (!response.ok) {
+      const message = String(data?.error || raw || `Worksheet helper failed (${response.status}).`).trim();
+      const error = new Error(message || 'Worksheet helper failed.');
+      error.status = response.status;
+      throw error;
+    }
+    return data || {};
+  }
+  const pythonBin = String(process.env.PYTHON_BIN || 'python3').trim() || 'python3';
+  const scriptPath = path.join(__dirname, 'ai_step_helper.py');
+  const { stdout } = await execFileAsync(pythonBin, [scriptPath], {
+    input: JSON.stringify(payload || {}),
+    maxBuffer: 5 * 1024 * 1024,
+    timeout: 12000,
+  });
+  return JSON.parse(String(stdout || '{}'));
+}
+
 function buildFallbackCountLines(dance) {
   const sections = Array.isArray(dance?.snapshot?.data?.sections) ? dance.snapshot.data.sections : [];
   const lines = [];
@@ -1707,226 +1737,6 @@ function fallbackDanceTool(mode, dance, prompt) {
     countLines: [],
     totalCounts: ''
   };
-}
-
-function helperCompactWhitespace(value) {
-  return String(value || '').replace(/\s+/g, ' ').trim();
-}
-
-function helperTitleCaseWords(value) {
-  return helperCompactWhitespace(value).replace(/\b([a-z])/g, (_match, char) => char.toUpperCase());
-}
-
-function helperNormalizeCountLabel(value) {
-  return helperCompactWhitespace(String(value || '')
-    .replace(/\bto\b/ig, '-')
-    .replace(/\s*&\s*/g, '&')
-    .replace(/\s*\-\s*/g, '-')
-    .replace(/\s+/g, ' ')
-  ).replace(/^[,;:\-\s]+|[,;:\-\s]+$/g, '');
-}
-
-function helperExtractCountFromToken(token) {
-  const value = helperCompactWhitespace(token);
-  if (!value) return { body: '', count: '' };
-  const leading = value.match(/^((?:\d+|&)(?:\s*(?:-|to|&)\s*(?:\d+|&))+|\d+)\s*[:.)-]?\s+(.+)$/i);
-  if (leading) return { count: helperNormalizeCountLabel(leading[1]), body: helperCompactWhitespace(leading[2]) };
-  const labelled = value.match(/^(.+?)\s+counts?\s*[:\-]?\s*((?:\d+|&)(?:\s*(?:-|to|&)\s*(?:\d+|&))+|\d+)$/i);
-  if (labelled) return { body: helperCompactWhitespace(labelled[1]), count: helperNormalizeCountLabel(labelled[2]) };
-  const trailing = value.match(/^(.+?)\s+((?:\d+|&)(?:\s*(?:-|to|&)\s*(?:\d+|&))+|\d+)$/i);
-  if (trailing && /\b(x\d+|\d+x|walk|run|step|touch|tap|rock|recover|vine|grapevine|shuffle|triple|coaster|sailor|mambo|pivot|turn|weave|kick|brush|scuff|stomp|heel|toe|cross|side|back|forward|charleston|jazz box|rumba box)\b/i.test(trailing[1])) {
-    return { body: helperCompactWhitespace(trailing[1]), count: helperNormalizeCountLabel(trailing[2]) };
-  }
-  return { body: value, count: '' };
-}
-
-function helperExtractMeta(text) {
-  const source = String(text || '');
-  const meta = {};
-  const titleLabelMatch = source.match(/\b(?:called|named|title(?:d)?|dance name is|name is|name\s*:)\s+"?([^"\n,.!?]+)"?/i);
-  const callThisMatch = source.match(/\bcall (?:this|the dance)\s+"?([^"\n,.!?]+)"?/i);
-  const titleValue = titleLabelMatch?.[1] || callThisMatch?.[1] || '';
-  if (titleValue) meta.title = helperTitleCaseWords(titleValue);
-  const countsMatch = source.match(/\b(\d{1,3})\s*counts?\b/i);
-  if (countsMatch) meta.counts = String(countsMatch[1]);
-  const wallsMatch = source.match(/\b(\d{1,2})\s*(?:wall|walls)\b/i);
-  const hyphenWallMatch = source.match(/\b(\d{1,2})\s*\-\s*wall\b/i);
-  const wallValue = wallsMatch?.[1] || hyphenWallMatch?.[1] || '';
-  if (wallValue) {
-    meta.walls = String(wallValue);
-    meta.type = `${meta.walls}-Wall`;
-  }
-  const levelMatch = source.match(/\b(beginner|improver|intermediate|advanced)\b/i);
-  if (levelMatch) meta.level = helperTitleCaseWords(levelMatch[1]);
-  return meta;
-}
-
-function helperCleanStepToken(token) {
-  let value = helperCompactWhitespace(token);
-  value = value.replace(/^[\-•*]+\s*/, '');
-  value = value.replace(/^\d+[.)]\s*/, '');
-  value = value.replace(/^(?:please\s+)?(?:can you\s+)?(?:could you\s+)?(?:help me\s+)?(?:add|put in|put|insert|make|create|build|write|give me|do)\s+/i, '');
-  value = value.replace(/^(?:a|an|the)\s+/i, '');
-  value = value.replace(/\b(?:for the dance|to the dance|into the dance|to the worksheet|into the worksheet|on the worksheet|please|thanks|thank you|babes)\b/ig, '');
-  value = value.replace(/^steps?\s*[:\-]\s*/i, '');
-  value = value.replace(/[“”]/g, '"');
-  return helperCompactWhitespace(value.replace(/[.]+$/g, ''));
-}
-
-function buildHelperGlossaryLookup(glossarySteps = []) {
-  const lookup = new Map();
-  for (const item of Array.isArray(glossarySteps) ? glossarySteps : []) {
-    if (!item || typeof item !== 'object') continue;
-    const keys = new Set();
-    const name = helperCompactWhitespace(item.name || '').toLowerCase();
-    if (name) keys.add(name);
-    for (const tag of String(item.tags || '').split(/[;,]/).map(part => helperCompactWhitespace(part).toLowerCase()).filter(Boolean)) {
-      keys.add(tag);
-    }
-    for (const key of keys) {
-      if (!lookup.has(key)) lookup.set(key, item);
-    }
-  }
-  return lookup;
-}
-
-function helperBuildCustomStepName(body) {
-  const safe = helperCompactWhitespace(body).replace(/^"|"$/g, '');
-  return helperTitleCaseWords(safe.split(/\s+/).slice(0, 6).join(' ')) || 'Custom Step';
-}
-
-function helperSplitStepIdeas(text, glossarySteps = []) {
-  const source = String(text || '');
-  if (!source.trim()) return [];
-  let candidate = source;
-  const stepsLabelMatch = candidate.match(/\b(?:steps?|sequence|section)\s*[:\-]\s*([\s\S]+)$/i);
-  if (stepsLabelMatch?.[1]) candidate = stepsLabelMatch[1];
-  candidate = candidate
-    .replace(/\b(?:called|named|dance name is|name is|name\s*:|call this|call the dance)\b[^,;\n]*/ig, ' ')
-    .replace(/\b\d{1,3}\s*counts?\b/ig, ' ')
-    .replace(/\b\d{1,2}\s*(?:wall|walls)\b/ig, ' ')
-    .replace(/\b(beginner|improver|intermediate|advanced)\b/ig, ' ')
-    .replace(/\band then\b/ig, ',')
-    .replace(/\bthen\b/ig, ',')
-    .replace(/\bafter that\b/ig, ',')
-    .replace(/\bnext\b/ig, ',')
-    .replace(/[|]/g, ',');
-  const rawTokens = candidate.split(/[\n;,]+/).map(helperCleanStepToken).filter(Boolean);
-  const glossaryLookup = buildHelperGlossaryLookup(glossarySteps);
-  const actionWord = /\b(step|walk|run|rock|recover|vine|grapevine|shuffle|triple|stomp|clap|kick|toe|heel|cross|side|back|forward|turn|pivot|coaster|sailor|weave|mambo|swivel|skate|scuff|brush|hitch|hop|touch|tap|slide|drag|monterey|jazz box|rumba box|charleston|syncopated)\b/i;
-  return rawTokens.map((token) => {
-    const parsed = helperExtractCountFromToken(token);
-    const body = helperCleanStepToken(parsed.body || token);
-    if (!body) return null;
-    const glossaryItem = glossaryLookup.get(body.toLowerCase());
-    if (glossaryItem) {
-      return {
-        name: helperCompactWhitespace(glossaryItem.name || body),
-        description: helperCompactWhitespace(glossaryItem.description || glossaryItem.desc || body),
-        count: helperNormalizeCountLabel(parsed.count || glossaryItem.counts || glossaryItem.count || '1') || '1',
-        foot: helperCompactWhitespace(glossaryItem.foot || ''),
-        fromGlossary: true
-      };
-    }
-    if (!actionWord.test(body) && !/\bx\d+\b|\d+x\b/i.test(body) && rawTokens.length === 1) return null;
-    return {
-      name: helperBuildCustomStepName(body),
-      description: helperCompactWhitespace(body),
-      count: helperNormalizeCountLabel(parsed.count || '1') || '1',
-      foot: '',
-      fromGlossary: false
-    };
-  }).filter(Boolean);
-}
-
-function helperLooksLikeDanceBuildPrompt(text) {
-  const value = String(text || '').toLowerCase();
-  if (/^\s*(how|where|what|which|why|can i|do i|is there|when)\b/.test(value)) return false;
-  if (/(?:name|called|named|counts?|walls?|level)\b/.test(value) && /(set|change|update|make|call|rename)/.test(value)) return true;
-  if (!/(add|insert|put|make|create|build|write|start|give me|set|change|update|rename|call)/.test(value)) return false;
-  if (/(dance|worksheet|section|part|steps?|sequence|count|walls?|level)/.test(value)) return true;
-  return helperSplitStepIdeas(value).length > 0;
-}
-
-function helperShouldStartFreshWorksheet(text) {
-  const value = String(text || '').toLowerCase();
-  return /\b(new dance|new worksheet|fresh dance|fresh worksheet|start a dance|create a dance|build a dance)\b/.test(value);
-}
-
-function helperCurrentDanceHasSteps(context = {}) {
-  const data = context && typeof context.currentDanceData === 'object' ? context.currentDanceData : null;
-  return !!(data && Array.isArray(data.sections) && data.sections.some(section => Array.isArray(section?.steps) && section.steps.length));
-}
-
-function helperCurrentMeta(context = {}) {
-  const data = context && typeof context.currentDanceData === 'object' ? context.currentDanceData : null;
-  const meta = data && typeof data.meta === 'object' ? data.meta : {};
-  return {
-    title: helperCompactWhitespace(meta.title || ''),
-    counts: helperCompactWhitespace(meta.counts || ''),
-    walls: helperCompactWhitespace(meta.walls || ''),
-    type: helperCompactWhitespace(meta.type || ''),
-    level: helperCompactWhitespace(meta.level || '')
-  };
-}
-
-function helperBuildFollowUp(plan) {
-  const needs = Array.isArray(plan?.needs) ? plan.needs : [];
-  if (!needs.length) return 'Tell me the dance name, counts, walls, and the step pattern you want added.';
-  const labels = { title: 'dance name', counts: 'counts', walls: 'walls', steps: 'step pattern', level: 'level' };
-  const readable = needs.map(key => labels[key] || key);
-  const joined = readable.length === 1 ? readable[0] : `${readable.slice(0, -1).join(', ')} and ${readable[readable.length - 1]}`;
-  return `I can build that, but I still need the ${joined}. Send it like: Name: Midnight Run. Counts: 32. Walls: 4. Steps: walk x3 with a touch 1-2-3-4, rock back recover 5-6, coaster step 7&8.`;
-}
-
-function helperBuildApplySummary(plan = {}) {
-  const bits = [];
-  const steps = Array.isArray(plan.steps) ? plan.steps : [];
-  if (steps.length) {
-    const customCount = steps.filter(step => !step?.fromGlossary).length;
-    const summary = steps.slice(0, 6).map(step => step?.name).filter(Boolean).join(', ');
-    bits.push(`Done. I prepared ${steps.length} step${steps.length === 1 ? '' : 's'} for the worksheet.`);
-    if (summary) bits.push(`Added: ${summary}${steps.length > 6 ? ', …' : '.'}`);
-    if (customCount) bits.push(`${customCount} of those step${customCount === 1 ? ' was' : 's were'} treated as custom worksheet steps rather than glossary matches.`);
-  }
-  if (plan.meta?.title) bits.push(`Dance name set to ${plan.meta.title}.`);
-  if (plan.meta?.counts) bits.push(`Counts set to ${plan.meta.counts}.`);
-  if (plan.meta?.walls) bits.push(`Walls set to ${plan.meta.walls}.`);
-  if (plan.meta?.level) bits.push(`Level set to ${plan.meta.level}.`);
-  return bits.join(' ') || 'Done.';
-}
-
-function resolveHelperDanceAction({ prompt, pendingPlan, context = {}, glossarySteps = [] } = {}) {
-  const cleanPrompt = helperCompactWhitespace(prompt);
-  const pending = pendingPlan && typeof pendingPlan === 'object' && String(pendingPlan.type || '').trim() === 'worksheet-build' ? pendingPlan : null;
-  if (!cleanPrompt) return null;
-  if (!pending && !helperLooksLikeDanceBuildPrompt(cleanPrompt)) return null;
-  const mergedPrompt = pending ? helperCompactWhitespace(`${pending.prompt || ''} ${cleanPrompt}`) : cleanPrompt;
-  const freshDance = helperShouldStartFreshWorksheet(mergedPrompt);
-  const creatingDance = freshDance || /\b(make|create|build|start)\b.*\bdance\b/i.test(mergedPrompt) || (!helperCurrentDanceHasSteps(context) && /\b(add|insert|put)\b.*\bstep/.test(mergedPrompt));
-  const extractedMeta = helperExtractMeta(mergedPrompt);
-  const meta = {
-    ...(!freshDance ? helperCurrentMeta(context) : {}),
-    ...(pending?.meta && typeof pending.meta === 'object' ? pending.meta : {}),
-    ...extractedMeta
-  };
-  for (const key of Object.keys(meta)) {
-    if (!helperCompactWhitespace(meta[key])) delete meta[key];
-  }
-  const steps = helperSplitStepIdeas(mergedPrompt, glossarySteps);
-  const hasMetaOnlyRequest = Object.keys(extractedMeta).length > 0 && !steps.length;
-  const needs = [];
-  if (creatingDance && !meta.title) needs.push('title');
-  if (creatingDance && !meta.counts) needs.push('counts');
-  if (creatingDance && !meta.walls) needs.push('walls');
-  if (!steps.length && !hasMetaOnlyRequest) needs.push('steps');
-  if (needs.length) {
-    const plan = { type: 'worksheet-build', prompt: mergedPrompt, meta, needs };
-    const text = helperBuildFollowUp(plan);
-    return { text, action: { type: 'pending-worksheet-build', prompt: mergedPrompt, meta, needs, text } };
-  }
-  const text = helperBuildApplySummary({ prompt: mergedPrompt, meta, steps });
-  return { text, action: { type: 'apply-worksheet-build', prompt: mergedPrompt, meta, steps, text } };
 }
 
 const SITE_HELP_CONTEXT = `You are the Step By Stepper site helper. Keep answers short, practical, and human. Only answer about using this site.
@@ -2926,6 +2736,45 @@ app.delete('/api/admin/site-memory/:id', requireAdmin, async (req, res) => {
   res.json({ ok:true, items: db.siteMemory });
 });
 
+
+app.post('/api/ai/worksheet-builder', requireGoogleUser, async (req, res) => {
+  const prompt = String(req.body?.prompt || '').trim();
+  const history = Array.isArray(req.body?.history) ? req.body.history : [];
+  const pending = req.body?.pending && typeof req.body.pending === 'object' ? req.body.pending : null;
+  const dance = req.body?.dance && typeof req.body.dance === 'object' ? req.body.dance : null;
+  const approvedGlossary = Array.isArray(req.body?.approvedGlossary) ? req.body.approvedGlossary : [];
+  const db = await readDb();
+  const key = userKeyFromClaims(req.stepperClaims);
+  const bucket = touchUser(db, req.stepperUser, key);
+  await writeDb(db);
+  if (!isPremiumUser(bucket, req.stepperUser)) {
+    return res.status(402).json({ ok:false, error:'Premium subscription required for the AI site helper.' });
+  }
+  if (!prompt) {
+    return res.status(400).json({ ok:false, error:'Missing prompt.' });
+  }
+  try {
+    const glossary = approvedGlossary.length
+      ? approvedGlossary
+      : (Array.isArray(db.approvedGlossarySteps) ? db.approvedGlossarySteps : []).slice(0, 200).map(item => ({
+          id: item.id,
+          name: item.name,
+          description: item.description,
+          desc: item.desc,
+          counts: item.counts,
+          count: item.count,
+          foot: item.foot,
+        }));
+    const result = await runWorksheetBuilderPython({ prompt, history, pending, dance, approvedGlossary: glossary });
+    if (!result || typeof result !== 'object') {
+      return res.status(502).json({ ok:false, error:'Worksheet builder returned no usable data.' });
+    }
+    res.json({ ok:true, ...result });
+  } catch (error) {
+    res.status(error.status || 502).json({ ok:false, error: error.message || 'Worksheet builder failed.' });
+  }
+});
+
 app.post('/api/ai/dance-tools', requireGoogleUser, async (req, res) => {
   const requestedMode = String(req.body?.mode || 'judge').trim().toLowerCase();
   const mode = requestedMode === 'add' ? 'add' : (requestedMode === 'counts' ? 'counts' : 'judge');
@@ -2971,12 +2820,7 @@ ${approved.map(item => `- ${item.name} [${item.foot}] ${item.counts}: ${item.des
 
 app.post('/api/chatbot/help', requireGoogleUser, async (req, res) => {
   const prompt = String(req.body?.prompt || '').trim();
-  const baseContext = req.body?.context && typeof req.body.context === 'object' ? req.body.context : {};
-  const currentDanceData = req.body?.currentDanceData && typeof req.body.currentDanceData === 'object'
-    ? req.body.currentDanceData
-    : (baseContext.currentDanceData && typeof baseContext.currentDanceData === 'object' ? baseContext.currentDanceData : null);
-  const pendingPlan = req.body?.pendingPlan && typeof req.body.pendingPlan === 'object' ? req.body.pendingPlan : null;
-  const context = { ...baseContext, currentDanceData };
+  const context = req.body?.context && typeof req.body.context === 'object' ? req.body.context : {};
   const history = Array.isArray(req.body?.history) ? req.body.history : [];
   const preferredModel = String(req.body?.preferredModel || 'gemini').trim().toLowerCase();
   const db = await readDb();
@@ -2994,13 +2838,8 @@ app.post('/api/chatbot/help', requireGoogleUser, async (req, res) => {
     text: String(item?.text || '').trim().slice(0, 2000)
   })).filter(item => item.text);
   try {
-    const approvedGlossary = (Array.isArray(db.approvedGlossarySteps) ? db.approvedGlossarySteps : []).slice(0, 160);
-    const structured = resolveHelperDanceAction({ prompt, pendingPlan, context, glossarySteps: approvedGlossary });
-    if (structured && structured.action) {
-      return res.json({ ok:true, text: structured.text, action: structured.action, mode: 'structured' });
-    }
     const learnedNotes = (Array.isArray(db.siteMemory) ? db.siteMemory : []).slice(0, 30).map(item => `- ${String(item?.text || '').trim()}`).filter(Boolean).join('\n') || '(none)';
-    const glossarySteps = approvedGlossary.map(item => `- ${item.name} [${item.foot || 'Either'}] ${item.counts || '1'}: ${item.description || ''}`).filter(Boolean).join('\n') || '(none)';
+    const glossarySteps = (Array.isArray(db.approvedGlossarySteps) ? db.approvedGlossarySteps : []).slice(0, 80).map(item => `- ${item.name} [${item.foot || 'Either'}] ${item.counts || '1'}: ${item.description || ''}`).filter(Boolean).join('\n') || '(none)';
     const system = `${SITE_HELP_CONTEXT}\nReply like a natural AI helper for the Step By Stepper site. Be specific, warm, and practical. Use the conversation history when it matters, and do not keep repeating the exact same canned answer.\nAdmin-approved helper memory:\n${learnedNotes}\nCommunity glossary dance steps (use these when building or suggesting dance steps):\n${glossarySteps}`;
     const userPrompt = `Current tab: ${context.currentTab || 'unknown'}
 Signed in: ${context.signedIn ? 'yes' : 'no'}

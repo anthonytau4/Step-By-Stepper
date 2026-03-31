@@ -434,7 +434,8 @@
   function applyHelperPlanToWorksheet(plan){
     if (!plan || !Array.isArray(plan.steps) || !plan.steps.length) return { applied: false, message: '' };
     let data = ensureAppData();
-    if (shouldStartFreshWorksheet(plan.prompt) && !currentWorksheetHasSteps()) {
+    const forceFresh = !!(plan && plan.resetDance);
+    if ((forceFresh || shouldStartFreshWorksheet(plan.prompt)) && !currentWorksheetHasSteps()) {
       data = createBlankAppData();
     }
     if (!data.meta || typeof data.meta !== 'object') data.meta = createBlankAppData().meta;
@@ -448,7 +449,7 @@
       if (plan.meta.level) data.meta.level = plan.meta.level;
     }
     let target = data.sections[data.sections.length - 1];
-    const wantsNewSection = /\b(new section|add a section|another section|new part|add a part)\b/i.test(String(plan.prompt || ''));
+    const wantsNewSection = !!(plan && plan.createSection) || /\b(new section|add a section|another section|new part|add a part)\b/i.test(String(plan.prompt || ''));
     if (!target || wantsNewSection) {
       target = { id:createLocalId('section'), name:`Section ${data.sections.length + 1}`, steps:[] };
       data.sections.push(target);
@@ -520,6 +521,41 @@
       if (result && result.handled) return result;
     }
     return null;
+  }
+
+  async function tryHandleSiteHelperWithBackend(question){
+    const prompt = compactWhitespace(question);
+    const hasPending = !!(state.chatPending && state.chatPending.type === 'worksheet-build');
+    if (!prompt) return null;
+    if (!(hasPending || looksLikeDanceBuildPrompt(prompt))) return null;
+    try {
+      const data = await authFetch('/api/ai/worksheet-builder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt,
+          history: (state.chatMessages || []).slice(-8).map((message) => ({ role: message.role, text: message.text })),
+          pending: state.chatPending,
+          dance: buildCurrentDanceEntry(),
+          approvedGlossary: (state.glossaryApproved || []).slice(0, 200),
+        })
+      });
+      if (data && data.pending && typeof data.pending === 'object') state.chatPending = data.pending;
+      else if (data && !data.needsFollowUp) state.chatPending = null;
+      if (data && data.applyNow) {
+        const applied = applyHelperPlanToWorksheet({
+          prompt,
+          meta: data.meta,
+          steps: Array.isArray(data.steps) ? data.steps : [],
+          resetDance: !!data.resetDance,
+          createSection: !!data.createSection,
+        });
+        return { handled: true, message: applied.message || String(data.reply || 'Done.').trim(), applied: true };
+      }
+      return { handled: true, message: String((data && data.reply) || 'Tell me the dance name, counts, walls, and the step pattern you want added.').trim(), applied: false };
+    } catch (_error) {
+      return tryHandleSiteHelperLocally(prompt);
+    }
   }
 
 
@@ -3976,11 +4012,15 @@ Newest user question: ${question}`;
       } else if (!(payload.context.isPremium || payload.context.isModerator || payload.context.isAdmin)) {
         text = 'Premium or moderator access is needed for the AI helper. Open Subscription to upgrade, or apply for moderator from the top of the Sign In tab.';
       } else {
+        const builderHandled = await tryHandleSiteHelperWithBackend(prompt);
+        if (builderHandled && builderHandled.handled) {
+          text = String(builderHandled.message || 'Done.').trim();
+        }
         const loweredPrompt = prompt.toLowerCase();
-        const wantsDanceJudge = /\b(judge|score|rate|flow|flowability|clunky|smooth)\b/.test(loweredPrompt) && /\b(dance|sheet|worksheet|routine|choreo|choreography)\b/.test(loweredPrompt);
-        const wantsDanceAdd = /\b(add|generate|suggest|improve|fix|tidy)\b/.test(loweredPrompt) && /\b(step|steps|dance|sheet|worksheet|routine|choreo|choreography|glossary)\b/.test(loweredPrompt);
+        const wantsDanceJudge = !text && /\b(judge|score|rate|flow|flowability|clunky|smooth)\b/.test(loweredPrompt) && /\b(dance|sheet|worksheet|routine|choreo|choreography)\b/.test(loweredPrompt);
+        const wantsDanceAdd = !text && /\b(add|generate|suggest|improve|fix|tidy)\b/.test(loweredPrompt) && /\b(step|steps|dance|sheet|worksheet|routine|choreo|choreography|glossary)\b/.test(loweredPrompt);
         const danceToolMode = wantsDanceAdd ? 'add' : (wantsDanceJudge ? 'judge' : '');
-        if (danceToolMode) {
+        if (!text && danceToolMode) {
           const dance = buildCurrentDanceEntry();
           if (!dance) {
             text = 'Build or load a dance first, then ask me to judge it or add glossary-style ideas.';
@@ -4007,6 +4047,7 @@ Newest user question: ${question}`;
             }
           }
         }
+
         if (!text && !helperError) {
           try {
             const data = await authFetch('/api/chatbot/help', {
