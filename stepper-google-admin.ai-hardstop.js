@@ -370,10 +370,360 @@
     return compactWhitespace(value.replace(/[.]+$/g, ''));
   }
 
+  function localHelperNumberWord(value){
+    const map = { 0:'zero', 1:'one', 2:'two', 3:'three', 4:'four', 5:'five', 6:'six', 7:'seven', 8:'eight', 9:'nine', 10:'ten', 11:'eleven', 12:'twelve' };
+    const num = Number(String(value || '').trim());
+    return Number.isFinite(num) && map[num] ? map[num] : String(value || '').trim();
+  }
+
+  function normalizeLocalMotionText(text){
+    const words = { zero:'0', one:'1', two:'2', three:'3', four:'4', five:'5', six:'6', seven:'7', eight:'8', nine:'9', ten:'10', eleven:'11', twelve:'12' };
+    let value = compactWhitespace(String(text || '').toLowerCase());
+    Object.entries(words).forEach(([word, num]) => {
+      value = value.replace(new RegExp(`\\b${word}\\b`, 'g'), num);
+    });
+    value = value
+      .replace(/\bfoward\b/g, 'forward')
+      .replace(/\bforwards\b/g, 'forward')
+      .replace(/\bfwd\b/g, 'forward')
+      .replace(/\bbackwards\b/g, 'back')
+      .replace(/\bbackward\b/g, 'back')
+      .replace(/\bto the side\b/g, 'side')
+      .replace(/\bwith a touch\b/g, 'with touch');
+    return compactWhitespace(value);
+  }
+
+  function flipLocalFoot(value){
+    const foot = compactWhitespace(value).toUpperCase();
+    if (foot === 'R') return 'L';
+    if (foot === 'L') return 'R';
+    return '';
+  }
+
+  function getLocalExpectedStartFoot(){
+    const data = readAppData();
+    const sections = Array.isArray(data && data.sections) ? data.sections : [];
+    let lastWeightFoot = '';
+    sections.forEach((section) => {
+      const steps = Array.isArray(section && section.steps) ? section.steps : [];
+      steps.forEach((step) => {
+        if (!step || typeof step !== 'object') return;
+        if (step.weight === false) return;
+        const foot = compactWhitespace(step.foot || '').toUpperCase();
+        if (foot === 'R' || foot === 'L') lastWeightFoot = foot;
+      });
+    });
+    return flipLocalFoot(lastWeightFoot);
+  }
+
+  function parseLocalRepeatedWalk(body){
+    const source = normalizeLocalMotionText(body);
+    const patterns = [
+      /^walk\s*(?:x\s*)?(\d+)\s*(?:times?)?\s*(forward|back|left|right|side)?(?:\s+with\s+touch)?$/i,
+      /^walk\s+(\d+)\s*(?:times?)?\s*(forward|back|left|right|side)?(?:\s+with\s+touch)?$/i,
+      /^walk\s+(forward|back|left|right|side)\s+(\d+)\s*(?:times?)?(?:\s+with\s+touch)?$/i,
+      /^(\d+)\s+walks?\s+(forward|back|left|right|side)(?:\s+with\s+touch)?$/i,
+      /^walk\s*x\s*(\d+)\s+with\s+touch$/i,
+    ];
+    for (const pattern of patterns) {
+      const match = source.match(pattern);
+      if (!match) continue;
+      if (/^walk\s*x\s*(\d+)\s+with\s+touch$/i.test(source)) {
+        return { repeats:Number(match[1]), direction:'forward', touch:true };
+      }
+      if (/^walk\s+(forward|back|left|right|side)\s+(\d+)/i.test(source)) {
+        return { repeats:Number(match[2]), direction:compactWhitespace(match[1] || 'forward') || 'forward', touch:/\bwith\s+touch\b/i.test(source) };
+      }
+      if (/^(\d+)\s+walks?\s+(forward|back|left|right|side)/i.test(source)) {
+        return { repeats:Number(match[1]), direction:compactWhitespace(match[2] || 'forward') || 'forward', touch:/\bwith\s+touch\b/i.test(source) };
+      }
+      return { repeats:Number(match[1]), direction:compactWhitespace(match[2] || 'forward') || 'forward', touch:/\bwith\s+touch\b/i.test(source) };
+    }
+    return null;
+  }
+
+  function extractExplicitLocalStepName(text){
+    const source = String(text || '');
+    const match = source.match(/\b(?:step called|step named|name the step|call the step|step name\s*[:=-])\s+"?([^"\n,.!?]+)"?/i);
+    return match && match[1] ? titleCaseWords(match[1]) : '';
+  }
+
+  function extractLocalStepCountLabel(text){
+    const source = compactWhitespace(text);
+    const match = source.match(/\b(?:counts?\s*[:=-]\s*|(?:use|put|set|on)\s+counts?\s+)?((?:\d+\s*[&,-]\s*)+\d+|\d+\s*&\s*\d+)\b/i);
+    return match && match[1] ? compactWhitespace(String(match[1]).replace(/\bto\b/ig, '-')) : '';
+  }
+
+  function inferLocalStepCount(body){
+    const lowered = normalizeLocalMotionText(body);
+    const repeatedWalk = parseLocalRepeatedWalk(lowered);
+    if (repeatedWalk) return `1-${Number(repeatedWalk.repeats) + (repeatedWalk.touch ? 1 : 0)}`;
+    if (/\b(?:grapevine|vine)\b/.test(lowered)) return '1-4';
+    if (/rock\s+back(?:,|\s+)recover/.test(lowered)) return '1-2';
+    if (/\b(?:coaster|sailor|shuffle|triple step|triple|chasse|kick ball change|mambo)\b/.test(lowered)) return '1&2';
+    if (/\b(?:jazz box|rumba box|monterey|charleston)\b/.test(lowered)) return '1-4';
+    if (/\b(?:step touch|side touch|touch side|heel touch|toe touch|tap touch|step tap|pivot)\b/.test(lowered)) return '1-2';
+    return '';
+  }
+
+  function inferLocalStepName(body, explicitName){
+    if (explicitName) return { name:titleCaseWords(explicitName), confident:true };
+    const source = normalizeLocalMotionText(body);
+    if (!source) return { name:'', confident:false };
+    const repeatedWalk = parseLocalRepeatedWalk(source);
+    if (repeatedWalk) {
+      const direction = repeatedWalk.direction ? titleCaseWords(repeatedWalk.direction) : 'Forward';
+      return { name:`Walk ${direction} x${repeatedWalk.repeats}${repeatedWalk.touch ? ' with a Touch' : ''}`, confident:true };
+    }
+    const patterns = [
+      [/^(?:grapevine|vine)\s+(right|left)$/i, (m) => ({ name:`Grapevine ${titleCaseWords(m[1])}`, confident:true })],
+      [/^rock\s+back(?:,|\s+)recover$/i, () => ({ name:'Rock Back Recover', confident:true })],
+      [/^coaster(?:\s+step)?$/i, () => ({ name:'Coaster Step', confident:true })],
+      [/^sailor(?:\s+step)?$/i, () => ({ name:'Sailor Step', confident:true })],
+      [/^jazz\s+box$/i, () => ({ name:'Jazz Box', confident:true })],
+      [/^rumba\s+box$/i, () => ({ name:'Rumba Box', confident:true })],
+      [/^kick\s+ball\s+change$/i, () => ({ name:'Kick Ball Change', confident:true })],
+      [/^step\s+touch$/i, () => ({ name:'Step Touch', confident:true })],
+      [/^side\s+touch$/i, () => ({ name:'Side Touch', confident:true })],
+      [/^step\s+lock\s+step$/i, () => ({ name:'Step Lock Step', confident:true })],
+      [/^shuffle\s+(forward|back|left|right)$/i, (m) => ({ name:`Shuffle ${titleCaseWords(m[1])}`, confident:true })],
+      [/^pivot(?:\s+\d+)?(?:\s*(?:1\/4|1\/2|1\/8|quarter|half))?\s*(left|right)?$/i, () => ({ name:'Pivot Turn', confident:true })],
+    ];
+    for (const [pattern, builder] of patterns) {
+      const match = source.match(pattern);
+      if (match) return builder(match);
+    }
+    if (source.split(/\s+/).length <= 6 && /\b(step|rock|recover|vine|grapevine|shuffle|triple|stomp|clap|kick|toe|heel|cross|side|back|forward|turn|pivot|coaster|sailor|weave|mambo|swivel|skate|scuff|brush|hitch|hop|touch|monterey|jazz|rumba|charleston|syncopated|walk|lock)\b/i.test(source)) {
+      return { name:titleCaseWords(source).replace(/\bX(\d+)\b/g, 'x$1'), confident:true };
+    }
+    return { name:'', confident:false };
+  }
+
+  function buildLocalWalkSequence(repeats, direction, startFoot){
+    const dir = compactWhitespace(direction || 'forward') || 'forward';
+    const list = [];
+    for (let index = 0; index < Number(repeats || 0); index += 1) {
+      let footLabel = '';
+      if (startFoot === 'R' || startFoot === 'L') {
+        const foot = index % 2 === 0 ? startFoot : flipLocalFoot(startFoot);
+        footLabel = foot === 'R' ? 'right' : 'left';
+      } else {
+        footLabel = index % 2 === 0 ? 'right/left' : 'left/right';
+      }
+      if (dir === 'back') list.push(`step ${footLabel} back`);
+      else if (dir === 'left') list.push(`step ${footLabel} left`);
+      else if (dir === 'right') list.push(`step ${footLabel} right`);
+      else if (dir === 'side') list.push(`step ${footLabel} to the side`);
+      else list.push(`step ${footLabel} forward`);
+    }
+    return list.join(', ');
+  }
+
+  function localWeightChangeCount(body, count){
+    const source = normalizeLocalMotionText(body);
+    const repeatedWalk = parseLocalRepeatedWalk(source);
+    if (repeatedWalk) return Number(repeatedWalk.repeats || 0) || 1;
+    if (/rock\s+back(?:,|\s+)recover/.test(source)) return 2;
+    if (/\b(?:coaster|sailor|shuffle|triple step|triple|chasse|kick ball change|mambo)\b/.test(source)) return 3;
+    if (/\b(?:grapevine|vine|jazz box|rumba box|monterey|charleston)\b/.test(source)) return 4;
+    if (/\b(?:step touch|side touch|touch side|heel touch|toe touch|tap touch)\b/.test(source)) return 1;
+    if (/\bpivot\b/.test(source)) return 2;
+    const numbers = String(count || '').match(/\d+/g);
+    if (numbers && numbers.length) {
+      const values = numbers.map((item) => Number(item)).filter((item) => Number.isFinite(item));
+      if (values.length >= 2) return Math.max(1, values[values.length - 1] - values[0] + 1);
+    }
+    return 1;
+  }
+
+  function estimateLocalNextFoot(currentStart, body, count){
+    if (!(currentStart === 'R' || currentStart === 'L')) return '';
+    return localWeightChangeCount(body, count) % 2 === 1 ? flipLocalFoot(currentStart) : currentStart;
+  }
+
+  function localGlossarySimilarity(body, item){
+    const target = compactWhitespace(String(body || '').toLowerCase()).replace(/[^a-z0-9]+/g, ' ').trim();
+    const name = compactWhitespace(String(item && item.name || '').toLowerCase()).replace(/[^a-z0-9]+/g, ' ').trim();
+    if (!target || !name) return 0;
+    if (target === name) return 1;
+    if (target.includes(name) || name.includes(target)) return 0.92;
+    const targetWords = new Set(target.split(/\s+/).filter(Boolean));
+    const nameWords = new Set(name.split(/\s+/).filter(Boolean));
+    const overlap = [...targetWords].filter((word) => nameWords.has(word)).length;
+    if (!overlap) return 0;
+    return overlap / Math.max(targetWords.size, nameWords.size);
+  }
+
+  function findBestLocalGlossaryMatch(body, glossary, currentStart){
+    let best = null;
+    let bestScore = 0;
+    (Array.isArray(glossary) ? glossary : []).forEach((item) => {
+      if (!item || typeof item !== 'object') return;
+      let score = localGlossarySimilarity(body, item);
+      if (score <= 0.72) return;
+      const foot = compactWhitespace(item.foot || '').toUpperCase();
+      if (currentStart === 'R' || currentStart === 'L') {
+        if (foot === currentStart) score += 0.08;
+        else if (foot && foot !== currentStart) score -= 0.05;
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        best = item;
+      }
+    });
+    return best;
+  }
+
+  function buildLocalRandomGlossaryFlow(prompt){
+    const glossary = Array.isArray(state.glossaryApproved) ? state.glossaryApproved : [];
+    if (!glossary.length) return [];
+    const source = normalizeLocalMotionText(prompt);
+    const countsMatch = source.match(/\b(\d{1,3})\s*counts?\b/i);
+    let remaining = countsMatch ? Math.max(2, Number(countsMatch[1])) : 8;
+    const stepsMatch = source.match(/\b(\d{1,2})\s*(?:steps?|moves?)\b/i);
+    const targetSteps = stepsMatch ? Math.max(1, Math.min(8, Number(stepsMatch[1]))) : 0;
+    let currentStart = getLocalExpectedStartFoot();
+    const results = [];
+    let previousName = '';
+    let guard = 0;
+    while (remaining > 0 && guard < 12 && (!targetSteps || results.length < targetSteps)) {
+      guard += 1;
+      let best = null;
+      let bestScore = -Infinity;
+      glossary.forEach((item) => {
+        if (!item || typeof item !== 'object' || !compactWhitespace(item.name)) return;
+        const countLabel = compactWhitespace(item.counts || item.count || '1') || '1';
+        const numbers = countLabel.match(/\d+/g);
+        let span = 1;
+        if (numbers && numbers.length) {
+          const values = numbers.map((n) => Number(n)).filter((n) => Number.isFinite(n));
+          if (values.length >= 2) span = Math.max(1, values[values.length - 1] - values[0] + 1);
+        }
+        let score = span <= remaining ? 3 : -(span - remaining) * 2.2;
+        const foot = compactWhitespace(item.foot || '').toUpperCase();
+        if (currentStart === 'R' || currentStart === 'L') {
+          if (foot === currentStart) score += 3;
+          else if (foot === 'R' || foot === 'L') score -= 1.4;
+          else score += 1.5;
+        } else {
+          score += foot === 'R' || foot === 'L' ? 0.5 : 1;
+        }
+        if (compactWhitespace(item.name).toLowerCase() === compactWhitespace(previousName).toLowerCase()) score -= 3.5;
+        const noiseSeed = `${prompt}|${item.name}|${results.length}`;
+        let noise = 0;
+        for (let i = 0; i < noiseSeed.length; i += 1) noise = (noise + noiseSeed.charCodeAt(i) * (i + 1)) % 1000;
+        score += noise / 1000;
+        if (score > bestScore) {
+          bestScore = score;
+          best = item;
+        }
+      });
+      if (!best) break;
+      const step = {
+        name: compactWhitespace(best.name || 'Custom Step') || 'Custom Step',
+        description: compactWhitespace(best.description || best.desc || '') || inferLocalStepDescription(best.name || 'step', best.counts || best.count || '1', currentStart),
+        count: compactWhitespace(best.counts || best.count || '1') || '1',
+        foot: /^(R|L)$/i.test(compactWhitespace(best.foot || '')) ? compactWhitespace(best.foot || '').toUpperCase() : currentStart,
+        fromGlossary: true,
+        needsName: false,
+        needsCount: false,
+        source: compactWhitespace(best.name || '')
+      };
+      results.push(step);
+      previousName = step.name;
+      const numbers = step.count.match(/\d+/g);
+      let span = 1;
+      if (numbers && numbers.length) {
+        const values = numbers.map((n) => Number(n)).filter((n) => Number.isFinite(n));
+        if (values.length >= 2) span = Math.max(1, values[values.length - 1] - values[0] + 1);
+      }
+      remaining = Math.max(0, remaining - span);
+      const nextStart = step.foot || currentStart;
+      currentStart = nextStart ? estimateLocalNextFoot(nextStart, step.source || step.name, step.count) : currentStart;
+      if (!targetSteps && remaining <= 0) break;
+    }
+    return results;
+  }
+
+  function inferLocalStepDescription(body, count, startFoot){
+    const source = normalizeLocalMotionText(body);
+    const repeatedWalk = parseLocalRepeatedWalk(source);
+    if (repeatedWalk) {
+      const sequence = buildLocalWalkSequence(repeatedWalk.repeats, repeatedWalk.direction, startFoot);
+      const sentence = sequence ? `${sequence.charAt(0).toUpperCase()}${sequence.slice(1)}` : 'Walk forward.';
+      return repeatedWalk.touch ? `${sentence}, then touch beside with no weight change.` : `${sentence}.`;
+    }
+    if (/rock\s+back(?:,|\s+)recover/.test(source)) return 'Rock back onto the stepping foot and recover back onto the other foot.';
+    if (/\b(?:grapevine|vine)\b/.test(source)) {
+      const direction = /right/.test(source) ? 'right' : (/left/.test(source) ? 'left' : 'to the side');
+      return `Step ${direction}, cross behind, step ${direction}, then touch or step to finish.`;
+    }
+    if (/coaster/.test(source)) return 'Step back, step together, then step forward.';
+    if (/sailor/.test(source)) return 'Cross behind, step to the side, then recover onto the other foot.';
+    if (/jazz box/.test(source)) return 'Cross over, step back, step to the side, then step forward.';
+    if (/rumba box/.test(source)) return 'Step to the side, close, step forward, then hold or touch to finish.';
+    if (/kick ball change/.test(source)) return 'Kick, step onto the ball of the foot, then change weight back.';
+    if (/pivot/.test(source)) return 'Step forward and pivot the stated amount before recovering your weight.';
+    if (/\b(?:step touch|side touch)\b/.test(source)) return 'Step, then touch beside with no weight change.';
+    let sentence = source
+      .replace(/\bx\s*(\d+)\b/ig, (_, value) => ` ${localHelperNumberWord(value)} times`)
+      .replace(/\btouch\b/ig, 'touch with no weight')
+      .replace(/\bbrush\b/ig, 'brush the foot forward')
+      .replace(/\bscuff\b/ig, 'scuff the heel forward')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!sentence) sentence = 'Custom step';
+    sentence = sentence.charAt(0).toUpperCase() + sentence.slice(1);
+    if (!/[.!?]$/.test(sentence)) sentence += '.';
+    return sentence;
+  }
+
+  function applyLocalFollowUpToPendingSteps(steps, prompt){
+    const list = Array.isArray(steps) ? steps.map((item) => ({ ...item })) : [];
+    if (list.length !== 1) return list;
+    const step = list[0];
+    const explicitName = extractExplicitLocalStepName(prompt);
+    const explicitCount = extractLocalStepCountLabel(prompt);
+    const source = compactWhitespace(step.source || step.name || prompt);
+    const startFoot = compactWhitespace(step.foot || '').toUpperCase() || getLocalExpectedStartFoot();
+    if (explicitName) {
+      step.name = explicitName;
+      step.needsName = false;
+    } else if (step.needsName && source && !/\b(count|wall|dance|title|level|step pattern|steps?)\b/i.test(prompt)) {
+      const candidate = compactWhitespace(String(prompt || '').replace(/^(?:call it|name it|step name\s*[:=-])\s*/i, ''));
+      if (candidate && candidate.split(/\s+/).length <= 6) {
+        step.name = titleCaseWords(candidate);
+        step.needsName = false;
+      }
+    }
+    if (explicitCount) {
+      step.count = explicitCount;
+      step.needsCount = false;
+    } else if (step.needsCount) {
+      const inferredCount = inferLocalStepCount(source);
+      if (inferredCount) {
+        step.count = inferredCount;
+        step.needsCount = false;
+      }
+    }
+    if (!compactWhitespace(step.name)) {
+      const inferred = inferLocalStepName(source);
+      if (inferred.name) {
+        step.name = inferred.name;
+        step.needsName = !inferred.confident && step.needsName;
+      }
+    }
+    step.description = inferLocalStepDescription(source, step.count || '', startFoot);
+    return list;
+  }
+
   function splitStepIdeasFromText(text){
     const source = String(text || '');
     if (!source.trim()) return [];
     let candidate = source;
+    const explicitStepName = extractExplicitLocalStepName(source);
+    const randomPrompt = /\b(?:random(?:ly)?|any|whatever)\b.*\b(?:steps?|moves?|sequence|section|part)\b|\b(?:random(?:ly)?\s+put|pick|choose|give me)\b.*\b(?:steps?|moves?)\b/i;
+    if (randomPrompt.test(candidate)) return buildLocalRandomGlossaryFlow(candidate);
     const stepsLabelMatch = candidate.match(/\b(?:steps?|sequence|section)\s*[:\-]\s*([\s\S]+)$/i);
     if (stepsLabelMatch && stepsLabelMatch[1]) candidate = stepsLabelMatch[1];
     candidate = candidate
@@ -385,31 +735,48 @@
     const rawTokens = candidate.split(/[\n;,]+/).map(cleanStepIdeaToken).filter(Boolean);
     const glossary = Array.isArray(state.glossaryApproved) ? state.glossaryApproved : [];
     const glossaryMap = new Map(glossary.map((item) => [compactWhitespace(item && item.name).toLowerCase(), item]));
-    const actionWord = /\b(step|rock|recover|vine|grapevine|shuffle|triple|stomp|clap|kick|toe|heel|cross|side|back|forward|turn|pivot|coaster|sailor|weave|mambo|swivel|skate|scuff|brush|hitch|hop|touch|monterey|jazz box|rumba box|charleston|syncopated)\b/i;
+    const actionWord = /\b(step|rock|recover|vine|grapevine|shuffle|triple|stomp|clap|kick|toe|heel|cross|side|back|forward|turn|pivot|coaster|sailor|weave|mambo|swivel|skate|scuff|brush|hitch|hop|touch|monterey|jazz box|rumba box|charleston|syncopated|walk|lock)\b/i;
+    const singleToken = rawTokens.length === 1;
+    let currentStart = getLocalExpectedStartFoot();
     return rawTokens.map((token) => {
-      const countMatch = token.match(/^(\d+(?:\s*(?:-|to|&)\s*\d+)?)\s*[:.)-]?\s+(.+)$/i);
-      const body = compactWhitespace(countMatch ? countMatch[2] : token);
+      const explicitCount = extractLocalStepCountLabel(token);
+      const body = compactWhitespace(token.replace(/\(([^)]*\d[^)]*)\)\s*$/i, '').replace(/\b((?:\d+\s*[&,-]\s*)+\d+)\b\s*$/i, '').replace(/\b(?:use|put|set|on)\s+counts?\b\s*$/i, '').trim() || token);
       if (!body) return null;
-      const glossaryItem = glossaryMap.get(body.toLowerCase());
+      let glossaryItem = glossaryMap.get(compactWhitespace(body).toLowerCase());
+      if (!glossaryItem) glossaryItem = findBestLocalGlossaryMatch(body, glossary, currentStart);
       if (glossaryItem) {
-        return {
+        const foot = /^(R|L)$/i.test(compactWhitespace(glossaryItem.foot || '')) ? compactWhitespace(glossaryItem.foot || '').toUpperCase() : currentStart;
+        const step = {
           name: compactWhitespace(glossaryItem.name || body),
-          description: compactWhitespace(glossaryItem.description || glossaryItem.desc || body),
-          count: compactWhitespace(countMatch ? countMatch[1] : (glossaryItem.counts || glossaryItem.count || '1')) || '1',
-          foot: compactWhitespace(glossaryItem.foot || ''),
-          fromGlossary: true
+          description: compactWhitespace(glossaryItem.description || glossaryItem.desc || '') || inferLocalStepDescription(body, compactWhitespace(explicitCount || glossaryItem.counts || glossaryItem.count || inferLocalStepCount(body) || '1'), foot),
+          count: compactWhitespace(explicitCount || glossaryItem.counts || glossaryItem.count || inferLocalStepCount(body) || '1') || '1',
+          foot,
+          fromGlossary: true,
+          needsName: false,
+          needsCount: false,
+          source: body,
         };
+        currentStart = foot ? estimateLocalNextFoot(foot, step.source, step.count) : currentStart;
+        return step;
       }
-      if (!actionWord.test(body) && rawTokens.length === 1) return null;
-      const count = compactWhitespace(countMatch ? countMatch[1] : '1') || '1';
-      const name = titleCaseWords(body.split(/\s+/).slice(0, 4).join(' '));
-      return {
-        name: name || 'Custom Step',
-        description: compactWhitespace(body),
-        count,
-        foot: '',
-        fromGlossary: false
+      if (!actionWord.test(body) && singleToken) return null;
+      const inferredName = inferLocalStepName(body, singleToken ? explicitStepName : '');
+      const count = compactWhitespace(explicitCount || inferLocalStepCount(body));
+      const needsName = singleToken && !inferredName.confident && !compactWhitespace(inferredName.name);
+      const needsCount = singleToken && !count;
+      const foot = currentStart === 'R' || currentStart === 'L' ? currentStart : '';
+      const step = {
+        name: compactWhitespace(inferredName.name || (needsName ? '' : titleCaseWords(body.split(/\s+/).slice(0, 5).join(' '))) || 'Custom Step'),
+        description: inferLocalStepDescription(body, count, foot),
+        count: count || '',
+        foot,
+        fromGlossary: false,
+        needsName,
+        needsCount,
+        source: body,
       };
+      if (foot) currentStart = estimateLocalNextFoot(foot, body, count);
+      return step;
     }).filter(Boolean);
   }
 
@@ -480,7 +847,9 @@
       title: 'dance name',
       counts: 'counts',
       walls: 'walls',
-      steps: 'step pattern'
+      steps: 'step pattern',
+      step_name: 'step name',
+      step_count: 'step counts'
     };
     const readable = needs.map((key) => labels[key] || key);
     const joined = readable.length === 1
@@ -495,15 +864,26 @@
     const pending = state.chatPending && state.chatPending.type === 'worksheet-build' ? state.chatPending : null;
     const mergedPrompt = pending ? compactWhitespace(`${pending.prompt} ${prompt}`) : prompt;
     const meta = Object.assign({}, pending && pending.meta ? pending.meta : {}, extractHelperMeta(mergedPrompt));
-    const steps = splitStepIdeasFromText(mergedPrompt);
+    let steps = [];
+    if (pending && Array.isArray(pending.steps) && pending.steps.length) {
+      steps = applyLocalFollowUpToPendingSteps(pending.steps, prompt);
+      const current = splitStepIdeasFromText(prompt);
+      if (current.length) steps = steps.concat(current);
+    } else {
+      steps = splitStepIdeasFromText(mergedPrompt);
+    }
     const creatingDance = shouldStartFreshWorksheet(mergedPrompt) || /\b(make|create|build)\b.*\bdance\b/i.test(mergedPrompt);
     const needs = [];
     if (creatingDance && !meta.title) needs.push('title');
     if (creatingDance && !meta.counts) needs.push('counts');
     if (creatingDance && !meta.walls) needs.push('walls');
     if (!steps.length) needs.push('steps');
+    if (steps.length === 1 && !steps[0].fromGlossary) {
+      if (steps[0].needsName) needs.push('step_name');
+      if (steps[0].needsCount) needs.push('step_count');
+    }
     if (needs.length) {
-      const plan = { type:'worksheet-build', prompt: mergedPrompt, meta, needs };
+      const plan = { type:'worksheet-build', prompt: mergedPrompt, meta, steps, needs };
       state.chatPending = plan;
       return { handled: true, message: buildHelperFollowUp(plan), applied: false };
     }
