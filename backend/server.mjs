@@ -1739,26 +1739,110 @@ function fallbackDanceTool(mode, dance, prompt) {
   };
 }
 
-const SITE_HELP_CONTEXT = `You are the Step By Stepper site helper. Keep answers short, practical, and human. Only answer about using this site.
-Tabs and actions available: Build, Sheet, What's New, My Saved Dances, Featured Choreo, Sign In, and Admin for anthonytau4@gmail.com only.
-Important behaviours: users sign in with Google, Save Changes pushes the current dance to cloud save, Send to host for featuring creates a feature request, Upload to site creates a site-upload request, Featured Choreo shows public featured dances, removing a feature removes it from Featured Choreo, signed-in users can get notifications when admin approves or rejects requests, and Admin reviews custom glossary step requests under Requested dance steps.
-The site can also remember admin-approved helper memory notes, and those learned notes should be treated as true for future helper replies.
-The community glossary contains approved dance steps with names, counts, foot, and descriptions. When a user asks to build a dance or suggests steps, reference the glossary steps to stay consistent with the community's terminology and technique. You may suggest glossary steps by name when they fit the context.
-Users can also import dance steps from a PDF stepsheet using the Import PDF button on the sheet page. The PDF is parsed automatically and steps populate the editor.
-If someone asks where to go, tell them the exact tab or button to use.
-Do not open with generic greetings like "Hi there! What can I help you with today on Step By Stepper?" and do not tell people to ask about any tab or feature. Just answer the actual question.`;
+const SITE_HELP_CONTEXT = `You are the Step By Stepper AI site helper — a knowledgeable, friendly assistant for a line dance choreography editor. You are an expert in line dance terminology, step patterns, choreography structure, and every feature of this site.
+
+SITE TABS & FEATURES:
+• Build — Create and edit dance choreography step-by-step. Set dance title, counts, walls, type, and level. Add sections (Intro, Verse, Chorus, Tag, Bridge, Restart). Add steps with name, counts, foot, and description.
+• Sheet — Clean, print-ready view of the dance. Import PDF stepsheets with the Import PDF button. Print or save-as-PDF to export.
+• What's New — Site changelog with latest updates and features.
+• My Saved Dances — Cloud saves linked to Google sign-in. Use Save Changes to push current dance to cloud. Auto-syncs in background when signed in.
+• Featured Choreo — Public gallery of admin-featured dances with Bronze, Silver, and Gold badges.
+• Sign In — Google authentication. Access to AI Dance Judge, Generate Counts, Apply for Moderator, Subscription management, Request glossary steps.
+• Admin — Only for anthonytau4@gmail.com. Manages featured dances, submissions, moderator applications, glossary requests, site memory, user accounts.
+
+KEY ACTIONS:
+• Save Changes — Pushes current dance to cloud save (requires sign-in)
+• Send to host for featuring — Submits dance for admin review for Featured Choreo
+• Upload to site — Submits dance to admin moderation queue for site collection
+• Import PDF — Parses PDF stepsheets and populates the editor
+• AI Dance Judge — Scores flowability, suggests improvements, generates counts
+• Community Glossary — Browse and apply admin-approved dance steps
+• Phrasing Tools — Set up phrased dance structures (AABB, ABAB patterns)
+• Undo/Redo — Ctrl+Z / Ctrl+Y (⌘Z / ⌘Shift+Z on Mac), 120-step history
+
+KEYBOARD SHORTCUTS: Ctrl+Z (undo), Ctrl+Y / Ctrl+Shift+Z (redo), Ctrl+S (save when signed in), Tab (move fields), Enter (confirm), Escape (close panels).
+
+PREMIUM (NZ$12.50/month or NZ$100/year): Full AI chat helper, AI dance building, AI dance judging, priority feature review, PRO badge.
+
+LINE DANCE TERMINOLOGY (use these when discussing steps):
+• Vine/Grapevine (4 counts) — Side-traveling: step side, cross behind, step side, touch
+• Coaster Step (3 counts in 2 beats) — Step back, step together, step forward
+• Jazz Box (4 counts) — Cross over, step back, step side, step forward
+• Pivot Turn (2 counts) — Step forward, pivot half-turn
+• Rock Step (2 counts) — Rock forward/back, recover weight
+• Shuffle/Cha-Cha (3 counts in 2 beats) — Step, close, step
+• Weave (4-8 counts) — Crossing steps front and behind while traveling sideways
+• Kick Ball Change (3 counts in 2 beats) — Kick forward, ball, change weight
+• Sailor Step (3 counts) — Cross behind, step side, step in place
+• Monterey Turn (4 counts) — Point side, pivot turn, point side, step together
+• Heel Touch/Dig — Touch heel forward, step back in place
+• Stomp — Forceful step down with or without weight transfer
+• Hitch — Lift knee up, foot off floor
+• Flick — Quick backward kick, heel up behind
+• Scuff — Brush heel forward along floor
+• Slide — Gliding step to side, other foot meets it
+• Cross — Step one foot across the other (front or behind)
+• Touch — Tap toe/ball to floor without weight transfer
+• Hip Bump — Hip movement to one side
+
+DANCE LEVELS:
+• Beginner: 16-32 counts, 2 or 4 walls, basic steps, no restarts/tags
+• Intermediate: 32-64 counts, more complex steps, syncopation, tags, restarts
+• Advanced: 48-96+ counts, intricate footwork, multiple restarts, phrased structures
+
+RULES:
+• Be specific, warm, and practical. Tell users the exact tab or button.
+• Reference the community glossary steps when building or suggesting dances.
+• When explaining dance steps, include counts and foot directions.
+• If someone asks where to go, name the exact tab and button.
+• Never invent features that don't exist.
+• Never open with generic greetings. Just answer the question directly.
+• Keep answers concise but complete. Use bullet points for lists.
+• If asked to build a dance, ask for: name, counts, walls, level, and step pattern.`;
 
 function fallbackSiteHelp(prompt, context = {}) {
   const q = String(prompt || '').toLowerCase();
-  if (q.includes('save')) return 'Use the Save Changes button at the top. Sign in first so the dance can save into your Google-linked cloud save.';
-  if (q.includes('feature') || q.includes('featured')) return context.isAdmin ? 'Open Admin, find the dance, then press Bronze, Silver, or Gold. Remove feature there if you want it gone from Featured Choreo.' : 'Use Send to host for featuring after signing in. Admin reviews it from the Admin tab.';
-  if (q.includes('upload')) return 'Sign in, then use Upload to site. That sends the current dance into the admin review queue.';
-  if (q.includes('admin')) return 'The Admin tab only appears for anthonytau4@gmail.com after Google sign-in.';
-  if (q.includes('sign in') || q.includes('google')) return 'Open the Sign In tab and press Sign in with Google.';
-  if (q.includes('saved')) return 'Use My Saved Dances for your saved items, and Save Changes at the top to push the current one to cloud save.';
-  if (q.includes('pdf') || q.includes('import')) return 'On the sheet page, click the Import PDF button at the bottom-right. Drop or select your PDF stepsheet, review the extracted steps, then click Apply to Editor to populate the dance.';
-  if (q.includes('glossary')) return 'The glossary has community-approved dance steps. When the AI builds or suggests steps, it references the glossary so names and counts stay consistent.';
-  return 'Use Build to make or edit a dance, Save Changes at the top to keep it, Sign In for Google saving, My Saved Dances for your saved work, and Featured Choreo to browse featured dances.';
+  /* Saving */
+  if (q.includes('save')) return context.signedIn ? 'Use the Save Changes button in My Saved Dances to push your dance to cloud save. It also auto-syncs while signed in.' : 'Sign in with Google first, then use Save Changes in My Saved Dances to save to the cloud. Your dance is also saved locally in your browser.';
+  /* Featuring */
+  if (q.includes('feature') || q.includes('featured')) return context.isAdmin ? 'Open Admin, find the dance, then press Bronze, Silver, or Gold to feature it. Remove feature there if you want it gone from Featured Choreo.' : 'Sign in, then use Send to host for featuring. The admin reviews it and can award Bronze 🥉, Silver 🥈, or Gold 🥇 badges. Premium members get priority review.';
+  /* Upload */
+  if (q.includes('upload')) return 'Sign in, then use Upload to site. That sends the current dance into the admin review queue for the site collection.';
+  /* Admin */
+  if (q.includes('admin')) return 'The Admin tab only appears for anthonytau4@gmail.com after Google sign-in. It manages featured dances, submissions, moderator applications, glossary requests, and user accounts.';
+  /* Sign in */
+  if (q.includes('sign in') || q.includes('google') || q.includes('login')) return 'Open the Sign In tab and press Sign in with Google. Once signed in, you can save to cloud, submit for featuring, use AI tools, and apply for moderator.';
+  /* Saved dances */
+  if (q.includes('saved')) return 'Use My Saved Dances for your saved items, and Save Changes to push the current one to cloud save. Dances are listed by most recently updated.';
+  /* PDF import */
+  if (q.includes('pdf') || q.includes('import')) return 'On the Sheet tab, click the Import PDF button (bottom-right). Drop or select your PDF stepsheet, review the extracted steps, then click Apply to Editor to populate the dance.';
+  /* Glossary */
+  if (q.includes('glossary')) return 'The Community Glossary has admin-approved dance steps. Click Glossary+ in the Build tab to browse and apply them. Request new steps from the Sign In tab.';
+  /* Premium */
+  if (q.includes('premium') || q.includes('subscription') || q.includes('upgrade')) return 'Premium is NZ$12.50/month or NZ$100/year. Benefits: full AI chat helper, AI dance building and judging, priority feature review, and a PRO badge. Go to Sign In → Subscription.';
+  /* Moderator */
+  if (q.includes('moderator')) return 'Sign in with Google, then use Apply for moderator in the Sign In tab. Approved moderators help review featured dance submissions.';
+  /* Undo/redo */
+  if (q.includes('undo')) return 'Press Ctrl+Z (⌘Z on Mac) to undo. The history holds up to 120 steps.';
+  if (q.includes('redo')) return 'Press Ctrl+Y or Ctrl+Shift+Z (⌘Shift+Z on Mac) to redo.';
+  /* Dark mode */
+  if (q.includes('dark') || q.includes('theme')) return 'Toggle dark/light mode using the theme button (🌙/☀️) in the navigation bar.';
+  /* Steps/terminology */
+  if (q.includes('vine') || q.includes('grapevine')) return 'Vine (Grapevine): A 4-count side-traveling step. Step side, cross behind, step side, touch. Can go left or right.';
+  if (q.includes('coaster')) return 'Coaster Step: A 3-count step (in 2 beats): step back, step together, step forward. Smooth direction change.';
+  if (q.includes('jazz box')) return 'Jazz Box: A 4-count step: cross over, step back, step side, step forward. Creates a box pattern.';
+  if (q.includes('pivot')) return 'Pivot Turn: A 2-count turning step: step forward, pivot 180° on both feet.';
+  if (q.includes('shuffle') || q.includes('cha cha')) return 'Shuffle (Cha-Cha): A 3-count step in 2 beats: step, close, step. Can travel forward, back, or sideways.';
+  /* Shortcuts */
+  if (q.includes('shortcut') || q.includes('keyboard') || q.includes('hotkey')) return 'Keyboard shortcuts: Ctrl+Z (undo), Ctrl+Y / Ctrl+Shift+Z (redo), Ctrl+S (save), Tab (move fields), Enter (confirm), Escape (close panels).';
+  /* Troubleshooting */
+  if (q.includes('not working') || q.includes('broken') || q.includes('error') || q.includes('bug')) return 'Try refreshing the page (Ctrl+R), clearing browser cache, or signing out and back in. For persistent issues, try a different browser.';
+  /* Help */
+  if (q.includes('help') || q.includes('what can')) return 'I can help with: building dances, saving, featuring, PDF import, AI tools, dance terminology, keyboard shortcuts, and troubleshooting. Just ask!';
+  /* Navigation */
+  if (q.includes('tab') || q.includes('where') || q.includes('navigate')) return 'Tabs: Build (create/edit), Sheet (preview/print/PDF import), What\'s New (changelog), My Saved Dances (cloud saves), Featured Choreo (public gallery), Sign In (auth/AI/subscription).';
+  /* Default */
+  return 'Use Build to make or edit a dance, Sheet to preview and print, Save Changes at the top to keep it, Sign In for Google saving and AI tools, My Saved Dances for your saved work, and Featured Choreo to browse featured dances.';
 }
 
 function sanitizeHelperText(text, prompt, context = {}) {
@@ -2848,7 +2932,15 @@ Moderator: ${context.isModerator ? 'yes' : 'no'}
 Premium: ${context.isPremium ? 'yes' : 'no'}
 Online count: ${context.onlineCount || 0}
 Current dance title: ${context.currentDanceTitle || 'none'}
-Community glossary count: ${Array.isArray(db.approvedGlossarySteps) ? db.approvedGlossarySteps.length : 0}
+Current dance counts: ${context.currentDanceCounts || 'not set'}
+Current dance walls: ${context.currentDanceWalls || 'not set'}
+Current dance type: ${context.currentDanceType || 'not set'}
+Current dance level: ${context.currentDanceLevel || 'not set'}
+Sections: ${context.sectionCount || 0}
+Total steps: ${context.totalSteps || 0}
+Has unsaved changes: ${context.hasUnsavedChanges ? 'yes' : 'no'}
+Is phrased dance: ${context.isPhrased ? 'yes' : 'no'}
+Community glossary count: ${context.glossaryCount || (Array.isArray(db.approvedGlossarySteps) ? db.approvedGlossarySteps.length : 0)}
 Conversation so far:
 ${trimmedHistory.map(item => `${item.role}: ${item.text}`).join('\n') || '(none)'}
 Newest user question: ${prompt}`;
