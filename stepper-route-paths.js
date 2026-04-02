@@ -9,7 +9,10 @@
     preview: '/sheet/',
     whatsnew: '/whats-new/',
     saveddances: '/my-saved-dances/',
-    featured: '/featured-choreo/'
+    featured: '/featured-choreo/',
+    friends: '/friends/',
+    glossary: '/glossary/',
+    pdfimport: '/pdf-import/'
   };
 
   const PATH_TO_ROUTE = {
@@ -25,6 +28,12 @@
     '/my-saved-dances/': 'saveddances',
     '/featured-choreo': 'featured',
     '/featured-choreo/': 'featured',
+    '/friends': 'friends',
+    '/friends/': 'friends',
+    '/glossary': 'glossary',
+    '/glossary/': 'glossary',
+    '/pdf-import': 'pdfimport',
+    '/pdf-import/': 'pdfimport',
     '/editor/index.html': 'editor',
     '/sheet/index.html': 'preview',
     '/whats-new/index.html': 'whatsnew',
@@ -77,6 +86,9 @@
     if (path.includes('/whats-new/') || path.endsWith('/whats-new/index.html/')) return 'whatsnew';
     if (path.includes('/my-saved-dances/') || path.endsWith('/my-saved-dances/index.html/')) return 'saveddances';
     if (path.includes('/featured-choreo/') || path.endsWith('/featured-choreo/index.html/')) return 'featured';
+    if (path.includes('/friends/')) return 'friends';
+    if (path.includes('/glossary/')) return 'glossary';
+    if (path.includes('/pdf-import/')) return 'pdfimport';
     if (path.includes('/editor/') || path.endsWith('/editor/index.html/')) return 'editor';
     return null;
   }
@@ -130,6 +142,9 @@
     if (routeName === 'whatsnew') return buttonByText("What's New");
     if (routeName === 'saveddances') return document.getElementById('stepper-saved-dances-tab') || buttonByText('My Saved Dances');
     if (routeName === 'featured') return document.getElementById('stepper-featured-choreo-tab') || buttonByText('Featured Choreo');
+    if (routeName === 'friends') return document.getElementById('stepper-friends-tab');
+    if (routeName === 'glossary') return document.getElementById('stepper-glossary-tab');
+    if (routeName === 'pdfimport') return document.getElementById('stepper-pdf-tab');
     return null;
   }
 
@@ -148,6 +163,9 @@
     attachPathBinding(getRouteButton('whatsnew'), 'whatsnew');
     attachPathBinding(getRouteButton('saveddances'), 'saveddances');
     attachPathBinding(getRouteButton('featured'), 'featured');
+    attachPathBinding(getRouteButton('friends'), 'friends');
+    attachPathBinding(getRouteButton('glossary'), 'glossary');
+    attachPathBinding(getRouteButton('pdfimport'), 'pdfimport');
     bindingsReady = !!(getRouteButton('editor') && getRouteButton('preview') && getRouteButton('whatsnew'));
     return bindingsReady;
   }

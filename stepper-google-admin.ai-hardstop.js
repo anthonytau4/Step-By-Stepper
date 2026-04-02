@@ -16,6 +16,12 @@
   const SIGNIN_TAB_ID = 'stepper-google-signin-tab';
   const ADMIN_TAB_ID = 'stepper-google-admin-tab';
   const SUBSCRIPTION_TAB_ID = 'stepper-google-subscription-tab';
+  const FRIENDS_PAGE_ID = 'stepper-friends-page';
+  const FRIENDS_TAB_ID = 'stepper-friends-tab';
+  const GLOSSARY_PAGE_ID = 'stepper-glossary-page';
+  const GLOSSARY_TAB_ID = 'stepper-glossary-tab';
+  const PDF_PAGE_ID = 'stepper-pdf-page';
+  const PDF_TAB_ID = 'stepper-pdf-tab';
   const ADMIN_EMAIL = 'anthonytau4@gmail.com';
   const DEFAULT_RENDER_SERVICE_ID = 'srv-d6ss4295pdvs73e1iifg';
   const DEFAULT_BACKEND_BASE = 'https://step-by-stepper.onrender.com';
@@ -67,7 +73,10 @@
       host: null,
       signInBtn: null,
       adminBtn: null,
-      subscriptionBtn: null
+      subscriptionBtn: null,
+      friendsBtn: null,
+      glossaryBtn: null,
+      pdfBtn: null
     },
     gisReady: false,
     gisPromise: null,
@@ -2009,6 +2018,9 @@
     applyTabStyles(state.ui.signInBtn, state.activePage === 'signin', '#4f46e5');
     applyTabStyles(state.ui.subscriptionBtn, state.activePage === 'subscription', '#4f46e5');
     applyTabStyles(state.ui.adminBtn, state.activePage === 'admin', '#4f46e5');
+    if (state.ui.friendsBtn) applyTabStyles(state.ui.friendsBtn, state.activePage === 'friends', '#4f46e5');
+    if (state.ui.glossaryBtn) applyTabStyles(state.ui.glossaryBtn, state.activePage === 'glossary', '#4f46e5');
+    if (state.ui.pdfBtn) applyTabStyles(state.ui.pdfBtn, state.activePage === 'pdfimport', '#4f46e5');
   }
 
   function makeTabButton(label, iconSvg, pageName, id){
@@ -2138,12 +2150,34 @@
       else tabStrip.appendChild(state.ui.adminBtn);
     }
 
+    /* ── New feature tabs ── */
+    var friendsIcon = (window.__stepperFriendsTab && window.__stepperFriendsTab.icon) ? window.__stepperFriendsTab.icon() : '👥';
+    state.ui.friendsBtn = makeTabButton('Friends', friendsIcon, 'friends', FRIENDS_TAB_ID);
+    if (!state.ui.friendsBtn.parentNode) {
+      if (state.ui.signInBtn && state.ui.signInBtn.parentNode === tabStrip) state.ui.signInBtn.insertAdjacentElement('beforebegin', state.ui.friendsBtn);
+      else tabStrip.appendChild(state.ui.friendsBtn);
+    }
+
+    var glossaryIcon = (window.__stepperGlossaryTab && window.__stepperGlossaryTab.icon) ? window.__stepperGlossaryTab.icon() : '📖';
+    state.ui.glossaryBtn = makeTabButton('Glossary', glossaryIcon, 'glossary', GLOSSARY_TAB_ID);
+    if (!state.ui.glossaryBtn.parentNode) {
+      if (state.ui.friendsBtn && state.ui.friendsBtn.parentNode === tabStrip) state.ui.friendsBtn.insertAdjacentElement('beforebegin', state.ui.glossaryBtn);
+      else tabStrip.appendChild(state.ui.glossaryBtn);
+    }
+
+    var pdfIcon = (window.__stepperPdfTab && window.__stepperPdfTab.icon) ? window.__stepperPdfTab.icon() : '📄';
+    state.ui.pdfBtn = makeTabButton('PDF Import', pdfIcon, 'pdfimport', PDF_TAB_ID);
+    if (!state.ui.pdfBtn.parentNode) {
+      if (state.ui.glossaryBtn && state.ui.glossaryBtn.parentNode === tabStrip) state.ui.glossaryBtn.insertAdjacentElement('beforebegin', state.ui.pdfBtn);
+      else tabStrip.appendChild(state.ui.pdfBtn);
+    }
+
     if (!tabStrip.__stepperGoogleAdminCloseWired) {
       tabStrip.__stepperGoogleAdminCloseWired = true;
       tabStrip.addEventListener('click', (event) => {
         const button = event.target.closest('button');
         if (!button) return;
-        const own = button.id === SIGNIN_TAB_ID || button.id === SUBSCRIPTION_TAB_ID || button.id === ADMIN_TAB_ID;
+        const own = button.id === SIGNIN_TAB_ID || button.id === SUBSCRIPTION_TAB_ID || button.id === ADMIN_TAB_ID || button.id === FRIENDS_TAB_ID || button.id === GLOSSARY_TAB_ID || button.id === PDF_TAB_ID;
         if (!own && state.activePage) closePages();
       }, true);
     }
@@ -2165,7 +2199,7 @@
     host.id = HOST_ID;
     host.hidden = true;
     host.className = 'max-w-4xl mx-auto px-3 sm:px-4 py-6 sm:py-8 pb-28 sm:pb-32 print:hidden';
-    host.innerHTML = `<div class="space-y-5"><section id="${SIGNIN_PAGE_ID}" hidden style="display:none"></section><section id="${SUBSCRIPTION_PAGE_ID}" hidden style="display:none"></section><section id="${ADMIN_PAGE_ID}" hidden style="display:none"></section></div>`;
+    host.innerHTML = `<div class="space-y-5"><section id="${SIGNIN_PAGE_ID}" hidden style="display:none"></section><section id="${SUBSCRIPTION_PAGE_ID}" hidden style="display:none"></section><section id="${ADMIN_PAGE_ID}" hidden style="display:none"></section><section id="${FRIENDS_PAGE_ID}" hidden style="display:none"></section><section id="${GLOSSARY_PAGE_ID}" hidden style="display:none"></section><section id="${PDF_PAGE_ID}" hidden style="display:none"></section></div>`;
     if (parent) parent.insertBefore(host, anchor || null);
     else document.body.appendChild(host);
     state.ui.host = host;
@@ -2205,7 +2239,8 @@
   }
 
   function openPage(pageName){
-    state.activePage = pageName === 'admin' ? 'admin' : (pageName === 'subscription' ? 'subscription' : 'signin');
+    var validPages = { admin: 1, subscription: 1, signin: 1, friends: 1, glossary: 1, pdfimport: 1 };
+    state.activePage = validPages[pageName] ? pageName : 'signin';
     const host = ensureHost();
     host.hidden = false;
     host.style.display = '';
@@ -4350,16 +4385,25 @@
     const signInPage = document.getElementById(SIGNIN_PAGE_ID);
     const adminPage = document.getElementById(ADMIN_PAGE_ID);
     const subscriptionPage = document.getElementById(SUBSCRIPTION_PAGE_ID);
+    const friendsPage = document.getElementById(FRIENDS_PAGE_ID);
+    const glossaryPage = document.getElementById(GLOSSARY_PAGE_ID);
+    const pdfPage = document.getElementById(PDF_PAGE_ID);
     const showSignIn = state.activePage === 'signin';
     const showSubscription = state.activePage === 'subscription';
     const showAdmin = state.activePage === 'admin';
+    const showFriends = state.activePage === 'friends';
+    const showGlossary = state.activePage === 'glossary';
+    const showPdf = state.activePage === 'pdfimport';
     setVisibility(signInPage, showSignIn);
     setVisibility(subscriptionPage, showSubscription);
     setVisibility(adminPage, showAdmin);
+    setVisibility(friendsPage, showFriends);
+    setVisibility(glossaryPage, showGlossary);
+    setVisibility(pdfPage, showPdf);
     host.hidden = !state.activePage;
     host.style.display = state.activePage ? '' : 'none';
     /* ── Enforce contain on hidden pages to prevent bleed ── */
-    [signInPage, adminPage, subscriptionPage].forEach(function(el){
+    [signInPage, adminPage, subscriptionPage, friendsPage, glossaryPage, pdfPage].forEach(function(el){
       if (!el) return;
       if (el.hidden) { el.style.overflow = 'hidden'; el.style.height = '0'; el.style.pointerEvents = 'none'; }
       else { el.style.overflow = ''; el.style.height = ''; el.style.pointerEvents = ''; }
@@ -4419,6 +4463,10 @@
     renderSignInPage();
     renderSubscriptionPage();
     renderAdminPage();
+    /* ── New tab rendering ── */
+    if (state.activePage === 'friends' && window.__stepperFriendsTab) window.__stepperFriendsTab.render();
+    if (state.activePage === 'glossary' && window.__stepperGlossaryTab) window.__stepperGlossaryTab.render();
+    if (state.activePage === 'pdfimport' && window.__stepperPdfTab) window.__stepperPdfTab.render();
     syncPageVisibility();
     renderPresenceOnly();
     renderSuspensionBanner();
@@ -5673,7 +5721,7 @@ Newest user question: ${question}`;
     if (__stepperLiveQueueRefreshBusy || !(state.session && state.session.credential)) return;
     __stepperLiveQueueRefreshBusy = true;
     refreshLiveQueues().then(() => {
-      if (state.activePage === 'admin' || state.activePage === 'signin' || state.activePage === 'subscription') renderPages();
+      if (state.activePage === 'admin' || state.activePage === 'signin' || state.activePage === 'subscription' || state.activePage === 'friends' || state.activePage === 'glossary' || state.activePage === 'pdfimport') renderPages();
     }).catch(() => {}).finally(() => { __stepperLiveQueueRefreshBusy = false; });
   }, LIVE_QUEUE_SYNC_INTERVAL_MS);
 

@@ -1,0 +1,615 @@
+/**
+ * stepper-friends-tab.js
+ * ─────────────────────────────────────────────────────────────
+ * Dedicated Friends tab for Step-By-Stepper.
+ * Provides a full visual UI for:
+ *   • Adding friends via Gmail / email address
+ *   • Viewing friend list
+ *   • Pending invites (sent & received)
+ *   • Accept / decline invitations
+ *   • Remove friends
+ *   • Quick-share dances with friends
+ *
+ * Integrates with the existing collaboration backend endpoints
+ * and the tab system in stepper-google-admin.ai-hardstop.js.
+ * ─────────────────────────────────────────────────────────────
+ */
+(function () {
+  'use strict';
+  if (window.__stepperFriendsTabInstalled) return;
+  window.__stepperFriendsTabInstalled = true;
+
+  /* ── Constants ── */
+  var PAGE_ID = 'stepper-friends-page';
+  var TAB_ID  = 'stepper-friends-tab';
+  var FRIENDS_KEY = 'stepper_friends_v1';
+  var PENDING_KEY = 'stepper_friends_pending_v1';
+
+  /* ── Local state ── */
+  var friendsState = {
+    friends: [],
+    pendingSent: [],
+    pendingReceived: [],
+    loading: false,
+    inviteEmail: '',
+    searchQuery: '',
+    lastRefresh: 0,
+    error: null,
+    success: null,
+    activeView: 'list'  /* 'list' | 'pending' | 'add' */
+  };
+
+  /* ── Persistence ── */
+  function saveFriendsLocal(friends) {
+    try { localStorage.setItem(FRIENDS_KEY, JSON.stringify(friends || [])); } catch (e) { /* quota */ }
+  }
+  function loadFriendsLocal() {
+    try { return JSON.parse(localStorage.getItem(FRIENDS_KEY) || '[]'); } catch (e) { return []; }
+  }
+  function savePendingLocal(pending) {
+    try { localStorage.setItem(PENDING_KEY, JSON.stringify(pending || [])); } catch (e) { /* quota */ }
+  }
+  function loadPendingLocal() {
+    try { return JSON.parse(localStorage.getItem(PENDING_KEY) || '[]'); } catch (e) { return []; }
+  }
+
+  /* ── Theme helper (re-use from admin) ── */
+  function isDarkMode() {
+    try {
+      var data = JSON.parse(localStorage.getItem('linedance_builder_data_v13') || 'null');
+      return !!(data && data.isDarkMode);
+    } catch (e) { return false; }
+  }
+  function themeClasses() {
+    var dark = isDarkMode();
+    return {
+      dark: dark,
+      shell: dark ? 'bg-neutral-900 border-neutral-800 text-neutral-100' : 'bg-neutral-50 border-neutral-200 text-neutral-900',
+      panel: dark ? 'bg-neutral-950 border-neutral-800 text-neutral-100' : 'bg-white border-neutral-200 text-neutral-900',
+      soft: dark ? 'bg-neutral-900/80 border-neutral-800 text-neutral-300' : 'bg-white border-neutral-200 text-neutral-700',
+      subtle: dark ? 'text-neutral-400' : 'text-neutral-500',
+      accent: dark ? 'bg-indigo-500/15 border-indigo-400/30 text-indigo-200' : 'bg-indigo-50 border-indigo-200 text-indigo-700',
+      danger: dark ? 'bg-red-500/15 border-red-400/30 text-red-200' : 'bg-red-50 border-red-200 text-red-700',
+      success: dark ? 'bg-green-500/15 border-green-400/30 text-green-200' : 'bg-green-50 border-green-200 text-green-700',
+      cardBg: dark ? 'background:#1a1a2e;border-color:#2d2d44;' : 'background:#ffffff;border-color:#e5e7eb;',
+      inputBg: dark ? 'background:#111827;border-color:#374151;color:#f3f4f6;' : 'background:#ffffff;border-color:#d1d5db;color:#111827;'
+    };
+  }
+
+  function escapeHtml(text) {
+    var el = document.createElement('span');
+    el.textContent = String(text || '');
+    return el.innerHTML;
+  }
+
+  /* ── Session helper ── */
+  function getSession() {
+    try { return JSON.parse(localStorage.getItem('stepper_google_auth_session_v2') || 'null'); } catch (e) { return null; }
+  }
+  function isSignedIn() {
+    var s = getSession();
+    return !!(s && s.credential);
+  }
+  function getProfile() {
+    var s = getSession();
+    return (s && s.profile) || {};
+  }
+  function getApiBase() {
+    return window.STEPPER_API_BASE || localStorage.getItem('stepper_api_base_v1') || 'https://step-by-stepper.onrender.com';
+  }
+
+  /* ── API helpers ── */
+  function authHeaders() {
+    var s = getSession();
+    return {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + (s && s.credential ? s.credential : '')
+    };
+  }
+
+  function apiFetch(path, opts) {
+    var base = getApiBase().replace(/\/+$/, '');
+    var url = base + path;
+    return fetch(url, Object.assign({ mode: 'cors', credentials: 'omit' }, opts || {}))
+      .then(function (r) { return r.json(); });
+  }
+
+  /* ── Data refresh ── */
+  function refreshFriends() {
+    if (!isSignedIn()) return Promise.resolve();
+    friendsState.loading = true;
+    renderFriendsPage();
+
+    return apiFetch('/api/collaborators?scope=all', { headers: authHeaders() })
+      .then(function (data) {
+        var items = (data && Array.isArray(data.items)) ? data.items : [];
+        friendsState.friends = items.filter(function (f) { return f.status === 'accepted'; });
+        friendsState.pendingSent = items.filter(function (f) { return f.status === 'invited' && f.direction === 'sent'; });
+        friendsState.pendingReceived = items.filter(function (f) { return f.status === 'invited' && f.direction === 'received'; });
+        saveFriendsLocal(friendsState.friends);
+        savePendingLocal(friendsState.pendingSent.concat(friendsState.pendingReceived));
+        friendsState.lastRefresh = Date.now();
+        friendsState.error = null;
+      })
+      .catch(function (err) {
+        /* Fallback to local cache */
+        friendsState.friends = loadFriendsLocal();
+        var pending = loadPendingLocal();
+        friendsState.pendingSent = pending.filter(function (p) { return p.direction === 'sent'; });
+        friendsState.pendingReceived = pending.filter(function (p) { return p.direction === 'received'; });
+        friendsState.error = 'Could not reach the server. Showing cached data.';
+      })
+      .finally(function () {
+        friendsState.loading = false;
+        renderFriendsPage();
+      });
+  }
+
+  /* ── Invite friend ── */
+  function sendInvite(email) {
+    if (!isSignedIn()) {
+      friendsState.error = 'Please sign in with Google first.';
+      renderFriendsPage();
+      return;
+    }
+    var trimmed = String(email || '').trim().toLowerCase();
+    if (!trimmed || !trimmed.includes('@')) {
+      friendsState.error = 'Please enter a valid email address.';
+      renderFriendsPage();
+      return;
+    }
+    friendsState.loading = true;
+    friendsState.error = null;
+    friendsState.success = null;
+    renderFriendsPage();
+
+    apiFetch('/api/collaborators/invite', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ email: trimmed, type: 'friend' })
+    })
+      .then(function (data) {
+        if (data && data.ok) {
+          friendsState.success = 'Friend invite sent to ' + trimmed + '! 🎉';
+          friendsState.inviteEmail = '';
+          refreshFriends();
+        } else {
+          friendsState.error = (data && data.error) || 'Could not send invite.';
+        }
+      })
+      .catch(function () {
+        friendsState.error = 'Could not send the invite. The server might be down.';
+      })
+      .finally(function () {
+        friendsState.loading = false;
+        renderFriendsPage();
+      });
+  }
+
+  /* ── Respond to invite ── */
+  function respondToInvite(inviteId, accept) {
+    if (!isSignedIn()) return;
+    friendsState.loading = true;
+    renderFriendsPage();
+
+    apiFetch('/api/collaborators/respond', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ inviteId: inviteId, accept: !!accept })
+    })
+      .then(function () {
+        friendsState.success = accept ? 'Friend request accepted! 🤝' : 'Friend request declined.';
+        refreshFriends();
+      })
+      .catch(function () {
+        friendsState.error = 'Could not respond to the invite.';
+        friendsState.loading = false;
+        renderFriendsPage();
+      });
+  }
+
+  /* ── Remove friend ── */
+  function removeFriend(friendId) {
+    if (!isSignedIn()) return;
+    friendsState.loading = true;
+    renderFriendsPage();
+
+    apiFetch('/api/collaborators/remove', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ friendId: friendId })
+    })
+      .then(function () {
+        friendsState.success = 'Friend removed.';
+        refreshFriends();
+      })
+      .catch(function () {
+        friendsState.error = 'Could not remove friend.';
+        friendsState.loading = false;
+        renderFriendsPage();
+      });
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     RENDER
+     ════════════════════════════════════════════════════════════ */
+  function renderFriendsPage() {
+    var page = document.getElementById(PAGE_ID);
+    if (!page) return;
+    if (page.hidden || page.style.display === 'none') return;
+
+    var theme = themeClasses();
+    var signedIn = isSignedIn();
+    var profile = getProfile();
+
+    var html = '';
+    html += '<div class="rounded-3xl border shadow-sm overflow-hidden ' + theme.shell + '" style="transition:all .3s ease;">';
+
+    /* ── Header ── */
+    html += '<div class="px-6 py-5 border-b ' + theme.panel + '">';
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">';
+    html += '<div style="display:flex;align-items:center;gap:10px;">';
+    html += '<span style="font-size:28px;">👥</span>';
+    html += '<div>';
+    html += '<h2 style="font-size:20px;font-weight:900;margin:0;">Friends</h2>';
+    if (signedIn && profile.name) {
+      html += '<p class="' + theme.subtle + '" style="font-size:12px;margin:2px 0 0;">' + escapeHtml(profile.email || profile.name) + '</p>';
+    }
+    html += '</div></div>';
+    if (signedIn) {
+      html += '<button data-friends-refresh class="stepper-google-cta" style="font-size:12px;padding:8px 14px;border-radius:10px;">🔄 Refresh</button>';
+    }
+    html += '</div></div>';
+
+    /* ── Body ── */
+    html += '<div class="p-5 sm:p-6" style="min-height:200px;">';
+
+    if (!signedIn) {
+      html += renderSignInPrompt(theme);
+    } else {
+      /* Sub-navigation */
+      html += renderSubNav(theme);
+
+      /* Alerts */
+      if (friendsState.error) {
+        html += '<div class="' + theme.danger + '" style="border:1px solid;border-radius:14px;padding:12px 16px;margin-bottom:16px;font-size:13px;display:flex;align-items:center;gap:8px;">';
+        html += '<span>⚠️</span><span>' + escapeHtml(friendsState.error) + '</span>';
+        html += '<button data-friends-dismiss-error style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:16px;opacity:.6;">✕</button>';
+        html += '</div>';
+      }
+      if (friendsState.success) {
+        html += '<div class="' + theme.success + '" style="border:1px solid;border-radius:14px;padding:12px 16px;margin-bottom:16px;font-size:13px;display:flex;align-items:center;gap:8px;">';
+        html += '<span>✅</span><span>' + escapeHtml(friendsState.success) + '</span>';
+        html += '<button data-friends-dismiss-success style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:16px;opacity:.6;">✕</button>';
+        html += '</div>';
+      }
+
+      /* Loading */
+      if (friendsState.loading) {
+        html += '<div style="text-align:center;padding:24px;"><div class="stepper-friends-spinner"></div><p style="margin-top:10px;font-size:13px;opacity:.7;">Loading…</p></div>';
+      }
+
+      /* Views */
+      if (friendsState.activeView === 'add') {
+        html += renderAddFriend(theme);
+      } else if (friendsState.activeView === 'pending') {
+        html += renderPendingInvites(theme);
+      } else {
+        html += renderFriendsList(theme);
+      }
+    }
+
+    html += '</div></div>';
+
+    page.innerHTML = html;
+    wireEvents(page);
+  }
+
+  function renderSignInPrompt(theme) {
+    var html = '';
+    html += '<div style="text-align:center;padding:40px 20px;">';
+    html += '<div style="font-size:64px;margin-bottom:16px;">🔐</div>';
+    html += '<h3 style="font-size:18px;font-weight:800;margin:0 0 8px;">Sign In to Connect</h3>';
+    html += '<p class="' + theme.subtle + '" style="font-size:14px;max-width:360px;margin:0 auto 20px;">Sign in with your Google account to add friends, send dance invites, and collaborate on choreography together.</p>';
+    html += '<button data-friends-goto-signin class="stepper-google-cta" style="background:#4f46e5;color:#fff;padding:12px 24px;border-radius:14px;font-weight:800;">Sign In with Google</button>';
+    html += '</div>';
+    return html;
+  }
+
+  function renderSubNav(theme) {
+    var views = [
+      { key: 'list', label: 'My Friends', icon: '👥', count: friendsState.friends.length },
+      { key: 'pending', label: 'Pending', icon: '📨', count: friendsState.pendingSent.length + friendsState.pendingReceived.length },
+      { key: 'add', label: 'Add Friend', icon: '➕', count: 0 }
+    ];
+    var html = '<div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;">';
+    for (var i = 0; i < views.length; i++) {
+      var v = views[i];
+      var active = friendsState.activeView === v.key;
+      var bgStyle = active
+        ? 'background:#4f46e5;color:#fff;border-color:#4f46e5;box-shadow:0 4px 12px rgba(79,70,229,.25);'
+        : (theme.dark ? 'background:#1f2937;border-color:#374151;color:#d1d5db;' : 'background:#f9fafb;border-color:#e5e7eb;color:#374151;');
+      html += '<button data-friends-view="' + v.key + '" style="display:flex;align-items:center;gap:6px;padding:10px 16px;border-radius:12px;border:1px solid;font-weight:800;font-size:13px;cursor:pointer;transition:all .2s ease;' + bgStyle + '">';
+      html += '<span>' + v.icon + '</span><span>' + escapeHtml(v.label) + '</span>';
+      if (v.count > 0) {
+        html += '<span style="background:' + (active ? 'rgba(255,255,255,.25)' : 'rgba(79,70,229,.12)') + ';padding:2px 8px;border-radius:999px;font-size:11px;font-weight:900;">' + v.count + '</span>';
+      }
+      html += '</button>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function renderAddFriend(theme) {
+    var html = '';
+    html += '<div class="' + theme.soft + '" style="border:1px solid;border-radius:18px;padding:24px;margin-bottom:16px;">';
+    html += '<h3 style="font-size:16px;font-weight:800;margin:0 0 4px;">Add a Friend by Email</h3>';
+    html += '<p class="' + theme.subtle + '" style="font-size:13px;margin:0 0 16px;">Enter your friend\'s Gmail or email address. They\'ll get a notification to accept your friend request.</p>';
+
+    html += '<div style="display:flex;gap:10px;align-items:stretch;flex-wrap:wrap;">';
+    html += '<input data-friends-email type="email" placeholder="friend@gmail.com" value="' + escapeHtml(friendsState.inviteEmail) + '" ';
+    html += 'style="flex:1 1 220px;border-radius:12px;border:1px solid;padding:12px 16px;font-size:15px;outline:none;transition:border-color .2s,box-shadow .2s;' + theme.inputBg + '" />';
+    html += '<button data-friends-send-invite class="stepper-google-cta" style="background:#4f46e5;color:#fff;padding:12px 20px;border-radius:12px;font-weight:800;white-space:nowrap;">';
+    html += '📩 Send Invite</button>';
+    html += '</div>';
+
+    /* Quick tips */
+    html += '<div style="margin-top:16px;padding:14px;border-radius:12px;' + (theme.dark ? 'background:#1e293b;' : 'background:#f0f4ff;') + '">';
+    html += '<p style="font-size:12px;font-weight:700;margin:0 0 6px;opacity:.8;">💡 Tips</p>';
+    html += '<ul style="font-size:12px;margin:0;padding-left:18px;opacity:.7;line-height:1.7;">';
+    html += '<li>Your friend needs a Step-By-Stepper account to accept</li>';
+    html += '<li>Use the same email they use to sign in with Google</li>';
+    html += '<li>Friends can collaborate on dances together in real-time</li>';
+    html += '</ul></div>';
+
+    html += '</div>';
+    return html;
+  }
+
+  function renderFriendsList(theme) {
+    var html = '';
+    var friends = friendsState.friends;
+
+    /* Search bar */
+    if (friends.length > 3) {
+      html += '<div style="margin-bottom:16px;">';
+      html += '<input data-friends-search type="text" placeholder="🔍 Search friends…" value="' + escapeHtml(friendsState.searchQuery) + '" ';
+      html += 'style="width:100%;border-radius:12px;border:1px solid;padding:10px 16px;font-size:14px;outline:none;' + theme.inputBg + '" />';
+      html += '</div>';
+    }
+
+    /* Filter */
+    var filtered = friends;
+    if (friendsState.searchQuery) {
+      var q = friendsState.searchQuery.toLowerCase();
+      filtered = friends.filter(function (f) {
+        return (f.name || '').toLowerCase().indexOf(q) !== -1 || (f.email || '').toLowerCase().indexOf(q) !== -1;
+      });
+    }
+
+    if (!filtered.length) {
+      html += '<div style="text-align:center;padding:32px 16px;">';
+      if (!friends.length) {
+        html += '<div style="font-size:56px;margin-bottom:12px;">🤗</div>';
+        html += '<h3 style="font-size:16px;font-weight:800;margin:0 0 6px;">No Friends Yet</h3>';
+        html += '<p class="' + theme.subtle + '" style="font-size:13px;margin:0 0 16px;">Add your first friend to start collaborating on line dances!</p>';
+        html += '<button data-friends-view="add" class="stepper-google-cta" style="background:#4f46e5;color:#fff;padding:10px 20px;border-radius:12px;font-weight:800;">➕ Add Your First Friend</button>';
+      } else {
+        html += '<p class="' + theme.subtle + '" style="font-size:14px;">No friends match "' + escapeHtml(friendsState.searchQuery) + '"</p>';
+      }
+      html += '</div>';
+      return html;
+    }
+
+    /* Friend cards */
+    html += '<div style="display:grid;gap:10px;">';
+    for (var i = 0; i < filtered.length; i++) {
+      var f = filtered[i];
+      html += renderFriendCard(f, theme);
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function renderFriendCard(friend, theme) {
+    var html = '';
+    var initial = String(friend.name || friend.email || '?').charAt(0).toUpperCase();
+    var colors = ['#4f46e5','#7c3aed','#db2777','#ea580c','#059669','#0891b2','#6366f1'];
+    var bgColor = colors[initial.charCodeAt(0) % colors.length];
+
+    html += '<div style="display:flex;align-items:center;gap:14px;padding:14px 16px;border-radius:16px;border:1px solid;transition:all .2s ease;' + theme.cardBg + '">';
+
+    /* Avatar */
+    html += '<div style="width:44px;height:44px;border-radius:999px;background:' + bgColor + ';color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:18px;flex-shrink:0;">';
+    if (friend.picture) {
+      html += '<img src="' + escapeHtml(friend.picture) + '" alt="" style="width:44px;height:44px;border-radius:999px;object-fit:cover;" />';
+    } else {
+      html += initial;
+    }
+    html += '</div>';
+
+    /* Info */
+    html += '<div style="flex:1;min-width:0;">';
+    html += '<div style="font-weight:800;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(friend.name || 'Friend') + '</div>';
+    html += '<div class="' + theme.subtle + '" style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(friend.email || '') + '</div>';
+    html += '</div>';
+
+    /* Status */
+    html += '<div style="display:flex;align-items:center;gap:6px;">';
+    html += '<span style="width:8px;height:8px;border-radius:999px;background:#22c55e;display:inline-block;" title="Connected"></span>';
+    html += '<button data-friends-remove="' + escapeHtml(friend.id || friend.email || '') + '" title="Remove friend" style="background:none;border:none;cursor:pointer;font-size:16px;opacity:.4;transition:opacity .2s;">✕</button>';
+    html += '</div>';
+
+    html += '</div>';
+    return html;
+  }
+
+  function renderPendingInvites(theme) {
+    var html = '';
+    var received = friendsState.pendingReceived;
+    var sent = friendsState.pendingSent;
+
+    /* Received */
+    html += '<h3 style="font-size:14px;font-weight:800;margin:0 0 10px;">📥 Received Invites</h3>';
+    if (!received.length) {
+      html += '<div class="' + theme.soft + '" style="border:1px solid;border-radius:14px;padding:20px;text-align:center;margin-bottom:20px;">';
+      html += '<p class="' + theme.subtle + '" style="font-size:13px;margin:0;">No pending invites to review.</p>';
+      html += '</div>';
+    } else {
+      html += '<div style="display:grid;gap:10px;margin-bottom:20px;">';
+      for (var i = 0; i < received.length; i++) {
+        html += renderInviteCard(received[i], theme, true);
+      }
+      html += '</div>';
+    }
+
+    /* Sent */
+    html += '<h3 style="font-size:14px;font-weight:800;margin:0 0 10px;">📤 Sent Invites</h3>';
+    if (!sent.length) {
+      html += '<div class="' + theme.soft + '" style="border:1px solid;border-radius:14px;padding:20px;text-align:center;">';
+      html += '<p class="' + theme.subtle + '" style="font-size:13px;margin:0;">No pending sent invites.</p>';
+      html += '</div>';
+    } else {
+      html += '<div style="display:grid;gap:10px;">';
+      for (var j = 0; j < sent.length; j++) {
+        html += renderInviteCard(sent[j], theme, false);
+      }
+      html += '</div>';
+    }
+
+    return html;
+  }
+
+  function renderInviteCard(invite, theme, isReceived) {
+    var html = '';
+    var name = invite.name || invite.email || 'Someone';
+
+    html += '<div style="display:flex;align-items:center;gap:14px;padding:14px 16px;border-radius:16px;border:1px solid;' + theme.cardBg + '">';
+
+    /* Avatar placeholder */
+    var initial = String(name).charAt(0).toUpperCase();
+    html += '<div style="width:40px;height:40px;border-radius:999px;background:#6366f1;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:16px;flex-shrink:0;">' + initial + '</div>';
+
+    /* Info */
+    html += '<div style="flex:1;min-width:0;">';
+    html += '<div style="font-weight:800;font-size:14px;">' + escapeHtml(name) + '</div>';
+    html += '<div class="' + theme.subtle + '" style="font-size:12px;">' + escapeHtml(invite.email || '') + '</div>';
+    html += '</div>';
+
+    /* Actions */
+    if (isReceived) {
+      html += '<div style="display:flex;gap:6px;">';
+      html += '<button data-friends-accept="' + escapeHtml(invite.id || '') + '" class="stepper-google-cta" style="background:#22c55e;color:#fff;padding:8px 14px;border-radius:10px;font-size:12px;font-weight:800;">✓ Accept</button>';
+      html += '<button data-friends-decline="' + escapeHtml(invite.id || '') + '" class="stepper-google-cta" style="padding:8px 14px;border-radius:10px;font-size:12px;font-weight:800;' + (theme.dark ? 'background:#374151;color:#d1d5db;' : 'background:#f3f4f6;color:#6b7280;') + '">✕ Decline</button>';
+      html += '</div>';
+    } else {
+      html += '<span style="font-size:12px;font-weight:700;padding:6px 12px;border-radius:999px;' + (theme.dark ? 'background:#374151;color:#9ca3af;' : 'background:#f3f4f6;color:#9ca3af;') + '">⏳ Pending</span>';
+    }
+
+    html += '</div>';
+    return html;
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     EVENT WIRING
+     ════════════════════════════════════════════════════════════ */
+  function wireEvents(page) {
+    if (!page) return;
+
+    /* View switching */
+    page.querySelectorAll('[data-friends-view]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        friendsState.activeView = btn.getAttribute('data-friends-view') || 'list';
+        friendsState.error = null;
+        friendsState.success = null;
+        renderFriendsPage();
+      });
+    });
+
+    /* Refresh */
+    var refreshBtn = page.querySelector('[data-friends-refresh]');
+    if (refreshBtn) refreshBtn.addEventListener('click', function () { refreshFriends(); });
+
+    /* Dismiss alerts */
+    var dismissErr = page.querySelector('[data-friends-dismiss-error]');
+    if (dismissErr) dismissErr.addEventListener('click', function () { friendsState.error = null; renderFriendsPage(); });
+    var dismissSuc = page.querySelector('[data-friends-dismiss-success]');
+    if (dismissSuc) dismissSuc.addEventListener('click', function () { friendsState.success = null; renderFriendsPage(); });
+
+    /* Send invite */
+    var sendBtn = page.querySelector('[data-friends-send-invite]');
+    var emailInput = page.querySelector('[data-friends-email]');
+    if (sendBtn && emailInput) {
+      sendBtn.addEventListener('click', function () { sendInvite(emailInput.value); });
+      emailInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') sendInvite(emailInput.value); });
+      emailInput.addEventListener('input', function () { friendsState.inviteEmail = emailInput.value; });
+      /* Focus the input */
+      setTimeout(function () { emailInput.focus(); }, 100);
+    }
+
+    /* Search */
+    var searchInput = page.querySelector('[data-friends-search]');
+    if (searchInput) {
+      searchInput.addEventListener('input', function () {
+        friendsState.searchQuery = searchInput.value;
+        renderFriendsPage();
+      });
+    }
+
+    /* Accept / Decline */
+    page.querySelectorAll('[data-friends-accept]').forEach(function (btn) {
+      btn.addEventListener('click', function () { respondToInvite(btn.getAttribute('data-friends-accept'), true); });
+    });
+    page.querySelectorAll('[data-friends-decline]').forEach(function (btn) {
+      btn.addEventListener('click', function () { respondToInvite(btn.getAttribute('data-friends-decline'), false); });
+    });
+
+    /* Remove */
+    page.querySelectorAll('[data-friends-remove]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        if (confirm('Remove this friend?')) removeFriend(btn.getAttribute('data-friends-remove'));
+      });
+    });
+
+    /* Go to sign-in */
+    var signinBtn = page.querySelector('[data-friends-goto-signin]');
+    if (signinBtn) {
+      signinBtn.addEventListener('click', function () {
+        var tab = document.getElementById('stepper-google-signin-tab');
+        if (tab) tab.click();
+      });
+    }
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     STYLE INJECTION
+     ════════════════════════════════════════════════════════════ */
+  function ensureFriendsStyles() {
+    if (document.getElementById('stepper-friends-tab-style')) return;
+    var style = document.createElement('style');
+    style.id = 'stepper-friends-tab-style';
+    style.textContent = [
+      '@keyframes stepper-friends-spin { to { transform: rotate(360deg); } }',
+      '.stepper-friends-spinner { width:28px;height:28px;border:3px solid rgba(99,102,241,.15);border-top-color:#4f46e5;border-radius:50%;animation:stepper-friends-spin .7s linear infinite;margin:0 auto; }',
+      '#' + PAGE_ID + ' input:focus { border-color:rgba(99,102,241,.5)!important;box-shadow:0 0 0 3px rgba(99,102,241,.12)!important; }',
+      '#' + PAGE_ID + ' [data-friends-view]:hover { transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.08); }',
+      '#' + PAGE_ID + ' [data-friends-remove]:hover { opacity:1!important; }'
+    ].join('\n');
+    document.head.appendChild(style);
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     PUBLIC API — called by stepper-google-admin.ai-hardstop.js
+     ════════════════════════════════════════════════════════════ */
+  window.__stepperFriendsTab = {
+    PAGE_ID: PAGE_ID,
+    TAB_ID: TAB_ID,
+    render: function () { ensureFriendsStyles(); renderFriendsPage(); },
+    refresh: refreshFriends,
+    getState: function () { return friendsState; },
+    icon: function () {
+      return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>';
+    }
+  };
+
+})();
