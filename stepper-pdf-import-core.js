@@ -299,7 +299,7 @@
       const ceiling = parseCountCeiling(countText);
       /* ── Track accumulated count span for smart splitting ── */
       const countNums = (countText.match(/\d+/g) || []).map(Number).filter(Number.isFinite);
-      var span = countNums.length >= 2 ? Math.max(1, countNums[countNums.length - 1] - countNums[0] + 1) : 1;
+      var span = countNums.length >= 2 ? Math.max(1, countNums[countNums.length - 1] - countNums[0] + 1) : (countNums.length === 1 ? countNums[0] : 1);
       accumSpan += span;
       const reachedBoundary = current.length > 0 && (
         ceiling >= boundary ||

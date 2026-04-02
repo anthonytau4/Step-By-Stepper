@@ -279,6 +279,14 @@
     return String(value || '').replace(/\s+/g, ' ').trim();
   }
 
+  function calculateCountSpan(step){
+    var cl = compactWhitespace(step && (step.count || step.counts) || '');
+    var nums = (cl.match(/\d+/g) || []).map(Number).filter(Number.isFinite);
+    return nums.length >= 2 ? Math.max(1, nums[nums.length - 1] - nums[0] + 1) : (nums.length === 1 ? nums[0] : 1);
+  }
+
+  var HELPER_SQUIRCLE_ICON = '<span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#1F2A44,#312E81);box-shadow:0 2px 6px rgba(0,0,0,.18);position:relative;flex-shrink:0;"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 512 512" fill="none"><rect x="24" y="24" width="464" height="464" rx="112" fill="url(#_hfg)"/><defs><linearGradient id="_hfg" x1="64" y1="56" x2="448" y2="456" gradientUnits="userSpaceOnUse"><stop stop-color="#1F2A44"/><stop offset="1" stop-color="#312E81"/></linearGradient><linearGradient id="_hfa" x1="110" y1="392" x2="408" y2="160" gradientUnits="userSpaceOnUse"><stop stop-color="#F97316"/><stop offset="1" stop-color="#FDBA74"/></linearGradient></defs><path d="M116 344C116 326.327 130.327 312 148 312H230V392H148C130.327 392 116 377.673 116 360V344Z" fill="#F8FAFC" fill-opacity=".96"/><path d="M196 264C196 246.327 210.327 232 228 232H310V312H228C210.327 312 196 297.673 196 280V264Z" fill="#F8FAFC" fill-opacity=".96"/><path d="M276 184C276 166.327 290.327 152 308 152H390C407.673 152 422 166.327 422 184V232H308C290.327 232 276 217.673 276 200V184Z" fill="#F8FAFC" fill-opacity=".96"/><path d="M148 392L148 360C148 342.327 162.327 328 180 328H230V312H228C210.327 312 196 297.673 196 280V264C196 246.327 210.327 232 228 232H310V216C310 198.327 324.327 184 342 184H390" stroke="url(#_hfa)" stroke-width="36" stroke-linecap="round" stroke-linejoin="round"/><circle cx="390" cy="184" r="26" fill="#FDBA74"/><circle cx="390" cy="184" r="10" fill="#FFF7ED"/></svg><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" style="position:absolute;bottom:-1px;right:-1px;filter:drop-shadow(0 1px 1px rgba(0,0,0,.3));"><circle cx="12" cy="12" r="12" fill="#a78bfa"/><path d="M7 13l2-5h6l2 5M8 16h8M10 13v3M14 13v3" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
+
   function titleCaseWords(value){
     return compactWhitespace(value).replace(/\b([a-z])/g, (match, char) => char.toUpperCase());
   }
@@ -827,14 +835,10 @@
     let countAccum = 0;
     target.steps.forEach(function(step){
       if (!step || step.type !== 'step') return;
-      var cl = compactWhitespace(step.count || step.counts || '');
-      var nums = (cl.match(/\d+/g) || []).map(Number).filter(Number.isFinite);
-      countAccum += nums.length >= 2 ? Math.max(1, nums[nums.length - 1] - nums[0] + 1) : (nums.length === 1 ? nums[0] : 1);
+      countAccum += calculateCountSpan(step);
     });
     plan.steps.forEach(function(step){
-      var cl = compactWhitespace(step.count || step.counts || '');
-      var nums = (cl.match(/\d+/g) || []).map(Number).filter(Number.isFinite);
-      var span = nums.length >= 2 ? Math.max(1, nums[nums.length - 1] - nums[0] + 1) : (nums.length === 1 ? nums[0] : 1);
+      var span = calculateCountSpan(step);
       if (plan.steps.length > sectionSize && countAccum > 0 && countAccum + span > sectionSize) {
         target = { id:createLocalId('section'), name:'Section ' + (data.sections.length + 1), steps:[] };
         data.sections.push(target);
@@ -908,8 +912,7 @@
       const foot = compactWhitespace(step.foot || '').toUpperCase();
       const startLabel = (foot === 'R' || foot === 'L') ? (foot === 'R' ? 'Right' : 'Left') : '';
       const countLabel = compactWhitespace(step.count || step.counts || '');
-      const countNums = (countLabel.match(/\d+/g) || []).map(Number).filter(Number.isFinite);
-      const span = countNums.length >= 2 ? Math.max(1, countNums[countNums.length - 1] - countNums[0] + 1) : (countNums.length === 1 ? countNums[0] : 1);
+      const span = calculateCountSpan(step);
       if (steps.length > sectionSize && countAccum > 0 && countAccum + span > sectionSize) {
         sectionNum += 1;
         countAccum = 0;
@@ -1004,14 +1007,10 @@
     let countAccum = 0;
     target.steps.forEach(function(step){
       if (!step || step.type !== 'step') return;
-      var cl = compactWhitespace(step.count || step.counts || '');
-      var nums = (cl.match(/\d+/g) || []).map(Number).filter(Number.isFinite);
-      countAccum += nums.length >= 2 ? Math.max(1, nums[nums.length - 1] - nums[0] + 1) : (nums.length === 1 ? nums[0] : 1);
+      countAccum += calculateCountSpan(step);
     });
     pending.steps.forEach(function(step){
-      var cl = compactWhitespace(step.count || step.counts || '');
-      var nums = (cl.match(/\d+/g) || []).map(Number).filter(Number.isFinite);
-      var span = nums.length >= 2 ? Math.max(1, nums[nums.length - 1] - nums[0] + 1) : (nums.length === 1 ? nums[0] : 1);
+      var span = calculateCountSpan(step);
       if (pending.steps.length > sectionSize && countAccum > 0 && countAccum + span > sectionSize) {
         target = { id:createLocalId('section'), name:'Section ' + (data.sections.length + 1), steps:[] };
         data.sections.push(target);
@@ -2896,7 +2895,7 @@
     /* ── Full panel ── */
     host.innerHTML = `<div class="stepper-helper-panel" style="width:min(400px, calc(100vw - 24px));max-width:calc(100vw - 24px);background:#f8fafc;border:1px solid rgba(99,102,241,.16);border-radius:24px;box-shadow:0 18px 48px rgba(0,0,0,.2);overflow:hidden;">
       <div class="stepper-helper-header" style="padding:.85rem 1rem;background:#4f46e5;color:#fff;display:flex;align-items:center;gap:.5rem;">
-        <span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#1F2A44,#312E81);box-shadow:0 2px 6px rgba(0,0,0,.18);position:relative;flex-shrink:0;"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 512 512" fill="none"><rect x="24" y="24" width="464" height="464" rx="112" fill="url(#_hfg)"/><defs><linearGradient id="_hfg" x1="64" y1="56" x2="448" y2="456" gradientUnits="userSpaceOnUse"><stop stop-color="#1F2A44"/><stop offset="1" stop-color="#312E81"/></linearGradient><linearGradient id="_hfa" x1="110" y1="392" x2="408" y2="160" gradientUnits="userSpaceOnUse"><stop stop-color="#F97316"/><stop offset="1" stop-color="#FDBA74"/></linearGradient></defs><path d="M116 344C116 326.327 130.327 312 148 312H230V392H148C130.327 392 116 377.673 116 360V344Z" fill="#F8FAFC" fill-opacity=".96"/><path d="M196 264C196 246.327 210.327 232 228 232H310V312H228C210.327 312 196 297.673 196 280V264Z" fill="#F8FAFC" fill-opacity=".96"/><path d="M276 184C276 166.327 290.327 152 308 152H390C407.673 152 422 166.327 422 184V232H308C290.327 232 276 217.673 276 200V184Z" fill="#F8FAFC" fill-opacity=".96"/><path d="M148 392L148 360C148 342.327 162.327 328 180 328H230V312H228C210.327 312 196 297.673 196 280V264C196 246.327 210.327 232 228 232H310V216C310 198.327 324.327 184 342 184H390" stroke="url(#_hfa)" stroke-width="36" stroke-linecap="round" stroke-linejoin="round"/><circle cx="390" cy="184" r="26" fill="#FDBA74"/><circle cx="390" cy="184" r="10" fill="#FFF7ED"/></svg><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" style="position:absolute;bottom:-1px;right:-1px;filter:drop-shadow(0 1px 1px rgba(0,0,0,.3));"><circle cx="12" cy="12" r="12" fill="#a78bfa"/><path d="M7 13l2-5h6l2 5M8 16h8M10 13v3M14 13v3" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        ${HELPER_SQUIRCLE_ICON}
         <div style="font-weight:900;flex:1;">Site Helper${isPremiumSession() ? ' <span style="font-size:11px;background:rgba(255,255,255,.22);padding:2px 8px;border-radius:999px;margin-left:4px;">PRO</span>' : ''}</div>
         ${clearBtn}
         <button type="button" data-chat-close="1" style="border:none;background:rgba(255,255,255,.18);color:#fff;border-radius:999px;padding:.3rem .6rem;font-weight:900;cursor:pointer;transition:background .15s;" title="Close">✕</button>
