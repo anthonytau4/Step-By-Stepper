@@ -2665,6 +2665,9 @@
     const brain = window.__stepperHelperBrain;
     if (brain && brain.injectHelperStyles) brain.injectHelperStyles();
 
+    /* ── Set up delegated event handler once ── */
+    _ensureHelperDelegation(host);
+
     /* ── Restore persisted chat history on first open ── */
     if (brain && !state._chatHistoryRestored) {
       state._chatHistoryRestored = true;
@@ -2676,16 +2679,6 @@
     if (!state.chatOpen) {
       const isNew = !(brain && brain.hasCompletedOnboarding && brain.hasCompletedOnboarding());
       host.innerHTML = `<button type="button" data-chat-open="1" aria-label="Open site helper" style="border:none;background:#4f46e5;color:#fff;width:58px;height:58px;border-radius:999px;font-size:26px;box-shadow:0 12px 30px rgba(0,0,0,.18);position:relative;transition:transform .15s;cursor:pointer;"${isNew ? ' title="Click for help!"' : ''}>💬${isNew ? '<span style="position:absolute;top:-2px;right:-2px;width:14px;height:14px;background:#ef4444;border-radius:50%;border:2px solid #fff;"></span>' : ''}</button>`;
-      host.querySelector('[data-chat-open="1"]').addEventListener('click', ()=>{
-        if (isCompactViewport()) state.communityGlossaryOpen = false;
-        state.chatOpen = true;
-        /* Show onboarding message on first open */
-        if (brain && brain.getOnboardingMessage) {
-          const welcome = brain.getOnboardingMessage({});
-          if (welcome) state.chatMessages.unshift(welcome);
-        }
-        renderCommunityGlossary(); renderSiteHelper();
-      });
       return;
     }
 
@@ -2752,74 +2745,77 @@
     /* ── Auto-scroll to bottom ── */
     const list = host.querySelector('[data-chat-messages="1"]');
     if (list) list.scrollTop = list.scrollHeight;
+  }
 
-    /* ── Event: Close ── */
-    host.querySelector('[data-chat-close="1"]').addEventListener('click', ()=>{
-      state.chatOpen = false;
-      if (brain && brain.saveChatHistory) brain.saveChatHistory(state.chatMessages);
-      renderSiteHelper();
+  function _ensureHelperDelegation(host) {
+    if (host._stepperDelegated) return;
+    host._stepperDelegated = true;
+    host.addEventListener('click', function (e) {
+      const target = e.target.closest ? e.target.closest('[data-chat-open="1"],[data-chat-close="1"],[data-chat-clear="1"],[data-chip-text],[data-fb-idx]') : null;
+      if (!target) return;
+      if (target.hasAttribute('data-chat-open')) {
+        if (isCompactViewport()) state.communityGlossaryOpen = false;
+        state.chatOpen = true;
+        const brain2 = window.__stepperHelperBrain;
+        if (brain2 && brain2.getOnboardingMessage) {
+          const welcome = brain2.getOnboardingMessage({});
+          if (welcome) state.chatMessages.unshift(welcome);
+        }
+        renderCommunityGlossary(); renderSiteHelper();
+      } else if (target.hasAttribute('data-chat-close')) {
+        state.chatOpen = false;
+        const brain2 = window.__stepperHelperBrain;
+        if (brain2 && brain2.saveChatHistory) brain2.saveChatHistory(state.chatMessages);
+        renderSiteHelper();
+      } else if (target.hasAttribute('data-chat-clear')) {
+        state.chatMessages = [];
+        state.chatDraft = '';
+        const brain2 = window.__stepperHelperBrain;
+        if (brain2 && brain2.clearChatHistory) brain2.clearChatHistory();
+        renderSiteHelper();
+      } else if (target.hasAttribute('data-chip-text')) {
+        const chipText = target.getAttribute('data-chip-text');
+        if (!chipText) return;
+        state.chatMessages.push({ role:'user', text: chipText });
+        state.chatDraft = '';
+        const brain2 = window.__stepperHelperBrain;
+        if (brain2 && brain2.saveChatHistory) brain2.saveChatHistory(state.chatMessages);
+        renderSiteHelper();
+        askSiteHelper(chipText);
+      } else if (target.hasAttribute('data-fb-idx')) {
+        const idx = parseInt(target.getAttribute('data-fb-idx'), 10);
+        const val = target.getAttribute('data-fb-val');
+        const brain2 = window.__stepperHelperBrain;
+        if (brain2 && brain2.saveFeedback) brain2.saveFeedback(idx, val);
+        target.classList.add('voted');
+        target.style.opacity = '1';
+        const parent = target.parentElement;
+        if (parent) {
+          const siblings = parent.querySelectorAll('.stepper-helper-fb-btn');
+          for (let s = 0; s < siblings.length; s++) {
+            if (siblings[s] !== target) { siblings[s].style.opacity = '.2'; siblings[s].style.pointerEvents = 'none'; }
+          }
+        }
+      }
     });
-
-    /* ── Event: Clear chat ── */
-    const clearEl = host.querySelector('[data-chat-clear="1"]');
-    if (clearEl) clearEl.addEventListener('click', ()=>{
-      state.chatMessages = [];
-      state.chatDraft = '';
-      if (brain && brain.clearChatHistory) brain.clearChatHistory();
-      renderSiteHelper();
-    });
-
-    /* ── Event: Input ── */
-    const input = host.querySelector('[data-chat-input="1"]');
-    if (input) {
-      input.addEventListener('input', ()=>{ state.chatDraft = input.value; });
-    }
-
-    /* ── Event: Submit ── */
-    host.querySelector('[data-chat-form="1"]').addEventListener('submit', (event)=>{
-      event.preventDefault();
+    host.addEventListener('submit', function (e) {
+      const form = e.target.closest ? e.target.closest('[data-chat-form="1"]') : null;
+      if (!form) return;
+      e.preventDefault();
       const value = String(state.chatDraft || '').trim();
       if (!value) return;
       state.chatMessages.push({ role:'user', text:value });
       state.chatDraft = '';
-      if (brain && brain.saveChatHistory) brain.saveChatHistory(state.chatMessages);
+      const brain2 = window.__stepperHelperBrain;
+      if (brain2 && brain2.saveChatHistory) brain2.saveChatHistory(state.chatMessages);
       renderSiteHelper();
       askSiteHelper(value);
     });
-
-    /* ── Event: Quick-action chips ── */
-    const chips = host.querySelectorAll('[data-chip-text]');
-    for (let c = 0; c < chips.length; c++) {
-      chips[c].addEventListener('click', function () {
-        const chipText = this.getAttribute('data-chip-text');
-        if (!chipText) return;
-        state.chatMessages.push({ role:'user', text: chipText });
-        state.chatDraft = '';
-        if (brain && brain.saveChatHistory) brain.saveChatHistory(state.chatMessages);
-        renderSiteHelper();
-        askSiteHelper(chipText);
-      });
-    }
-
-    /* ── Event: Feedback buttons ── */
-    const fbBtns = host.querySelectorAll('[data-fb-idx]');
-    for (let f = 0; f < fbBtns.length; f++) {
-      fbBtns[f].addEventListener('click', function () {
-        const idx = parseInt(this.getAttribute('data-fb-idx'), 10);
-        const val = this.getAttribute('data-fb-val');
-        if (brain && brain.saveFeedback) brain.saveFeedback(idx, val);
-        this.classList.add('voted');
-        this.style.opacity = '1';
-        /* Dim the other button */
-        const parent = this.parentElement;
-        if (parent) {
-          const siblings = parent.querySelectorAll('.stepper-helper-fb-btn');
-          for (let s = 0; s < siblings.length; s++) {
-            if (siblings[s] !== this) { siblings[s].style.opacity = '.2'; siblings[s].style.pointerEvents = 'none'; }
-          }
-        }
-      });
-    }
+    host.addEventListener('input', function (e) {
+      if (e.target && e.target.matches && e.target.matches('[data-chat-input="1"]')) {
+        state.chatDraft = e.target.value;
+      }
+    });
   }
 
   function renderQuickActions(){

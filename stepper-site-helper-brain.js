@@ -455,8 +455,8 @@
 
     // Bold
     escaped = escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-    // Italic
-    escaped = escaped.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>');
+    // Italic (simple pattern for broad browser compat — no lookbehind)
+    escaped = escaped.replace(/\*([^*]+)\*/g, '<em>$1</em>');
     // Bullet lists
     escaped = escaped.replace(/^[•·]\s+(.+)$/gm, '<li>$1</li>');
     escaped = escaped.replace(/(<li>.*<\/li>\n?)+/g, function (match) {
