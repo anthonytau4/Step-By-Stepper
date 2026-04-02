@@ -2047,6 +2047,127 @@ app.post("/api/collaborators/respond", requireGoogleUser, async (req, res) => {
   res.json({ ok: true, item: invite });
 });
 
+/* ═══════════════════════════════════════════════════════════
+   FRIENDS ENDPOINTS (no dance ID required)
+   ═══════════════════════════════════════════════════════════ */
+app.post("/api/friends/add", requireGoogleUser, async (req, res) => {
+  const db = await readDb();
+  const key = userKeyFromClaims(req.stepperClaims);
+  touchUser(db, req.stepperUser, key);
+  const email = String(req.body?.email || "").trim().toLowerCase();
+  if (!email || email.length > 254 || email.indexOf("@") < 1 || email.indexOf("@") !== email.lastIndexOf("@") || email.indexOf(".") < 3)
+    return res.status(400).json({ ok: false, error: "Invalid email address." });
+  if (email === normalizeEmail(req.stepperUser?.email))
+    return res.status(400).json({ ok: false, error: "You can't add yourself as a friend." });
+  if (!db.friends) db.friends = [];
+  const existing = db.friends.find(f => f && f.fromKey === key && f.toEmail === email);
+  if (existing) return res.json({ ok: true, message: "Already sent a friend request.", item: existing });
+  const item = {
+    id: `friend-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    fromKey: key,
+    fromEmail: normalizeEmail(req.stepperUser?.email),
+    fromName: String(req.stepperUser?.name || "").trim(),
+    toEmail: email,
+    toName: "",
+    status: "invited",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  db.friends.push(item);
+  db.friends = db.friends.slice(-5000);
+  await writeDb(db);
+  res.json({ ok: true, message: "Friend request sent!", item });
+});
+
+app.get("/api/friends/list", requireGoogleUser, async (req, res) => {
+  const db = await readDb();
+  const key = userKeyFromClaims(req.stepperClaims);
+  const email = normalizeEmail(req.stepperUser?.email);
+  const list = Array.isArray(db.friends) ? db.friends : [];
+  const items = list.filter(f => f && (f.fromKey === key || f.toEmail === email)).map(f => {
+    const isSender = f.fromKey === key;
+    return Object.assign({}, f, { direction: isSender ? "sent" : "received" });
+  });
+  res.json({ ok: true, items });
+});
+
+app.post("/api/friends/respond", requireGoogleUser, async (req, res) => {
+  const db = await readDb();
+  const email = normalizeEmail(req.stepperUser?.email);
+  const friendId = String(req.body?.friendId || "").trim();
+  const accept = req.body?.accept === true;
+  if (!db.friends) db.friends = [];
+  const item = db.friends.find(f => f && f.id === friendId && f.toEmail === email);
+  if (!item) return res.status(404).json({ ok: false, error: "Friend request not found." });
+  item.status = accept ? "accepted" : "declined";
+  item.toName = String(req.stepperUser?.name || item.toName || "").trim();
+  item.updatedAt = new Date().toISOString();
+  await writeDb(db);
+  res.json({ ok: true, item });
+});
+
+app.post("/api/friends/remove", requireGoogleUser, async (req, res) => {
+  const db = await readDb();
+  const key = userKeyFromClaims(req.stepperClaims);
+  const email = normalizeEmail(req.stepperUser?.email);
+  const friendId = String(req.body?.friendId || "").trim();
+  if (!db.friends) db.friends = [];
+  const idx = db.friends.findIndex(f => f && f.id === friendId && (f.fromKey === key || f.toEmail === email));
+  if (idx === -1) return res.status(404).json({ ok: false, error: "Friend not found." });
+  db.friends.splice(idx, 1);
+  await writeDb(db);
+  res.json({ ok: true, removedId: friendId });
+});
+
+/* ═══════════════════════════════════════════════════════════
+   FRIEND CHAT ENDPOINTS
+   ═══════════════════════════════════════════════════════════ */
+app.get("/api/friends/chat", requireGoogleUser, async (req, res) => {
+  const db = await readDb();
+  const key = userKeyFromClaims(req.stepperClaims);
+  const email = normalizeEmail(req.stepperUser?.email);
+  const friendId = String(req.query?.friendId || "").trim();
+  if (!friendId) return res.status(400).json({ ok: false, error: "Missing friendId." });
+  if (!db.friends) db.friends = [];
+  const friendship = db.friends.find(f => f && f.id === friendId && f.status === "accepted" && (f.fromKey === key || f.toEmail === email));
+  if (!friendship) return res.status(403).json({ ok: false, error: "You are not friends with this person." });
+  if (!db.friendChat) db.friendChat = [];
+  const messages = db.friendChat
+    .filter(m => m && m.friendshipId === friendId)
+    .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+  res.json({ ok: true, messages });
+});
+
+app.post("/api/friends/chat", requireGoogleUser, async (req, res) => {
+  const db = await readDb();
+  const key = userKeyFromClaims(req.stepperClaims);
+  const email = normalizeEmail(req.stepperUser?.email);
+  const friendId = String(req.body?.friendId || "").trim();
+  const text = String(req.body?.text || "").trim();
+  if (!friendId) return res.status(400).json({ ok: false, error: "Missing friendId." });
+  if (!text) return res.status(400).json({ ok: false, error: "Message text is required." });
+  if (!db.friends) db.friends = [];
+  const friendship = db.friends.find(f => f && f.id === friendId && f.status === "accepted" && (f.fromKey === key || f.toEmail === email));
+  if (!friendship) return res.status(403).json({ ok: false, error: "You are not friends with this person." });
+  if (!db.friendChat) db.friendChat = [];
+  const item = {
+    id: `fchat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    friendshipId: friendId,
+    senderKey: key,
+    senderEmail: email,
+    senderName: String(req.stepperUser?.name || "").trim(),
+    text: text.slice(0, 4000),
+    createdAt: new Date().toISOString()
+  };
+  db.friendChat.push(item);
+  db.friendChat = db.friendChat.slice(-10000);
+  await writeDb(db);
+  const messages = db.friendChat
+    .filter(m => m && m.friendshipId === friendId)
+    .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+  res.json({ ok: true, messages });
+});
+
 app.post("/api/submissions/request", requireGoogleUser, async (req, res) => {
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);

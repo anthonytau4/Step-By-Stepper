@@ -287,34 +287,11 @@
 
   function autoSectionizeImportedSteps(steps, phraseCounts) {
     const source = Array.isArray(steps) ? steps.slice() : [];
-    const size = Math.max(1, Number(phraseCounts) || 8);
     if (!source.length) return [];
-    const sections = [];
-    let current = [];
-    let boundary = size;
-    let accumSpan = 0;
-    source.forEach((step, index) => {
-      current.push(step);
-      const countText = String(step && (step.counts || step.count) || '');
-      const ceiling = parseCountCeiling(countText);
-      /* ── Track accumulated count span for smart splitting ── */
-      const countNums = (countText.match(/\d+/g) || []).map(Number).filter(Number.isFinite);
-      var span = countNums.length >= 2 ? Math.max(1, countNums[countNums.length - 1] - countNums[0] + 1) : (countNums.length === 1 ? countNums[0] : 1);
-      accumSpan += span;
-      const reachedBoundary = current.length > 0 && (
-        ceiling >= boundary ||
-        accumSpan >= size ||
-        new RegExp('(?:^|\\D)' + boundary + '(?:\\D|$)').test(countText)
-      );
-      const isLast = index === source.length - 1;
-      if (reachedBoundary || isLast) {
-        sections.push({ id: makeId(), name: '', steps: current.map((item, itemIndex) => toEditorStep(item, itemIndex + 1)) });
-        current = [];
-        boundary += size;
-        accumSpan = 0;
-      }
-    });
-    return sections.filter((section) => Array.isArray(section.steps) && section.steps.length);
+    /* ── Place all imported steps into a single section.
+       Users can split sections manually via the right-click
+       "Split Section Here" option in the editor. ── */
+    return [{ id: makeId(), name: '', steps: source.map((item, index) => toEditorStep(item, index + 1)) }];
   }
 
   function buildImportedSections(data, importedSteps) {

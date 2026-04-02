@@ -38,7 +38,11 @@
     lastRefresh: 0,
     error: null,
     success: null,
-    activeView: 'list'  /* 'list' | 'pending' | 'add' */
+    activeView: 'list',  /* 'list' | 'pending' | 'add' | 'chat' */
+    chatFriend: null,     /* currently chatting friend object */
+    chatMessages: [],
+    chatText: '',
+    chatLoading: false
   };
 
   /* ── Persistence ── */
@@ -122,7 +126,7 @@
     friendsState.loading = true;
     renderFriendsPage();
 
-    return apiFetch('/api/collaborators?scope=all', { headers: authHeaders() })
+    return apiFetch('/api/friends/list', { headers: authHeaders() })
       .then(function (data) {
         var items = (data && Array.isArray(data.items)) ? data.items : [];
         friendsState.friends = items.filter(function (f) { return f.status === 'accepted'; });
@@ -165,10 +169,10 @@
     friendsState.success = null;
     renderFriendsPage();
 
-    apiFetch('/api/collaborators/invite', {
+    apiFetch('/api/friends/add', {
       method: 'POST',
       headers: authHeaders(),
-      body: JSON.stringify({ email: trimmed, type: 'friend' })
+      body: JSON.stringify({ email: trimmed })
     })
       .then(function (data) {
         if (data && data.ok) {
@@ -194,10 +198,10 @@
     friendsState.loading = true;
     renderFriendsPage();
 
-    apiFetch('/api/collaborators/respond', {
+    apiFetch('/api/friends/respond', {
       method: 'POST',
       headers: authHeaders(),
-      body: JSON.stringify({ inviteId: inviteId, accept: !!accept })
+      body: JSON.stringify({ friendId: inviteId, accept: !!accept })
     })
       .then(function () {
         friendsState.success = accept ? 'Friend request accepted!' : 'Friend request declined.';
@@ -216,7 +220,7 @@
     friendsState.loading = true;
     renderFriendsPage();
 
-    apiFetch('/api/collaborators/remove', {
+    apiFetch('/api/friends/remove', {
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify({ friendId: friendId })
@@ -230,6 +234,66 @@
         friendsState.loading = false;
         renderFriendsPage();
       });
+  }
+
+  /* ── Chat helpers ── */
+  function openChat(friend) {
+    friendsState.chatFriend = friend;
+    friendsState.chatMessages = [];
+    friendsState.chatText = '';
+    friendsState.chatLoading = true;
+    friendsState.activeView = 'chat';
+    renderFriendsPage();
+    loadChatMessages(friend.id);
+  }
+
+  function loadChatMessages(friendId) {
+    if (!isSignedIn()) return;
+    apiFetch('/api/friends/chat?friendId=' + encodeURIComponent(friendId), { headers: authHeaders() })
+      .then(function (data) {
+        friendsState.chatMessages = (data && Array.isArray(data.messages)) ? data.messages : [];
+      })
+      .catch(function () {
+        friendsState.error = 'Could not load chat messages.';
+      })
+      .finally(function () {
+        friendsState.chatLoading = false;
+        renderFriendsPage();
+        scrollChatToBottom();
+      });
+  }
+
+  function sendChatMessage(text) {
+    if (!isSignedIn() || !friendsState.chatFriend) return;
+    var trimmed = String(text || '').trim();
+    if (!trimmed) return;
+    friendsState.chatLoading = true;
+    renderFriendsPage();
+
+    apiFetch('/api/friends/chat', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ friendId: friendsState.chatFriend.id, text: trimmed })
+    })
+      .then(function (data) {
+        friendsState.chatMessages = (data && Array.isArray(data.messages)) ? data.messages : [];
+        friendsState.chatText = '';
+      })
+      .catch(function () {
+        friendsState.error = 'Could not send message.';
+      })
+      .finally(function () {
+        friendsState.chatLoading = false;
+        renderFriendsPage();
+        scrollChatToBottom();
+      });
+  }
+
+  function scrollChatToBottom() {
+    setTimeout(function () {
+      var chatBox = document.querySelector('[data-friends-chat-messages]');
+      if (chatBox) chatBox.scrollTop = chatBox.scrollHeight;
+    }, 50);
   }
 
   /* ════════════════════════════════════════════════════════════
@@ -296,6 +360,8 @@
         html += renderAddFriend(theme);
       } else if (friendsState.activeView === 'pending') {
         html += renderPendingInvites(theme);
+      } else if (friendsState.activeView === 'chat') {
+        html += renderChatView(theme);
       } else {
         html += renderFriendsList(theme);
       }
@@ -319,10 +385,12 @@
   }
 
   function renderSubNav(theme) {
+    var chatIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
     var views = [
       { key: 'list', label: 'My Friends', icon: _ic.people, count: friendsState.friends.length },
       { key: 'pending', label: 'Pending', icon: _ic.mail, count: friendsState.pendingSent.length + friendsState.pendingReceived.length },
-      { key: 'add', label: 'Add Friend', icon: _ic.add, count: 0 }
+      { key: 'add', label: 'Add Friend', icon: _ic.add, count: 0 },
+      { key: 'chat', label: 'Chat', icon: chatIcon, count: 0 }
     ];
     var html = '<div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;">';
     for (var i = 0; i < views.length; i++) {
@@ -439,6 +507,7 @@
     /* Status */
     html += '<div style="display:flex;align-items:center;gap:6px;">';
     html += '<span style="width:8px;height:8px;border-radius:999px;background:#22c55e;display:inline-block;" title="Connected"></span>';
+    html += '<button data-friends-chat-open="' + escapeHtml(friend.id || '') + '" title="Chat" style="background:none;border:none;cursor:pointer;font-size:16px;opacity:.5;transition:opacity .2s;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button>';
     html += '<button data-friends-remove="' + escapeHtml(friend.id || friend.email || '') + '" title="Remove friend" style="background:none;border:none;cursor:pointer;font-size:16px;opacity:.4;transition:opacity .2s;">' + _ic.close + '</button>';
     html += '</div>';
 
@@ -512,6 +581,93 @@
     return html;
   }
 
+  function renderChatView(theme) {
+    var html = '';
+    var friend = friendsState.chatFriend;
+    var profile = getProfile();
+    var myEmail = (profile.email || '').toLowerCase();
+
+    if (!friend) {
+      /* Show friend picker */
+      var friends = friendsState.friends;
+      html += '<div class="' + theme.soft + '" style="border:1px solid;border-radius:18px;padding:24px;margin-bottom:16px;">';
+      html += '<h3 style="font-size:16px;font-weight:800;margin:0 0 8px;">Select a Friend to Chat With</h3>';
+      if (!friends.length) {
+        html += '<p class="' + theme.subtle + '" style="font-size:13px;margin:0;">Add some friends first to start chatting!</p>';
+      } else {
+        html += '<div style="display:grid;gap:8px;">';
+        for (var i = 0; i < friends.length; i++) {
+          var f = friends[i];
+          var displayName = escapeHtml(f.name || f.toName || f.fromName || f.email || f.toEmail || f.fromEmail || 'Friend');
+          var displayEmail = escapeHtml(f.email || f.toEmail || f.fromEmail || '');
+          html += '<button data-friends-chat-start="' + escapeHtml(f.id || '') + '" style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:14px;border:1px solid;cursor:pointer;text-align:left;transition:all .2s ease;' + theme.cardBg + '">';
+          html += '<div style="width:36px;height:36px;border-radius:999px;background:#4f46e5;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:15px;flex-shrink:0;">' + displayName.charAt(0).toUpperCase() + '</div>';
+          html += '<div style="flex:1;min-width:0;"><div style="font-weight:800;font-size:13px;">' + displayName + '</div>';
+          html += '<div class="' + theme.subtle + '" style="font-size:11px;">' + displayEmail + '</div></div>';
+          html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;opacity:.4;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+          html += '</button>';
+        }
+        html += '</div>';
+      }
+      html += '</div>';
+      return html;
+    }
+
+    /* Chat with specific friend */
+    var friendName = escapeHtml(friend.name || friend.toName || friend.fromName || friend.email || friend.toEmail || friend.fromEmail || 'Friend');
+
+    html += '<div style="display:flex;flex-direction:column;height:400px;border:1px solid;border-radius:18px;overflow:hidden;' + theme.cardBg + '">';
+
+    /* Chat header */
+    html += '<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid;' + (theme.dark ? 'border-color:#2d2d44;background:#1e1e2e;' : 'border-color:#e5e7eb;background:#f9fafb;') + '">';
+    html += '<button data-friends-chat-back style="background:none;border:none;cursor:pointer;font-size:18px;opacity:.6;transition:opacity .2s;">&larr;</button>';
+    html += '<div style="width:32px;height:32px;border-radius:999px;background:#4f46e5;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:14px;flex-shrink:0;">' + friendName.charAt(0).toUpperCase() + '</div>';
+    html += '<div style="font-weight:800;font-size:14px;">' + friendName + '</div>';
+    html += '</div>';
+
+    /* Messages area */
+    html += '<div data-friends-chat-messages style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:8px;">';
+    if (friendsState.chatLoading) {
+      html += '<div style="text-align:center;padding:20px;"><div class="stepper-friends-spinner"></div></div>';
+    } else if (!friendsState.chatMessages.length) {
+      html += '<div style="text-align:center;padding:40px 16px;opacity:.5;font-size:13px;">No messages yet. Say hello!</div>';
+    } else {
+      for (var j = 0; j < friendsState.chatMessages.length; j++) {
+        var msg = friendsState.chatMessages[j];
+        var isMe = (msg.senderEmail || '').toLowerCase() === myEmail;
+        var align = isMe ? 'flex-end' : 'flex-start';
+        var bubbleBg = isMe ? 'background:#4f46e5;color:#fff;' : (theme.dark ? 'background:#2d2d44;color:#e5e7eb;' : 'background:#f0f0f0;color:#1f2937;');
+        html += '<div style="display:flex;justify-content:' + align + ';">';
+        html += '<div style="max-width:75%;padding:10px 14px;border-radius:16px;font-size:13px;line-height:1.5;word-wrap:break-word;' + bubbleBg + '">';
+        html += escapeHtml(msg.text || '');
+        html += '<div style="font-size:10px;opacity:.6;margin-top:4px;">' + escapeHtml(msg.senderName || '') + ' &middot; ' + formatTime(msg.createdAt) + '</div>';
+        html += '</div></div>';
+      }
+    }
+    html += '</div>';
+
+    /* Input area */
+    html += '<div style="display:flex;gap:8px;padding:12px 16px;border-top:1px solid;' + (theme.dark ? 'border-color:#2d2d44;background:#1e1e2e;' : 'border-color:#e5e7eb;background:#f9fafb;') + '">';
+    html += '<input data-friends-chat-input type="text" placeholder="Type a message…" value="' + escapeHtml(friendsState.chatText) + '" ';
+    html += 'style="flex:1;border-radius:12px;border:1px solid;padding:10px 14px;font-size:13px;outline:none;' + theme.inputBg + '" />';
+    html += '<button data-friends-chat-send class="stepper-google-cta" style="background:#4f46e5;color:#fff;padding:10px 16px;border-radius:12px;font-weight:800;font-size:13px;white-space:nowrap;">Send</button>';
+    html += '</div>';
+
+    html += '</div>';
+    return html;
+  }
+
+  function formatTime(isoStr) {
+    if (!isoStr) return '';
+    try {
+      var d = new Date(isoStr);
+      var now = new Date();
+      var sameDay = d.toDateString() === now.toDateString();
+      if (sameDay) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch (e) { return ''; }
+  }
+
   /* ════════════════════════════════════════════════════════════
      EVENT WIRING
      ════════════════════════════════════════════════════════════ */
@@ -580,6 +736,42 @@
         var tab = document.getElementById('stepper-google-signin-tab');
         if (tab) tab.click();
       });
+    }
+
+    /* Chat - open from friend card */
+    page.querySelectorAll('[data-friends-chat-open]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var fId = btn.getAttribute('data-friends-chat-open');
+        var friend = friendsState.friends.find(function (f) { return f.id === fId; });
+        if (friend) openChat(friend);
+      });
+    });
+
+    /* Chat - pick from list */
+    page.querySelectorAll('[data-friends-chat-start]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var fId = btn.getAttribute('data-friends-chat-start');
+        var friend = friendsState.friends.find(function (f) { return f.id === fId; });
+        if (friend) openChat(friend);
+      });
+    });
+
+    /* Chat - back button */
+    var chatBack = page.querySelector('[data-friends-chat-back]');
+    if (chatBack) chatBack.addEventListener('click', function () {
+      friendsState.chatFriend = null;
+      friendsState.chatMessages = [];
+      renderFriendsPage();
+    });
+
+    /* Chat - send message */
+    var chatSend = page.querySelector('[data-friends-chat-send]');
+    var chatInput = page.querySelector('[data-friends-chat-input]');
+    if (chatSend && chatInput) {
+      chatSend.addEventListener('click', function () { sendChatMessage(chatInput.value); });
+      chatInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') sendChatMessage(chatInput.value); });
+      chatInput.addEventListener('input', function () { friendsState.chatText = chatInput.value; });
+      if (friendsState.chatFriend) setTimeout(function () { chatInput.focus(); }, 100);
     }
   }
 
