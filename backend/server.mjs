@@ -1995,7 +1995,7 @@ app.post("/api/collaborators/invite", requireGoogleUser, async (req, res) => {
   const danceId = String(req.body?.danceId || "").trim();
   const email = String(req.body?.email || "").trim().toLowerCase();
   if (!danceId) return res.status(400).json({ ok: false, error: "Missing dance ID." });
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ ok: false, error: "Invalid email address." });
+  if (!email || email.length > 254 || email.indexOf("@") < 1 || email.indexOf("@") !== email.lastIndexOf("@") || email.indexOf(".") < 3) return res.status(400).json({ ok: false, error: "Invalid email address." });
   if (email === normalizeEmail(req.stepperUser?.email)) return res.status(400).json({ ok: false, error: "You can't invite yourself." });
   if (!db.collaborators) db.collaborators = [];
   const existing = db.collaborators.find(c => c && c.danceId === danceId && c.email === email && c.ownerKey === key);

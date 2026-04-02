@@ -1454,8 +1454,11 @@
         else score += 2;
         if (usedNames[p.name]) score -= 4;
         /* Seeded randomness for variety */
+        var seedStr = p.name + sectionSteps.length + prompt;
         var seed = 0;
-        for (var si = 0; si < (p.name + sectionSteps.length + prompt).length; si++) seed = (seed + (p.name + sectionSteps.length + prompt).charCodeAt(si % (p.name + sectionSteps.length + prompt).length) * (si + 1)) % 997;
+        for (var si = 0; si < seedStr.length; si++) {
+          seed = (seed + seedStr.charCodeAt(si % seedStr.length) * (si + 1)) % 997;
+        }
         score += (seed / 997) * 2;
         if (score > bestScore) { bestScore = score; best = p; }
       }
@@ -3019,7 +3022,7 @@
     host.style.top = 'auto';
     host.style.left = 'auto';
     host.style.transform = 'none';
-    host.style.right = '88px';
+    host.style.right = '88px'; /* offset right to avoid overlapping the 64px chat bubble at right:12px */
     host.style.bottom = state.chatOpen ? '92px' : '18px';
     host.style.zIndex = '8500';
     if (!shouldShow) { host.style.display='none'; host.innerHTML=''; return; }

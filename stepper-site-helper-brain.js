@@ -331,7 +331,7 @@
     /* ── AI Helper Page Actions ────────────────────────── */
     { patterns: [/\bhelper.*\bnavigate\b/, /\bhelper.*\bgo to\b/, /\bcan.*helper.*\bopen\b/],
       answer: 'Yes! The AI helper can navigate for you. Try saying:\n• "Go to Build" / "Open sheet" / "Open saved dances"\n• "Open featured" / "Open sign in" / "Open subscription"\n• "Open admin" (admin only)\n\nJust tell it where you want to go!' },
-    { patterns: [/\b8.?count\b.*\bwaltz\b|\bwaltz\b.*\b8.?count\b|\bdance.*type\b|\bsection.*split\b/],
+    { patterns: [/\b8.?count\b/, /\bwaltz\b/, /\bdance\s*type\b/, /\bsection\s*split\b/, /\bcount\s*limit\b/],
       answer: 'You can set your dance type to **8-count** (standard) or **waltz** (6-count). This controls where sections auto-split when adding steps.\n\nSay "set dance type 8-count" or "set dance type waltz" to the helper, or it will use 8-count by default.' },
     { patterns: [/\brandom.*dance\b|\bgenerate.*flow\b|\bperfect.*flow\b|\b10\/10\b/],
       answer: 'The helper can generate a **random 10/10 flowability dance section** using glossary steps with perfect foot alternation and variety. Say "generate a random 10/10 dance" or "random perfect flow section" to try it!' },
