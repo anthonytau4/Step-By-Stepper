@@ -1,7 +1,7 @@
 /**
  * stepper-step-dictionary.js
  * ─────────────────────────────────────────────────────────────
- * Enhanced step-name normalization engine with 200+ standard
+ * Enhanced step-name normalization engine with 100+ standard
  * line-dance terms, fuzzy matching, disambiguation prompts,
  * and foot/direction inference.
  *
@@ -24,12 +24,12 @@
     { name: 'Walk Back Right',         aliases: ['walk back r','step back right','step r back'], counts: 1, feet: 'R', description: 'Step right foot back', category: 'walking' },
     { name: 'Walk Back Left',          aliases: ['walk back l','step back left','step l back'], counts: 1, feet: 'L', description: 'Step left foot back', category: 'walking' },
     { name: 'Walk Forward x2',         aliases: ['walk forward 2','walk walk','two walks forward','2 walks forward','walk forward x2'], counts: 2, feet: 'R', description: 'Walk forward right, walk forward left', category: 'walking' },
-    { name: 'Walk Forward x3',         aliases: ['walk forward 3','three walks forward','3 walks forward','walk forward x3','walk forward x3 with a'], counts: 3, feet: 'R', description: 'Walk forward right, left, right', category: 'walking' },
+    { name: 'Walk Forward x3',         aliases: ['walk forward 3','three walks forward','3 walks forward','walk forward x3'], counts: 3, feet: 'R', description: 'Walk forward right, left, right', category: 'walking' },
     { name: 'Walk Back x2',            aliases: ['walk back 2','two walks back','2 walks back','walk back x2'], counts: 2, feet: 'R', description: 'Walk back right, walk back left', category: 'walking' },
-    { name: 'Walk Back x3',            aliases: ['walk back 3','three walks back','3 walks back','walk back x3','walk 3 times not 2','walking back counts'], counts: 3, feet: 'R', description: 'Walk back right, left, right', category: 'walking' },
+    { name: 'Walk Back x3',            aliases: ['walk back 3','three walks back','3 walks back','walk back x3'], counts: 3, feet: 'R', description: 'Walk back right, left, right', category: 'walking' },
 
     /* ── Vines / Grapevines ─────────────────────────────── */
-    { name: 'Vine Right',              aliases: ['grapevine right','grapevine r','vine r','not a vine just walking'], counts: 4, feet: 'R', description: 'Step right, cross left behind, step right, touch left beside', category: 'vine' },
+    { name: 'Vine Right',              aliases: ['grapevine right','grapevine r','vine r'], counts: 4, feet: 'R', description: 'Step right, cross left behind, step right, touch left beside', category: 'vine' },
     { name: 'Vine Left',               aliases: ['grapevine left','grapevine l','vine l'], counts: 4, feet: 'L', description: 'Step left, cross right behind, step left, touch right beside', category: 'vine' },
     { name: 'Vine Right with Turn',    aliases: ['vine right 1/4 turn','grapevine right turn','vine r turn'], counts: 4, feet: 'R', description: 'Step right, cross left behind, turn 1/4 right stepping right, touch left beside', category: 'vine' },
     { name: 'Vine Left with Turn',     aliases: ['vine left 1/4 turn','grapevine left turn','vine l turn'], counts: 4, feet: 'L', description: 'Step left, cross right behind, turn 1/4 left stepping left, touch right beside', category: 'vine' },
@@ -37,7 +37,7 @@
     { name: 'Weave Left',              aliases: ['weave l'], counts: 4, feet: 'L', description: 'Cross right over left, step left, cross right behind left, step left', category: 'vine' },
 
     /* ── Touches & Points ──────────────────────────────── */
-    { name: 'Touch Right Beside',      aliases: ['touch beside right','touch r beside','touch beside with no weight','touching the other foot','touch beside no weight'], counts: 1, feet: 'R', description: 'Touch right foot beside left (no weight change)', category: 'touch' },
+    { name: 'Touch Right Beside',      aliases: ['touch beside right','touch r beside','touch right no weight'], counts: 1, feet: 'R', description: 'Touch right foot beside left (no weight change)', category: 'touch' },
     { name: 'Touch Left Beside',       aliases: ['touch beside left','touch l beside'], counts: 1, feet: 'L', description: 'Touch left foot beside right (no weight change)', category: 'touch' },
     { name: 'Point Right',             aliases: ['point r','toe point right'], counts: 1, feet: 'R', description: 'Point right toe to right side (no weight change)', category: 'touch' },
     { name: 'Point Left',              aliases: ['point l','toe point left'], counts: 1, feet: 'L', description: 'Point left toe to left side (no weight change)', category: 'touch' },
