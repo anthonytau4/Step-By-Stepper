@@ -57,6 +57,7 @@
       danceWalls: String(meta.walls || '').trim(),
       danceType: String(meta.type || '').trim(),
       danceLevel: String(meta.level || '').trim(),
+      danceStyle: String(meta.danceStyle || '8-count').trim(),
       sectionCount: sections.length,
       totalSteps: totalSteps,
       sectionNames: sections.map(function (s) { return s.name || 'Untitled'; }),
@@ -327,6 +328,22 @@
     { patterns: [/\bstaff chat\b/, /\bchat with (admin|moderator|staff)\b/],
       answer: 'Staff chat is available for moderators and admins to communicate about submissions, site issues, and moderation tasks. It\'s in the moderation tools area.' },
 
+    /* ── AI Helper Page Actions ────────────────────────── */
+    { patterns: [/\bhelper.*\bnavigate\b/, /\bhelper.*\bgo to\b/, /\bcan.*helper.*\bopen\b/],
+      answer: 'Yes! The AI helper can navigate for you. Try saying:\n• "Go to Build" / "Open sheet" / "Open saved dances"\n• "Open featured" / "Open sign in" / "Open subscription"\n• "Open admin" (admin only)\n\nJust tell it where you want to go!' },
+    { patterns: [/\b8.?count\b.*\bwaltz\b|\bwaltz\b.*\b8.?count\b|\bdance.*type\b|\bsection.*split\b/],
+      answer: 'You can set your dance type to **8-count** (standard) or **waltz** (6-count). This controls where sections auto-split when adding steps.\n\nSay "set dance type 8-count" or "set dance type waltz" to the helper, or it will use 8-count by default.' },
+    { patterns: [/\brandom.*dance\b|\bgenerate.*flow\b|\bperfect.*flow\b|\b10\/10\b/],
+      answer: 'The helper can generate a **random 10/10 flowability dance section** using glossary steps with perfect foot alternation and variety. Say "generate a random 10/10 dance" or "random perfect flow section" to try it!' },
+    { patterns: [/\bcollaborat\b/, /\binvite.*collab\b/, /\bwork together\b/, /\bshare.*dance\b.*\bedit\b/],
+      answer: 'You can invite collaborators to work on a dance together! Say "invite collaborator user@email.com" to the helper. You can also say "list collaborators" to see who\'s on your current dance.' },
+    { patterns: [/\bdance.*group\b/, /\bgroup.*dance\b/, /\borganize.*saves?\b/, /\bfolder\b/],
+      answer: 'You can organize your saved dances into **groups**. Say "create group [name]" to make a new group, or "list groups" to see your groups. Move dances between groups from the Saved Dances page.' },
+    { patterns: [/\bsmart.*sav\b/, /\bduplicate.*saves?\b/, /\btoo many.*saves?\b/],
+      answer: 'Smart saving is built in — when you save, the same dance ID updates in place instead of creating duplicates. Your cloud saves stay clean and organized automatically.' },
+    { patterns: [/\bquick.*add\b.*\bstep\b|\badd.*to.*worksheet\b|\bput.*on.*sheet\b/],
+      answer: 'You can quickly add steps to the worksheet by saying "add to worksheet [step name]" or "put on sheet coaster step". The helper adds it directly with smart section splitting!' },
+
     /* ── Catch-all helpful patterns ───────────────────── */
     { patterns: [/\bhelp\b/, /\bguide\b/, /\btutorial\b/, /\bhow (does|do).*work\b/],
       answer: 'I can help with:\n• **Building dances** — How to create, edit, add steps\n• **Saving & cloud sync** — Saving your work across devices\n• **Featuring dances** — How to submit and get featured\n• **PDF import** — Importing stepsheets from PDFs\n• **AI tools** — Dance building, judging, counting\n• **Dance terminology** — What steps mean and how they work\n• **Troubleshooting** — Common issues and fixes\n\nJust ask about anything specific!' },
@@ -376,14 +393,14 @@
       if (ctx.totalSteps === 0) {
         suggestions.push('How do I create a new dance?');
         suggestions.push('Build me a beginner dance');
+        suggestions.push('Generate a random 10/10 dance');
       } else {
         suggestions.push('How do I add a step?');
-        if (ctx.hasUnsavedChanges) suggestions.push('How do I save my dance?');
+        if (ctx.hasUnsavedChanges) suggestions.push('Save my dance');
         suggestions.push('Judge my dance');
-        suggestions.push('What is a coaster step?');
+        suggestions.push('Generate a random section');
       }
-      suggestions.push('Show keyboard shortcuts');
-      suggestions.push('What steps can I use?');
+      suggestions.push('What can you do?');
     }
 
     if (page === 'sheet') {
@@ -392,9 +409,10 @@
     }
 
     if (page === 'saved' || page === 'my-saved-dances') {
-      suggestions.push('How do I save changes?');
-      suggestions.push('Can I export my dance?');
+      suggestions.push('List my saves');
+      suggestions.push('Create a dance group');
       if (!ctx.signedIn) suggestions.push('How do I sign in?');
+      else suggestions.push('Invite a collaborator');
     }
 
     if (page === 'featured' || page === 'featured-choreo') {

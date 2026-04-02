@@ -384,6 +384,7 @@ async function readDbFromPath(targetPath) {
   if (!Array.isArray(parsed.approvedGlossarySteps)) parsed.approvedGlossarySteps = [];
   if (!Array.isArray(parsed.siteMemory)) parsed.siteMemory = [];
   if (!Array.isArray(parsed.securityAlerts)) parsed.securityAlerts = [];
+  if (!Array.isArray(parsed.collaborators)) parsed.collaborators = [];
 
   if (Array.isArray(parsed.submissions)) {
     parsed.submissions = parsed.submissions.map((item) => {
@@ -1982,6 +1983,68 @@ app.delete("/api/cloud-saves/:id", requireGoogleUser, async (req, res) => {
   db.users[key].cloudSaves = list.filter(item => item && item.id !== String(req.params.id || "").trim());
   await writeDb(db);
   res.json({ ok: true, deletedId: String(req.params.id || "").trim() });
+});
+
+/* ═══════════════════════════════════════════════════════════
+   COLLABORATOR ENDPOINTS
+   ═══════════════════════════════════════════════════════════ */
+app.post("/api/collaborators/invite", requireGoogleUser, async (req, res) => {
+  const db = await readDb();
+  const key = userKeyFromClaims(req.stepperClaims);
+  touchUser(db, req.stepperUser, key);
+  const danceId = String(req.body?.danceId || "").trim();
+  const email = String(req.body?.email || "").trim().toLowerCase();
+  if (!danceId) return res.status(400).json({ ok: false, error: "Missing dance ID." });
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ ok: false, error: "Invalid email address." });
+  if (email === normalizeEmail(req.stepperUser?.email)) return res.status(400).json({ ok: false, error: "You can't invite yourself." });
+  if (!db.collaborators) db.collaborators = [];
+  const existing = db.collaborators.find(c => c && c.danceId === danceId && c.email === email && c.ownerKey === key);
+  if (existing) return res.json({ ok: true, message: "Already invited.", item: existing });
+  const invite = {
+    id: `collab-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    danceId,
+    ownerKey: key,
+    ownerEmail: normalizeEmail(req.stepperUser?.email),
+    ownerName: String(req.stepperUser?.name || "").trim(),
+    email,
+    name: "",
+    status: "invited",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  db.collaborators.push(invite);
+  db.collaborators = db.collaborators.slice(-2000);
+  await writeDb(db);
+  res.json({ ok: true, message: "Invite sent.", item: invite });
+});
+
+app.get("/api/collaborators", requireGoogleUser, async (req, res) => {
+  const db = await readDb();
+  const key = userKeyFromClaims(req.stepperClaims);
+  const email = normalizeEmail(req.stepperUser?.email);
+  const danceId = String(req.query?.danceId || "").trim();
+  const list = Array.isArray(db.collaborators) ? db.collaborators : [];
+  const filtered = list.filter(c => {
+    if (!c) return false;
+    if (danceId && c.danceId !== danceId) return false;
+    return c.ownerKey === key || c.email === email;
+  });
+  res.json({ ok: true, items: filtered });
+});
+
+app.post("/api/collaborators/respond", requireGoogleUser, async (req, res) => {
+  const db = await readDb();
+  const email = normalizeEmail(req.stepperUser?.email);
+  const inviteId = String(req.body?.inviteId || "").trim();
+  const accept = req.body?.accept === true;
+  if (!db.collaborators) db.collaborators = [];
+  const invite = db.collaborators.find(c => c && c.id === inviteId && c.email === email);
+  if (!invite) return res.status(404).json({ ok: false, error: "Invite not found." });
+  invite.status = accept ? "accepted" : "declined";
+  invite.name = String(req.stepperUser?.name || invite.name || "").trim();
+  invite.updatedAt = new Date().toISOString();
+  await writeDb(db);
+  res.json({ ok: true, item: invite });
 });
 
 app.post("/api/submissions/request", requireGoogleUser, async (req, res) => {
