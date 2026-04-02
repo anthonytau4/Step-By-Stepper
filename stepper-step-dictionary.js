@@ -196,25 +196,26 @@
   /* ════════════════════════════════════════════════════════════
      CATEGORIES for display grouping
      ════════════════════════════════════════════════════════════ */
+  var _ic = window.__stepperIcons || {};
   var CATEGORIES = {
-    walking:    { label: 'Walking / Traveling',  icon: '🚶' },
-    vine:       { label: 'Vines & Grapevines',   icon: '🌿' },
-    touch:      { label: 'Touches & Points',     icon: '👆' },
-    side:       { label: 'Side Steps',           icon: '↔️' },
-    rock:       { label: 'Rocks & Mambos',       icon: '🪨' },
-    triple:     { label: 'Triples & Shuffles',   icon: '⚡' },
-    turn:       { label: 'Turns & Pivots',       icon: '🔄' },
-    jazz:       { label: 'Jazz Box',             icon: '🎷' },
-    cross:      { label: 'Crosses & Weaves',     icon: '✖️' },
-    kick:       { label: 'Kicks',                icon: '🦵' },
-    stomp:      { label: 'Stomps & Stamps',      icon: '👟' },
-    embellish:  { label: 'Embellishments',       icon: '✨' },
-    slide:      { label: 'Slides & Drags',       icon: '💨' },
-    sway:       { label: 'Hip Bumps & Sways',    icon: '💃' },
-    specialty:  { label: 'Specialty Steps',      icon: '⭐' },
-    hold:       { label: 'Holds & Claps',        icon: '👏' },
-    together:   { label: 'Together / Close',     icon: '🤝' },
-    syncopated: { label: 'Syncopated',           icon: '🎵' }
+    walking:    { label: 'Walking / Traveling',  icon: _ic.walking    || '🚶' },
+    vine:       { label: 'Vines & Grapevines',   icon: _ic.vine       || '🌿' },
+    touch:      { label: 'Touches & Points',     icon: _ic.touch      || '👆' },
+    side:       { label: 'Side Steps',           icon: _ic.side       || '↔️' },
+    rock:       { label: 'Rocks & Mambos',       icon: _ic.rock       || '🪨' },
+    triple:     { label: 'Triples & Shuffles',   icon: _ic.triple     || '⚡' },
+    turn:       { label: 'Turns & Pivots',       icon: _ic.turn       || '🔄' },
+    jazz:       { label: 'Jazz Box',             icon: _ic.jazz       || '🎷' },
+    cross:      { label: 'Crosses & Weaves',     icon: _ic.cross      || '✖️' },
+    kick:       { label: 'Kicks',                icon: _ic.kick       || '🦵' },
+    stomp:      { label: 'Stomps & Stamps',      icon: _ic.stomp      || '👟' },
+    embellish:  { label: 'Embellishments',       icon: _ic.embellish  || '✨' },
+    slide:      { label: 'Slides & Drags',       icon: _ic.slide      || '💨' },
+    sway:       { label: 'Hip Bumps & Sways',    icon: _ic.sway       || '💃' },
+    specialty:  { label: 'Specialty Steps',      icon: _ic.specialty  || '⭐' },
+    hold:       { label: 'Holds & Claps',        icon: _ic.hold       || '👏' },
+    together:   { label: 'Together / Close',     icon: _ic.together   || '🤝' },
+    syncopated: { label: 'Syncopated',           icon: _ic.syncopated || '🎵' }
   };
 
   /* ════════════════════════════════════════════════════════════
