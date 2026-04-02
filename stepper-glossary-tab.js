@@ -16,6 +16,7 @@
   'use strict';
   if (window.__stepperGlossaryTabInstalled) return;
   window.__stepperGlossaryTabInstalled = true;
+  var _ic = window.__stepperIcons || {};
 
   /* ── Constants ── */
   var PAGE_ID = 'stepper-glossary-page';
@@ -77,7 +78,7 @@
     /* ── Header ── */
     html += '<div class="px-6 py-5 border-b ' + theme.panel + '">';
     html += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">';
-    html += '<span style="font-size:28px;">📖</span>';
+    html += '<span style="font-size:28px;">' + (_ic.book || '📖') + '</span>';
     html += '<div style="flex:1;">';
     html += '<h2 style="font-size:20px;font-weight:900;margin:0;">Step Dictionary</h2>';
     html += '<p class="' + theme.subtle + '" style="font-size:12px;margin:2px 0 0;">' + (dict ? dict.STEPS.length : 0) + ' standard line-dance steps</p>';
@@ -93,7 +94,7 @@
     } else {
       /* Search bar */
       html += '<div style="margin-bottom:16px;">';
-      html += '<input data-glossary-search type="text" placeholder="🔍 Search steps… (e.g. vine, shuffle, coaster)" value="' + escapeHtml(glossaryState.searchQuery) + '" ';
+      html += '<input data-glossary-search type="text" placeholder="Search steps… (e.g. vine, shuffle, coaster)" value="' + escapeHtml(glossaryState.searchQuery) + '" ';
       html += 'style="width:100%;border-radius:14px;border:1px solid;padding:12px 18px;font-size:15px;outline:none;transition:border-color .2s,box-shadow .2s;' + theme.inputBg + '" />';
       html += '</div>';
 
@@ -118,7 +119,7 @@
     /* All chip */
     var allActive = !glossaryState.selectedCategory;
     html += '<button data-glossary-cat="" style="display:inline-flex;align-items:center;gap:4px;padding:7px 14px;border-radius:999px;border:1px solid;font-size:12px;font-weight:800;cursor:pointer;transition:all .2s;' + (allActive ? theme.chipActive : theme.chipBg) + '">';
-    html += '📋 All</button>';
+    html += '' + (_ic.clipboard || '📋') + ' All</button>';
 
     for (var i = 0; i < keys.length; i++) {
       var key = keys[i];
@@ -144,7 +145,7 @@
 
     if (!steps.length) {
       var html = '<div style="text-align:center;padding:32px;">';
-      html += '<div style="font-size:48px;margin-bottom:12px;">🤷</div>';
+      html += '<div style="font-size:48px;margin-bottom:12px;">' + (_ic.shrug || '🤷') + '</div>';
       html += '<p class="' + theme.subtle + '" style="font-size:14px;">No steps found for "' + escapeHtml(glossaryState.searchQuery) + '"</p>';
       html += '<p class="' + theme.subtle + '" style="font-size:12px;margin-top:4px;">Try "vine", "shuffle", "coaster", or "jazz box"</p>';
       html += '</div>';
@@ -179,7 +180,7 @@
     html += '<div style="display:flex;align-items:center;gap:10px;">';
 
     /* Category icon */
-    html += '<span style="font-size:20px;flex-shrink:0;">' + (cat.icon || '💃') + '</span>';
+    html += '<span style="font-size:20px;flex-shrink:0;">' + (cat.icon || (_ic.sway || '💃')) + '</span>';
 
     /* Name & count */
     html += '<div style="flex:1;min-width:0;">';
@@ -193,7 +194,7 @@
     /* Add button */
     html += '<button data-glossary-add="' + escapeHtml(step.name) + '" class="stepper-google-cta" style="padding:8px 14px;border-radius:10px;font-size:12px;font-weight:800;white-space:nowrap;flex-shrink:0;';
     if (wasAdded) {
-      html += 'background:#22c55e;color:#fff;border-color:#22c55e;">✓ Added';
+      html += 'background:#22c55e;color:#fff;border-color:#22c55e;">' + (_ic.check || '✓') + ' Added';
     } else {
       html += 'background:#4f46e5;color:#fff;border-color:#4f46e5;">+ Add';
     }

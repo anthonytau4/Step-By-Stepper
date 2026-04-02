@@ -17,6 +17,7 @@
   'use strict';
   if (window.__stepperPdfTabInstalled) return;
   window.__stepperPdfTabInstalled = true;
+  var _ic = window.__stepperIcons || {};
 
   /* ── Constants ── */
   var PAGE_ID = 'stepper-pdf-page';
@@ -98,7 +99,7 @@
     /* ── Header ── */
     html += '<div class="px-6 py-5 border-b ' + theme.panel + '">';
     html += '<div style="display:flex;align-items:center;gap:10px;">';
-    html += '<span style="font-size:28px;">📄</span>';
+    html += '<span style="font-size:28px;">' + (_ic.document || '📄') + '</span>';
     html += '<div>';
     html += '<h2 style="font-size:20px;font-weight:900;margin:0;">Import PDF Stepsheet</h2>';
     html += '<p class="' + theme.subtle + '" style="font-size:12px;margin:2px 0 0;">Upload a PDF dance stepsheet and auto-import all steps</p>';
@@ -136,7 +137,7 @@
     html += '<div data-pdf-dropzone style="border:2px dashed;border-radius:20px;padding:48px 24px;text-align:center;cursor:pointer;transition:all .3s ease;' + theme.dropzone;
     if (pdfState.dragging) html += theme.dropzoneActive;
     html += '">';
-    html += '<div style="font-size:56px;margin-bottom:14px;">📋</div>';
+    html += '<div style="font-size:56px;margin-bottom:14px;">' + (_ic.clipboard || '📋') + '</div>';
     html += '<h3 style="font-size:18px;font-weight:800;margin:0 0 8px;">Drop Your PDF Stepsheet Here</h3>';
     html += '<p class="' + theme.subtle + '" style="font-size:14px;margin:0 0 20px;">or click to browse files</p>';
     html += '<button data-pdf-browse class="stepper-google-cta" style="background:#4f46e5;color:#fff;padding:12px 28px;border-radius:14px;font-weight:800;">📁 Choose PDF File</button>';
@@ -146,10 +147,10 @@
     /* Tips */
     html += '<div style="margin-top:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;">';
     var tips = [
-      { icon: '✅', text: 'Works with standard stepsheet PDFs' },
-      { icon: '📝', text: 'Auto-detects title, choreographer & steps' },
-      { icon: '🎯', text: 'Smart step matching with 100+ terms' },
-      { icon: '⚡', text: 'One-click apply to your worksheet' }
+      { icon: (_ic.check || '✅'), text: 'Works with standard stepsheet PDFs' },
+      { icon: (_ic.note || '📝'), text: 'Auto-detects title, choreographer & steps' },
+      { icon: (_ic.target || '🎯'), text: 'Smart step matching with 100+ terms' },
+      { icon: (_ic.triple || '⚡'), text: 'One-click apply to your worksheet' }
     ];
     for (var i = 0; i < tips.length; i++) {
       html += '<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:12px;' + (theme.dark ? 'background:#1e293b;' : 'background:#f0f4ff;') + '">';
@@ -164,9 +165,9 @@
 
   function renderProgress(theme) {
     var messages = {
-      uploading: '📤 Uploading PDF…',
-      parsing: '🔍 Parsing stepsheet…',
-      enriching: '✨ Matching steps to glossary…'
+      uploading: (_ic.upload || '📤') + ' Uploading PDF…',
+      parsing: (_ic.search || '🔍') + ' Parsing stepsheet…',
+      enriching: (_ic.embellish || '✨') + ' Matching steps to glossary…'
     };
     var msg = messages[pdfState.status] || pdfState.statusMessage || 'Processing…';
     var pct = pdfState.status === 'uploading' ? 33 : (pdfState.status === 'parsing' ? 66 : 90);
@@ -199,7 +200,7 @@
     html += '<div style="font-weight:800;font-size:14px;">Successfully parsed!</div>';
     html += '<div style="font-size:12px;opacity:.8;">Found ' + steps.length + ' steps</div>';
     html += '</div>';
-    html += '<button data-pdf-apply class="stepper-google-cta" style="background:#22c55e;color:#fff;padding:10px 20px;border-radius:12px;font-weight:800;">✅ Apply to Editor</button>';
+    html += '<button data-pdf-apply class="stepper-google-cta" style="background:#22c55e;color:#fff;padding:10px 20px;border-radius:12px;font-weight:800;">' + (_ic.check || '✅') + ' Apply to Editor</button>';
     html += '<button data-pdf-reset class="stepper-google-cta" style="padding:10px 16px;border-radius:12px;font-weight:800;' + (theme.dark ? 'background:#374151;color:#d1d5db;' : 'background:#f3f4f6;color:#6b7280;') + '">↩️ Start Over</button>';
     html += '</div>';
 
@@ -252,14 +253,14 @@
     var html = '';
     html += '<div style="margin-top:24px;">';
     html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">';
-    html += '<h3 style="font-size:14px;font-weight:800;margin:0;">📂 Recent Imports</h3>';
+    html += '<h3 style="font-size:14px;font-weight:800;margin:0;">' + (_ic.folderOpen || '📂') + ' Recent Imports</h3>';
     html += '<button data-pdf-clear-history class="' + theme.subtle + '" style="background:none;border:none;cursor:pointer;font-size:12px;font-weight:700;">Clear</button>';
     html += '</div>';
     html += '<div style="display:grid;gap:8px;">';
     for (var i = 0; i < Math.min(history.length, 5); i++) {
       var h = history[i];
       html += '<div style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:14px;border:1px solid;' + theme.cardBg + '">';
-      html += '<span style="font-size:18px;">📄</span>';
+      html += '<span style="font-size:18px;">' + (_ic.document || '📄') + '</span>';
       html += '<div style="flex:1;min-width:0;">';
       html += '<div style="font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(h.title || h.fileName || 'Untitled') + '</div>';
       html += '<div class="' + theme.subtle + '" style="font-size:11px;">' + escapeHtml(h.date || '') + ' · ' + (h.stepCount || 0) + ' steps</div>';

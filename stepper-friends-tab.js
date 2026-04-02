@@ -19,6 +19,8 @@
   if (window.__stepperFriendsTabInstalled) return;
   window.__stepperFriendsTabInstalled = true;
 
+  var _ic = window.__stepperIcons || {};
+
   /* ── Constants ── */
   var PAGE_ID = 'stepper-friends-page';
   var TAB_ID  = 'stepper-friends-tab';
@@ -170,7 +172,7 @@
     })
       .then(function (data) {
         if (data && data.ok) {
-          friendsState.success = 'Friend invite sent to ' + trimmed + '! 🎉';
+          friendsState.success = 'Friend invite sent to ' + trimmed + '!';
           friendsState.inviteEmail = '';
           refreshFriends();
         } else {
@@ -198,7 +200,7 @@
       body: JSON.stringify({ inviteId: inviteId, accept: !!accept })
     })
       .then(function () {
-        friendsState.success = accept ? 'Friend request accepted! 🤝' : 'Friend request declined.';
+        friendsState.success = accept ? 'Friend request accepted!' : 'Friend request declined.';
         refreshFriends();
       })
       .catch(function () {
@@ -249,7 +251,7 @@
     html += '<div class="px-6 py-5 border-b ' + theme.panel + '">';
     html += '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">';
     html += '<div style="display:flex;align-items:center;gap:10px;">';
-    html += '<span style="font-size:28px;">👥</span>';
+    html += '<span style="font-size:28px;">' + _ic.people + '</span>';
     html += '<div>';
     html += '<h2 style="font-size:20px;font-weight:900;margin:0;">Friends</h2>';
     if (signedIn && profile.name) {
@@ -257,7 +259,7 @@
     }
     html += '</div></div>';
     if (signedIn) {
-      html += '<button data-friends-refresh class="stepper-google-cta" style="font-size:12px;padding:8px 14px;border-radius:10px;">🔄 Refresh</button>';
+      html += '<button data-friends-refresh class="stepper-google-cta" style="font-size:12px;padding:8px 14px;border-radius:10px;">' + _ic.refresh + ' Refresh</button>';
     }
     html += '</div></div>';
 
@@ -273,14 +275,14 @@
       /* Alerts */
       if (friendsState.error) {
         html += '<div class="' + theme.danger + '" style="border:1px solid;border-radius:14px;padding:12px 16px;margin-bottom:16px;font-size:13px;display:flex;align-items:center;gap:8px;">';
-        html += '<span>⚠️</span><span>' + escapeHtml(friendsState.error) + '</span>';
-        html += '<button data-friends-dismiss-error style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:16px;opacity:.6;">✕</button>';
+        html += '<span>' + _ic.warning + '</span><span>' + escapeHtml(friendsState.error) + '</span>';
+        html += '<button data-friends-dismiss-error style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:16px;opacity:.6;">' + _ic.close + '</button>';
         html += '</div>';
       }
       if (friendsState.success) {
         html += '<div class="' + theme.success + '" style="border:1px solid;border-radius:14px;padding:12px 16px;margin-bottom:16px;font-size:13px;display:flex;align-items:center;gap:8px;">';
-        html += '<span>✅</span><span>' + escapeHtml(friendsState.success) + '</span>';
-        html += '<button data-friends-dismiss-success style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:16px;opacity:.6;">✕</button>';
+        html += '<span>' + _ic.check + '</span><span>' + escapeHtml(friendsState.success) + '</span>';
+        html += '<button data-friends-dismiss-success style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:16px;opacity:.6;">' + _ic.close + '</button>';
         html += '</div>';
       }
 
@@ -308,7 +310,7 @@
   function renderSignInPrompt(theme) {
     var html = '';
     html += '<div style="text-align:center;padding:40px 20px;">';
-    html += '<div style="font-size:64px;margin-bottom:16px;">🔐</div>';
+    html += '<div style="font-size:64px;margin-bottom:16px;">' + _ic.lock + '</div>';
     html += '<h3 style="font-size:18px;font-weight:800;margin:0 0 8px;">Sign In to Connect</h3>';
     html += '<p class="' + theme.subtle + '" style="font-size:14px;max-width:360px;margin:0 auto 20px;">Sign in with your Google account to add friends, send dance invites, and collaborate on choreography together.</p>';
     html += '<button data-friends-goto-signin class="stepper-google-cta" style="background:#4f46e5;color:#fff;padding:12px 24px;border-radius:14px;font-weight:800;">Sign In with Google</button>';
@@ -318,9 +320,9 @@
 
   function renderSubNav(theme) {
     var views = [
-      { key: 'list', label: 'My Friends', icon: '👥', count: friendsState.friends.length },
-      { key: 'pending', label: 'Pending', icon: '📨', count: friendsState.pendingSent.length + friendsState.pendingReceived.length },
-      { key: 'add', label: 'Add Friend', icon: '➕', count: 0 }
+      { key: 'list', label: 'My Friends', icon: _ic.people, count: friendsState.friends.length },
+      { key: 'pending', label: 'Pending', icon: _ic.mail, count: friendsState.pendingSent.length + friendsState.pendingReceived.length },
+      { key: 'add', label: 'Add Friend', icon: _ic.add, count: 0 }
     ];
     var html = '<div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;">';
     for (var i = 0; i < views.length; i++) {
@@ -350,12 +352,12 @@
     html += '<input data-friends-email type="email" placeholder="friend@gmail.com" value="' + escapeHtml(friendsState.inviteEmail) + '" ';
     html += 'style="flex:1 1 220px;border-radius:12px;border:1px solid;padding:12px 16px;font-size:15px;outline:none;transition:border-color .2s,box-shadow .2s;' + theme.inputBg + '" />';
     html += '<button data-friends-send-invite class="stepper-google-cta" style="background:#4f46e5;color:#fff;padding:12px 20px;border-radius:12px;font-weight:800;white-space:nowrap;">';
-    html += '📩 Send Invite</button>';
+    html += _ic.send + ' Send Invite</button>';
     html += '</div>';
 
     /* Quick tips */
     html += '<div style="margin-top:16px;padding:14px;border-radius:12px;' + (theme.dark ? 'background:#1e293b;' : 'background:#f0f4ff;') + '">';
-    html += '<p style="font-size:12px;font-weight:700;margin:0 0 6px;opacity:.8;">💡 Tips</p>';
+    html += '<p style="font-size:12px;font-weight:700;margin:0 0 6px;opacity:.8;">' + _ic.lightbulb + ' Tips</p>';
     html += '<ul style="font-size:12px;margin:0;padding-left:18px;opacity:.7;line-height:1.7;">';
     html += '<li>Your friend needs a Step-By-Stepper account to accept</li>';
     html += '<li>Use the same email they use to sign in with Google</li>';
@@ -373,7 +375,7 @@
     /* Search bar */
     if (friends.length > 3) {
       html += '<div style="margin-bottom:16px;">';
-      html += '<input data-friends-search type="text" placeholder="🔍 Search friends…" value="' + escapeHtml(friendsState.searchQuery) + '" ';
+      html += '<input data-friends-search type="text" placeholder="Search friends…" value="' + escapeHtml(friendsState.searchQuery) + '" ';
       html += 'style="width:100%;border-radius:12px;border:1px solid;padding:10px 16px;font-size:14px;outline:none;' + theme.inputBg + '" />';
       html += '</div>';
     }
@@ -390,10 +392,10 @@
     if (!filtered.length) {
       html += '<div style="text-align:center;padding:32px 16px;">';
       if (!friends.length) {
-        html += '<div style="font-size:56px;margin-bottom:12px;">🤗</div>';
+        html += '<div style="font-size:56px;margin-bottom:12px;">' + _ic.welcome + '</div>';
         html += '<h3 style="font-size:16px;font-weight:800;margin:0 0 6px;">No Friends Yet</h3>';
         html += '<p class="' + theme.subtle + '" style="font-size:13px;margin:0 0 16px;">Add your first friend to start collaborating on line dances!</p>';
-        html += '<button data-friends-view="add" class="stepper-google-cta" style="background:#4f46e5;color:#fff;padding:10px 20px;border-radius:12px;font-weight:800;">➕ Add Your First Friend</button>';
+        html += '<button data-friends-view="add" class="stepper-google-cta" style="background:#4f46e5;color:#fff;padding:10px 20px;border-radius:12px;font-weight:800;">' + _ic.add + ' Add Your First Friend</button>';
       } else {
         html += '<p class="' + theme.subtle + '" style="font-size:14px;">No friends match "' + escapeHtml(friendsState.searchQuery) + '"</p>';
       }
@@ -437,7 +439,7 @@
     /* Status */
     html += '<div style="display:flex;align-items:center;gap:6px;">';
     html += '<span style="width:8px;height:8px;border-radius:999px;background:#22c55e;display:inline-block;" title="Connected"></span>';
-    html += '<button data-friends-remove="' + escapeHtml(friend.id || friend.email || '') + '" title="Remove friend" style="background:none;border:none;cursor:pointer;font-size:16px;opacity:.4;transition:opacity .2s;">✕</button>';
+    html += '<button data-friends-remove="' + escapeHtml(friend.id || friend.email || '') + '" title="Remove friend" style="background:none;border:none;cursor:pointer;font-size:16px;opacity:.4;transition:opacity .2s;">' + _ic.close + '</button>';
     html += '</div>';
 
     html += '</div>';
@@ -450,7 +452,7 @@
     var sent = friendsState.pendingSent;
 
     /* Received */
-    html += '<h3 style="font-size:14px;font-weight:800;margin:0 0 10px;">📥 Received Invites</h3>';
+    html += '<h3 style="font-size:14px;font-weight:800;margin:0 0 10px;">' + _ic.download + ' Received Invites</h3>';
     if (!received.length) {
       html += '<div class="' + theme.soft + '" style="border:1px solid;border-radius:14px;padding:20px;text-align:center;margin-bottom:20px;">';
       html += '<p class="' + theme.subtle + '" style="font-size:13px;margin:0;">No pending invites to review.</p>';
@@ -464,7 +466,7 @@
     }
 
     /* Sent */
-    html += '<h3 style="font-size:14px;font-weight:800;margin:0 0 10px;">📤 Sent Invites</h3>';
+    html += '<h3 style="font-size:14px;font-weight:800;margin:0 0 10px;">' + _ic.upload + ' Sent Invites</h3>';
     if (!sent.length) {
       html += '<div class="' + theme.soft + '" style="border:1px solid;border-radius:14px;padding:20px;text-align:center;">';
       html += '<p class="' + theme.subtle + '" style="font-size:13px;margin:0;">No pending sent invites.</p>';
@@ -499,11 +501,11 @@
     /* Actions */
     if (isReceived) {
       html += '<div style="display:flex;gap:6px;">';
-      html += '<button data-friends-accept="' + escapeHtml(invite.id || '') + '" class="stepper-google-cta" style="background:#22c55e;color:#fff;padding:8px 14px;border-radius:10px;font-size:12px;font-weight:800;">✓ Accept</button>';
-      html += '<button data-friends-decline="' + escapeHtml(invite.id || '') + '" class="stepper-google-cta" style="padding:8px 14px;border-radius:10px;font-size:12px;font-weight:800;' + (theme.dark ? 'background:#374151;color:#d1d5db;' : 'background:#f3f4f6;color:#6b7280;') + '">✕ Decline</button>';
+      html += '<button data-friends-accept="' + escapeHtml(invite.id || '') + '" class="stepper-google-cta" style="background:#22c55e;color:#fff;padding:8px 14px;border-radius:10px;font-size:12px;font-weight:800;">' + _ic.check + ' Accept</button>';
+      html += '<button data-friends-decline="' + escapeHtml(invite.id || '') + '" class="stepper-google-cta" style="padding:8px 14px;border-radius:10px;font-size:12px;font-weight:800;' + (theme.dark ? 'background:#374151;color:#d1d5db;' : 'background:#f3f4f6;color:#6b7280;') + '">' + _ic.close + ' Decline</button>';
       html += '</div>';
     } else {
-      html += '<span style="font-size:12px;font-weight:700;padding:6px 12px;border-radius:999px;' + (theme.dark ? 'background:#374151;color:#9ca3af;' : 'background:#f3f4f6;color:#9ca3af;') + '">⏳ Pending</span>';
+      html += '<span style="font-size:12px;font-weight:700;padding:6px 12px;border-radius:999px;' + (theme.dark ? 'background:#374151;color:#9ca3af;' : 'background:#f3f4f6;color:#9ca3af;') + '">' + _ic.hourglass + ' Pending</span>';
     }
 
     html += '</div>';
