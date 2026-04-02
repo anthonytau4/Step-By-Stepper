@@ -2066,7 +2066,7 @@ app.post("/api/friends/add", requireGoogleUser, async (req, res) => {
     id: `friend-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     fromKey: key,
     fromEmail: normalizeEmail(req.stepperUser?.email),
-    fromName: String(req.stepperUser?.name || "").trim(),
+    fromName: String(db.users[key]?.displayName || req.stepperUser?.name || "").trim(),
     toEmail: email,
     toName: "",
     status: "invited",
