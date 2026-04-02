@@ -237,6 +237,17 @@
       answer: 'The dance editor works offline for local editing. Your dance is saved in browser local storage. However, cloud saves, AI features, and Featured Choreo need an internet connection. Changes sync when you\'re back online.' },
 
     /* ── Line Dance Terminology ────────────────────────── */
+    /* Step dictionary integration: catch ambiguous step queries */
+    { patterns: [/\bwhat (?:is|are|does)\b.*\bstep\b/, /\bwhat (?:is|are)\b.*\b(?:walk forward|step right|touch beside|walking back|not a vine)\b/i, /\bdescribe\b.*\bstep\b/, /\bfootwork for\b/],
+      answer: function (ctx, question) {
+        var dict = window.__stepperStepDictionary;
+        if (!dict) return 'I can help with step definitions! Try asking about specific steps like "vine right", "coaster step", "jazz box", or "shuffle forward".';
+        /* Extract the step name portion from the question */
+        var cleaned = String(question || '').replace(/^(?:what is a?|what are|what does|describe(?: the)?|footwork for)\s*/i, '').replace(/\?+$/, '').trim();
+        if (cleaned.length < 3) return 'Ask about a specific step like "vine right", "coaster step", "jazz box", or check the **Glossary tab** for a full searchable dictionary!';
+        return dict.disambiguate(cleaned);
+      }
+    },
     { patterns: [/\bwhat is a vine\b/, /\bgrapevine\b/],
       answer: '**Vine (Grapevine):** A 4-count side-traveling step. Vine Right: step right, cross left behind, step right, touch left. Vine Left: mirror image. Often 4 counts.' },
     { patterns: [/\bwhat is a coaster\b/, /\bcoaster step\b/],
@@ -276,7 +287,12 @@
     { patterns: [/\bwhat is a bump\b/, /\bhip bump\b/],
       answer: '**Hip Bump:** A hip movement to one side, usually done with a slight step. Often 1-2 counts per bump. Common in party-style line dances.' },
     { patterns: [/\bstep (terms|terminology|glossary|definitions)\b/, /\bline dance (terms|terminology|vocabulary)\b/, /\bdance definitions\b/],
-      answer: 'Common line dance step terms:\n• **Vine/Grapevine** — Side travel (4 counts)\n• **Coaster Step** — Back-together-forward (3 counts)\n• **Jazz Box** — Cross-back-side-forward (4 counts)\n• **Pivot Turn** — Step-pivot 180° (2 counts)\n• **Rock Step** — Rock-recover (2 counts)\n• **Shuffle** — Step-close-step (2 beats)\n• **Weave** — Cross front & behind traveling (4-8 counts)\n• **Kick Ball Change** — Kick-ball-change (2 beats)\n• **Sailor Step** — Behind-side-step (3 counts)\n\nAsk about any specific step for a detailed explanation!' },
+      answer: function () {
+        if (window.__stepperStepDictionary) {
+          return 'Check out the **Glossary tab** for a full searchable dictionary of ' + window.__stepperStepDictionary.STEPS.length + '+ standard line dance steps! You can browse by category, search by name, and add steps to your worksheet with one click.\n\nCommon terms:\n• **Vine/Grapevine** — Side travel (4 counts)\n• **Coaster Step** — Back-together-forward (3 counts)\n• **Jazz Box** — Cross-back-side-forward (4 counts)\n• **Pivot Turn** — Step-pivot 180° (2 counts)\n• **Rock Step** — Rock-recover (2 counts)\n• **Shuffle** — Step-close-step (2 beats)';
+        }
+        return 'Common line dance step terms:\n• **Vine/Grapevine** — Side travel (4 counts)\n• **Coaster Step** — Back-together-forward (3 counts)\n• **Jazz Box** — Cross-back-side-forward (4 counts)\n• **Pivot Turn** — Step-pivot 180° (2 counts)\n• **Rock Step** — Rock-recover (2 counts)\n• **Shuffle** — Step-close-step (2 beats)\n• **Weave** — Cross front & behind traveling (4-8 counts)\n• **Kick Ball Change** — Kick-ball-change (2 beats)\n• **Sailor Step** — Behind-side-step (3 counts)\n\nAsk about any specific step for a detailed explanation!';
+      } },
 
     /* ── Dance Levels ─────────────────────────────────── */
     { patterns: [/\bbeginner\b.*\bdance\b/, /\beasy dance\b/],
@@ -335,8 +351,8 @@
       answer: 'You can set your dance type to **8-count** (standard) or **waltz** (6-count). This controls where sections auto-split when adding steps.\n\nSay "set dance type 8-count" or "set dance type waltz" to the helper, or it will use 8-count by default.' },
     { patterns: [/\brandom.*dance\b|\bgenerate.*flow\b|\bperfect.*flow\b|\b10\/10\b/],
       answer: 'The helper can generate a **random 10/10 flowability dance section** using glossary steps with perfect foot alternation and variety. Say "generate a random 10/10 dance" or "random perfect flow section" to try it!' },
-    { patterns: [/\bcollaborat\b/, /\binvite.*collab\b/, /\bwork together\b/, /\bshare.*dance\b.*\bedit\b/],
-      answer: 'You can invite collaborators to work on a dance together! Say "invite collaborator user@email.com" to the helper. You can also say "list collaborators" to see who\'s on your current dance.' },
+    { patterns: [/\bcollaborat\b/, /\binvite.*collab\b/, /\bwork together\b/, /\bshare.*dance\b.*\bedit\b/, /\badd.*friend\b/, /\binvite.*friend\b/],
+      answer: 'You can add friends and collaborators! Go to the **Friends tab** to:\n• Add friends by their Gmail / email address\n• View pending invites\n• Accept or decline friend requests\n\nOr say "invite collaborator user@email.com" right here to send a quick invite.' },
     { patterns: [/\bdance.*group\b/, /\bgroup.*dance\b/, /\borganize.*saves?\b/, /\bfolder\b/, /\barchiv\b/],
       answer: 'You can organize your saved dances into **folders** (groups) and **archive** dances you don\'t need right now.\n\n• **Create a folder:** Say "create folder [name]"\n• **List folders:** Say "list folders"\n• **Archive a dance:** Say "archive this dance" — it hides from the main list but you can filter to see archived dances\n• **Move dances:** Use the group dropdown on each card in Saved Dances\n\nArchived dances are dimmed and hidden by default — click the "📦 Archived" filter button to see them.' },
     { patterns: [/\bsmart.*sav\b/, /\bduplicate.*saves?\b/, /\btoo many.*saves?\b/],
@@ -369,7 +385,7 @@
       var entry = knowledgeBase[i];
       for (var j = 0; j < entry.patterns.length; j++) {
         if (entry.patterns[j].test(q)) {
-          return typeof entry.answer === 'function' ? entry.answer(ctx) : entry.answer;
+          return typeof entry.answer === 'function' ? entry.answer(ctx, question) : entry.answer;
         }
       }
     }
@@ -434,6 +450,21 @@
       suggestions.push('What are the latest updates?');
     }
 
+    if (page === 'friends') {
+      suggestions.push('How do I invite a friend?');
+      if (ctx.signedIn) suggestions.push('List my collaborators');
+    }
+
+    if (page === 'glossary') {
+      suggestions.push('What is a vine?');
+      suggestions.push('Dance step terminology');
+    }
+
+    if (page === 'pdfimport') {
+      suggestions.push('How does PDF import work?');
+      suggestions.push('What PDF formats are supported?');
+    }
+
     /* General interest */
     if (suggestions.length < 4) {
       if (!suggestions.includes('Dance step terminology')) suggestions.push('Dance step terminology');
@@ -454,6 +485,9 @@
       text: '👋 Welcome to Step-By-Stepper! I\'m your dance helper. Here\'s a quick start:\n\n' +
         '• **Build tab** — Create your dance step by step\n' +
         '• **Sheet tab** — Preview and print your dance\n' +
+        '• **Glossary tab** — Browse 100+ standard dance steps\n' +
+        '• **PDF Import tab** — Upload a stepsheet PDF\n' +
+        '• **Friends tab** — Add friends & collaborate\n' +
         '• **Sign In** — Save to cloud, access AI tools\n' +
         '• **Featured Choreo** — Browse featured dances\n\n' +
         'I know all about line dance steps, site features, and choreography tips. Ask me anything!',
