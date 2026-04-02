@@ -4775,11 +4775,11 @@
     renderSignInPage();
     renderSubscriptionPage();
     renderAdminPage();
-    /* ── New tab rendering ── */
+    syncPageVisibility();
+    /* ── New tab rendering (after syncPageVisibility so sections are visible) ── */
     if (state.activePage === 'friends' && window.__stepperFriendsTab) window.__stepperFriendsTab.render();
     if (state.activePage === 'glossary' && window.__stepperGlossaryTab) window.__stepperGlossaryTab.render();
     if (state.activePage === 'pdfimport' && window.__stepperPdfTab) window.__stepperPdfTab.render();
-    syncPageVisibility();
     renderPresenceOnly();
     renderSuspensionBanner();
     patchFeaturedPageCopy();
