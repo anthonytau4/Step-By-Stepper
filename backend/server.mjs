@@ -2151,6 +2151,7 @@ app.get("/api/friends/chat", requireGoogleUser, async (req, res) => {
 app.post("/api/friends/chat", requireGoogleUser, async (req, res) => {
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);
+  touchUser(db, req.stepperUser, key);
   const email = normalizeEmail(req.stepperUser?.email);
   const friendId = String(req.body?.friendId || "").trim();
   const text = String(req.body?.text || "").trim();
@@ -2165,7 +2166,7 @@ app.post("/api/friends/chat", requireGoogleUser, async (req, res) => {
     friendshipId: friendId,
     senderKey: key,
     senderEmail: email,
-    senderName: String(req.stepperUser?.name || "").trim(),
+    senderName: String(db.users[key]?.displayName || req.stepperUser?.name || "").trim(),
     text: text.slice(0, 4000),
     createdAt: new Date().toISOString()
   };

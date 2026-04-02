@@ -813,7 +813,7 @@
   window.__stepperFriendsTab = {
     PAGE_ID: PAGE_ID,
     TAB_ID: TAB_ID,
-    render: function () { ensureFriendsStyles(); renderFriendsPage(); },
+    render: function () { ensureFriendsStyles(); renderFriendsPage(); if (isSignedIn() && Date.now() - friendsState.lastRefresh > 30000) refreshFriends(); },
     refresh: refreshFriends,
     getState: function () { return friendsState; },
     icon: function () {
