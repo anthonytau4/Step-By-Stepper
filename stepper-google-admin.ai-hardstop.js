@@ -1114,6 +1114,19 @@
       if (isAdminSession()) { openPage('admin'); return { handled: true, message: '✅ Opened the **Admin** page.' }; }
       return { handled: true, message: 'You need admin access to open that page.' };
     }
+    if (/\b(go to|open|show|switch to|navigate to)\b.*\b(friend|friends|people|contacts)\b/.test(q)) {
+      openPage('friends');
+      if (window.__stepperFriendsTab) window.__stepperFriendsTab.refresh();
+      return { handled: true, message: '✅ Opened the **Friends** tab. Add friends by their Gmail or email address!' };
+    }
+    if (/\b(go to|open|show|switch to|navigate to)\b.*\b(glossary|dictionary|step.?list|step.?dictionary)\b/.test(q)) {
+      openPage('glossary');
+      return { handled: true, message: '✅ Opened the **Glossary** tab. Browse and search 100+ standard dance steps!' };
+    }
+    if (/\b(go to|open|show|switch to|navigate to)\b.*\b(pdf|import|upload)\b/.test(q)) {
+      openPage('pdfimport');
+      return { handled: true, message: '✅ Opened the **PDF Import** tab. Drop a stepsheet PDF to auto-import!' };
+    }
     /* ── Toggle dark mode ── */
     if (/\b(dark mode|night mode|toggle dark|toggle theme|switch theme)\b/.test(q) || (/\b(turn on|enable|activate)\b.*\bdark\b/.test(q))) {
       var htmlEl = document.documentElement;
@@ -1342,7 +1355,7 @@
     /* ── Help / what can you do ── */
     if (/\bwhat can you do\b/.test(q) || /\byour (?:capabilities|abilities|features)\b/.test(q) || /\bhelp me\b.*\bwhat\b/.test(q)) {
       return { handled: true, message: '🧠 **I can do a lot!** Here\'s what I can help with:\n\n' +
-        '**Navigation:** "Go to Build", "Open sheet", "Open saved dances", "Open featured"\n' +
+        '**Navigation:** "Go to Build", "Open sheet", "Open saved dances", "Open featured", "Open friends", "Open glossary", "Open PDF import"\n' +
         '**Dance editing:** "Add a vine right", "Delete step 3", "Delete section 2", "Clear worksheet"\n' +
         '**Metadata:** "Set title to My Dance", "Set counts to 32", "Set walls to 4", "Set level to beginner"\n' +
         '**Saving:** "Save my dance", "List my saves", "Load [dance name]"\n' +
@@ -1351,7 +1364,9 @@
         '**Random dance:** "Generate a random 10/10 dance", "Random perfect flow section"\n' +
         '**Quick add:** "Add to worksheet vine right", "Put on sheet coaster step"\n' +
         '**Groups & Folders:** "Create folder [name]", "List folders", "Archive this dance"\n' +
-        '**Collaboration:** "Invite collaborator user@email.com", "List collaborators"\n' +
+        '**Friends:** Open the **Friends tab** to add friends by Gmail, or "Invite collaborator user@email.com"\n' +
+        '**Step Dictionary:** Open the **Glossary tab** to browse 100+ standard dance steps\n' +
+        '**PDF Import:** Open the **PDF Import tab** to upload a stepsheet PDF\n' +
         '**Display:** "Dark mode", "Light mode", "Scroll to top"\n' +
         '**Info:** "Dance info", "What\'s loaded"\n\n' +
         'Just tell me what you need!' };
