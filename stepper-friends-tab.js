@@ -120,6 +120,20 @@
       .then(function (r) { return r.json(); });
   }
 
+  /* ── Normalize friend item: derive .name and .email for "the other person" ── */
+  function normalizeFriendItem(f) {
+    var copy = {};
+    for (var k in f) { if (Object.prototype.hasOwnProperty.call(f, k)) copy[k] = f[k]; }
+    if (copy.direction === 'sent') {
+      copy.name = copy.toDisplayName || copy.toName || copy.toEmail || '';
+      copy.email = copy.toEmail || '';
+    } else {
+      copy.name = copy.fromDisplayName || copy.fromName || copy.fromEmail || '';
+      copy.email = copy.fromEmail || '';
+    }
+    return copy;
+  }
+
   /* ── Data refresh ── */
   function refreshFriends() {
     if (!isSignedIn()) return Promise.resolve();
@@ -129,6 +143,7 @@
     return apiFetch('/api/friends/list', { headers: authHeaders() })
       .then(function (data) {
         var items = (data && Array.isArray(data.items)) ? data.items : [];
+        items = items.map(normalizeFriendItem);
         friendsState.friends = items.filter(function (f) { return f.status === 'accepted'; });
         friendsState.pendingSent = items.filter(function (f) { return f.status === 'invited' && f.direction === 'sent'; });
         friendsState.pendingReceived = items.filter(function (f) { return f.status === 'invited' && f.direction === 'received'; });

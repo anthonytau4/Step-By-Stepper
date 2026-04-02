@@ -2603,6 +2603,7 @@
       saveSession({
         credential: state.session.credential,
         profile: data.profile,
+        displayName: data.displayName || '',
         isAdmin: !!data.isAdmin,
         isModerator: !!data.isModerator,
         role: data.role || (data.isAdmin ? 'admin' : (data.isModerator ? 'moderator' : 'member')),
@@ -2682,6 +2683,7 @@
       saveSession({
         credential,
         profile: data.profile,
+        displayName: data.displayName || '',
         isAdmin: !!data.isAdmin,
         isModerator: !!data.isModerator,
         role: data.role || (data.isAdmin ? 'admin' : (data.isModerator ? 'moderator' : 'member')),
@@ -2699,6 +2701,10 @@
       await syncFeaturedFromBackend();
     await ensureStaffChatLoaded(true);
       if (isAdminSession()) { await refreshAdminDances(); await refreshSubmissions(); }
+      /* ── Prompt for username if not set ── */
+      if (!state.session.displayName) {
+        openPage('signin');
+      }
     } catch (error) {
       alert(error.message || 'Google sign in failed.');
     }
@@ -4153,6 +4159,25 @@
               </div>
             </div>
           </div>
+          <div class="mx-auto max-w-3xl rounded-3xl border p-5 sm:p-6 ${session.displayName ? theme.soft : theme.accent}" data-stepper-username-section>
+            <div class="flex flex-wrap items-start justify-between gap-4">
+              <div style="flex:1;min-width:200px;">
+                <div class="text-lg font-black tracking-tight">${session.displayName ? 'Your username' : '⚡ Choose a username'}</div>
+                ${session.displayName
+                  ? `<p class="mt-1 text-sm ${theme.subtle}">Your username is <strong>${escapeHtml(session.displayName)}</strong>. This is the name friends see when you send a request.</p>`
+                  : `<p class="mt-2 text-sm ${theme.subtle}">Pick a unique username so friends can recognise you. Usernames must be 2–30 characters and are first-come-first-served.</p>`
+                }
+                <div class="mt-4 flex flex-wrap gap-3 items-end">
+                  <div style="flex:1;min-width:180px;">
+                    <input data-stepper-username-input class="stepper-google-input" placeholder="Enter a username…" value="${escapeHtml(session.displayName || '')}" maxlength="30" style="width:100%;" />
+                    <div data-stepper-username-status class="mt-1 text-xs ${theme.subtle}" style="min-height:18px;"></div>
+                  </div>
+                  <button type="button" data-stepper-action="save-username" class="stepper-google-cta ${theme.button}" style="white-space:nowrap;">Save username</button>
+                </div>
+              </div>
+              ${session.displayName ? `<span class="stepper-google-pill ${theme.orange}">@${escapeHtml(session.displayName)}</span>` : ''}
+            </div>
+          </div>
           <div class="mx-auto max-w-3xl rounded-3xl border p-5 sm:p-6 ${theme.soft}">
             <div class="flex flex-wrap items-center justify-between gap-4">
               <div>
@@ -4253,6 +4278,65 @@
     if (applyModBtn) applyModBtn.addEventListener('click', () => applyForModerator());
     const applyNeedsSignInBtn = page.querySelector('[data-stepper-action="apply-moderator-needs-signin"]');
     if (applyNeedsSignInBtn) applyNeedsSignInBtn.addEventListener('click', () => { alert('Sign in with Google first, then press Apply for moderator.'); });
+
+    /* ── Username input: live availability check ── */
+    const usernameInput = page.querySelector('[data-stepper-username-input]');
+    const usernameStatus = page.querySelector('[data-stepper-username-status]');
+    const _usernameDisallowed = /[<>"'&\\\/]/;
+    const _validateUsername = (raw) => {
+      if (!raw || raw.length < 2) return raw && raw.length === 1 ? 'Must be at least 2 characters.' : '';
+      if (raw.length > 30) return 'Must be 30 characters or fewer.';
+      if (_usernameDisallowed.test(raw)) return 'Contains disallowed characters.';
+      return null;
+    };
+    let _usernameCheckTimer = null;
+    if (usernameInput && usernameStatus) {
+      usernameInput.addEventListener('input', () => {
+        clearTimeout(_usernameCheckTimer);
+        const raw = String(usernameInput.value || '').trim();
+        const validationError = _validateUsername(raw);
+        if (validationError !== null) { usernameStatus.textContent = validationError; usernameStatus.style.color = ''; return; }
+        if (state.session && state.session.displayName && raw === state.session.displayName) { usernameStatus.textContent = 'This is your current username.'; usernameStatus.style.color = ''; return; }
+        usernameStatus.textContent = 'Checking…';
+        usernameStatus.style.color = '';
+        _usernameCheckTimer = setTimeout(async () => {
+          try {
+            const result = await authFetch('/api/user/check-display-name?name=' + encodeURIComponent(raw));
+            if (String(usernameInput.value || '').trim() !== raw) return;
+            usernameStatus.textContent = result.available ? '✅ Available!' : '❌ Already taken. Try another.';
+            usernameStatus.style.color = result.available ? '#22c55e' : '#ef4444';
+          } catch { usernameStatus.textContent = 'Could not check availability.'; usernameStatus.style.color = ''; }
+        }, 400);
+      });
+    }
+    const saveUsernameBtn = page.querySelector('[data-stepper-action="save-username"]');
+    if (saveUsernameBtn) {
+      saveUsernameBtn.addEventListener('click', async () => {
+        const raw = String((usernameInput || {}).value || '').trim();
+        const validationError = _validateUsername(raw);
+        if (validationError) { alert(validationError); return; }
+        saveUsernameBtn.disabled = true;
+        saveUsernameBtn.textContent = 'Saving…';
+        try {
+          const result = await authFetch('/api/user/display-name', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ displayName: raw })
+          });
+          if (result.ok !== false) {
+            if (state.session) { state.session.displayName = result.displayName || raw; saveSession(state.session); }
+            renderPages();
+          } else {
+            alert(result.error || 'Could not save username.');
+          }
+        } catch (err) {
+          alert(err.message || 'Could not save username.');
+        } finally {
+          saveUsernameBtn.disabled = false;
+          saveUsernameBtn.textContent = 'Save username';
+        }
+      });
+    }
     const aiPrompt = page.querySelector('[data-stepper-ai-prompt="1"]');
     if (aiPrompt) aiPrompt.addEventListener('input', () => { state.aiDance.prompt = aiPrompt.value; });
     const aiJudgeBtn = page.querySelector('[data-stepper-action="ai-judge"]');
