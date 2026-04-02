@@ -2505,7 +2505,17 @@
 
   function localSiteHelp(prompt){
     const text = String(prompt || '').toLowerCase();
-    if (!text) return 'Ask about saving, featuring, premium, moderators, or which tab to use.';
+    if (!text) return 'Ask about saving, featuring, premium, moderators, dance steps, or which tab to use.';
+    /* ── Try the enhanced brain first ── */
+    if (window.__stepperHelperBrain && window.__stepperHelperBrain.findLocalAnswer) {
+      const richCtx = window.__stepperHelperBrain.gatherRichContext ? window.__stepperHelperBrain.gatherRichContext() : {};
+      richCtx.signedIn = !!(state.session && state.session.credential);
+      richCtx.isPremium = isPremiumSession();
+      richCtx.currentTab = state.activePage || 'main';
+      const brainAnswer = window.__stepperHelperBrain.findLocalAnswer(prompt, richCtx);
+      if (brainAnswer) return brainAnswer;
+    }
+    /* ── Legacy fallback patterns ── */
     if (text.includes('save') || text.includes('changes')) return state.session && state.session.credential ? 'Use Save Changes in My Saved Dances to lock the newest version into your Google-linked cloud save. Your latest signed-in dance also auto-syncs in the background.' : 'Open My Saved Dances and use Save Changes there. Sign in with Google first if you want that save to follow you onto other devices.';
     if (text.includes('premium') || text.includes('subscription') || text.includes('pay')) return 'Open Subscription after signing in. Premium is NZ$12.50 monthly or NZ$100 yearly and gets priority review plus the paid site helper.';
     if (text.includes('feature') || text.includes('badge') || text.includes('bronze') || text.includes('silver') || text.includes('gold')) return 'Use Send to host for featuring. Premium requests go to the top of the admin queue, and the admin can approve them with Bronze, Silver, or Gold for Featured Choreo. Removing a feature takes it back off that public page.';
@@ -2534,27 +2544,72 @@
   async function askSiteHelper(question){
     const prompt = String(question || '').trim();
     if (!prompt) return;
+    const brain = window.__stepperHelperBrain;
+
+    /* ── Try local worksheet-build handler first ── */
     const localHandled = tryHandleSiteHelperLocally(prompt);
     if (localHandled && localHandled.handled) {
       state.chatMessages.push({ role:'assistant', text: localHandled.message || 'Done.' });
       state.chatBusy = false;
+      if (brain && brain.saveChatHistory) brain.saveChatHistory(state.chatMessages);
       renderCommunityGlossary();
       renderSiteHelper();
       return;
     }
+
+    /* ── Try enhanced brain local knowledge base (free for all users) ── */
+    if (brain && brain.findLocalAnswer) {
+      const richCtx = brain.gatherRichContext ? brain.gatherRichContext() : {};
+      richCtx.signedIn = !!(state.session && state.session.credential);
+      richCtx.isPremium = isPremiumSession();
+      richCtx.currentTab = state.activePage || 'main';
+      const localAnswer = brain.findLocalAnswer(prompt, richCtx);
+      if (localAnswer) {
+        state.chatMessages.push({ role:'assistant', text: localAnswer });
+        state.chatBusy = false;
+        if (brain.saveChatHistory) brain.saveChatHistory(state.chatMessages);
+        renderSiteHelper();
+        return;
+      }
+    }
+
+    /* ── For non-premium users without a local answer, try legacy local help ── */
+    if (!isPremiumSession()) {
+      const fallback = localSiteHelp(prompt);
+      state.chatMessages.push({ role:'assistant', text: fallback });
+      state.chatBusy = false;
+      if (brain && brain.saveChatHistory) brain.saveChatHistory(state.chatMessages);
+      renderSiteHelper();
+      return;
+    }
+
+    /* ── Premium path: call backend AI with enriched context ── */
     state.chatBusy = true;
     renderSiteHelper();
     const currentTab = state.activePage || 'main';
     const appData = readAppData();
+    const sections = (appData && Array.isArray(appData.sections)) ? appData.sections : [];
+    const totalSteps = sections.reduce(function (sum, sec) { return sum + (Array.isArray(sec.steps) ? sec.steps.length : 0); }, 0);
+    const meta = (appData && appData.meta) || {};
     const payload = {
       prompt,
-      history: (state.chatMessages || []).slice(-8).map(message => ({ role: message.role, text: message.text })),
+      history: (state.chatMessages || []).slice(-12).map(message => ({ role: message.role, text: message.text })),
       context: {
         currentTab,
         signedIn: !!(state.session && state.session.credential),
         isAdmin: isAdminSession(),
+        isPremium: isPremiumSession(),
         onlineCount: (state.presence && state.presence.onlineCount) || 0,
-        currentDanceTitle: appData && appData.meta ? String(appData.meta.title || '').trim() : ''
+        currentDanceTitle: meta.title ? String(meta.title).trim() : '',
+        currentDanceCounts: meta.counts ? String(meta.counts).trim() : '',
+        currentDanceWalls: meta.walls ? String(meta.walls).trim() : '',
+        currentDanceType: meta.type ? String(meta.type).trim() : '',
+        currentDanceLevel: meta.level ? String(meta.level).trim() : '',
+        sectionCount: sections.length,
+        totalSteps: totalSteps,
+        hasUnsavedChanges: !!(brain && brain.gatherRichContext && brain.gatherRichContext().hasUnsavedChanges),
+        isPhrased: !!(appData && appData.phrased),
+        glossaryCount: (state.glossaryApproved || []).length,
       }
     };
     try {
@@ -2571,8 +2626,8 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            system: 'You are the Step By Stepper site helper. Answer briefly and practically. Explain which tab or button to use. Mention Build, Sheet, Sign In, My Saved Dances, Featured Choreo, Save Changes, Send to host for featuring, and Upload to site when useful. Never invent hidden features.',
-            prompt: `Current tab: ${currentTab}\nSigned in: ${payload.context.signedIn ? 'yes' : 'no'}\nAdmin: ${payload.context.isAdmin ? 'yes' : 'no'}\nOnline count: ${payload.context.onlineCount}\nQuestion: ${prompt}`
+            system: 'You are the Step By Stepper site helper. Answer briefly and practically. Explain which tab or button to use. Mention Build, Sheet, Sign In, My Saved Dances, Featured Choreo, Save Changes, Send to host for featuring, and Upload to site when useful. Never invent hidden features. If asked about dance terminology, explain the step clearly with counts and foot directions.',
+            prompt: `Current tab: ${currentTab}\nSigned in: ${payload.context.signedIn ? 'yes' : 'no'}\nAdmin: ${payload.context.isAdmin ? 'yes' : 'no'}\nDance: ${payload.context.currentDanceTitle || 'none'} (${totalSteps} steps, ${sections.length} sections)\nQuestion: ${prompt}`
           })
         });
         text = sanitizeHelperReply(backup.text || '', prompt);
@@ -2584,6 +2639,7 @@
       state.chatMessages.push({ role:'assistant', text: message ? `AI helper error: ${message}` : 'AI helper error: the backend could not produce a usable reply.' });
     } finally {
       state.chatBusy = false;
+      if (brain && brain.saveChatHistory) brain.saveChatHistory(state.chatMessages);
       renderSiteHelper();
     }
   }
@@ -2603,31 +2659,162 @@
 
   function renderSiteHelper(){
     const activeInput = document.activeElement;
-    if (state.chatOpen && activeInput && activeInput.matches && activeInput.matches('[data-chat-input=\"1\"]')) return;
+    if (state.chatOpen && activeInput && activeInput.matches && activeInput.matches('[data-chat-input="1"]')) return;
     const host = ensureSiteHelperHost();
     placeFloatingHost(host, 'right');
+    const brain = window.__stepperHelperBrain;
+    if (brain && brain.injectHelperStyles) brain.injectHelperStyles();
+
+    /* ── Set up delegated event handler once ── */
+    _ensureHelperDelegation(host);
+
+    /* ── Restore persisted chat history on first open ── */
+    if (brain && !state._chatHistoryRestored) {
+      state._chatHistoryRestored = true;
+      const saved = brain.loadChatHistory();
+      if (saved.length && !state.chatMessages.length) state.chatMessages = saved;
+    }
+
+    /* ── Closed state: floating button with pulse ── */
     if (!state.chatOpen) {
-      host.innerHTML = `<button type="button" data-chat-open="1" aria-label="Open site helper" style="border:none;background:#4f46e5;color:#fff;width:58px;height:58px;border-radius:999px;font-size:26px;box-shadow:0 12px 30px rgba(0,0,0,.18);">💬</button>`;
-      host.querySelector('[data-chat-open="1"]').addEventListener('click', ()=>{ if (isCompactViewport()) state.communityGlossaryOpen = false; state.chatOpen = true; renderCommunityGlossary(); renderSiteHelper(); });
+      const isNew = !(brain && brain.hasCompletedOnboarding && brain.hasCompletedOnboarding());
+      host.innerHTML = `<button type="button" data-chat-open="1" aria-label="Open site helper" style="border:none;background:#4f46e5;color:#fff;width:58px;height:58px;border-radius:999px;font-size:26px;box-shadow:0 12px 30px rgba(0,0,0,.18);position:relative;transition:transform .15s;cursor:pointer;"${isNew ? ' title="Click for help!"' : ''}>💬${isNew ? '<span style="position:absolute;top:-2px;right:-2px;width:14px;height:14px;background:#ef4444;border-radius:50%;border:2px solid #fff;"></span>' : ''}</button>`;
       return;
     }
-    const messages = state.chatMessages.length ? state.chatMessages.slice(-10).map(msg => `<div style="align-self:${msg.role==='user'?'flex-end':'stretch'};max-width:100%;background:${msg.role==='user'?'#4f46e5':'#ffffff'};color:${msg.role==='user'?'#ffffff':'#111827'};border:1px solid rgba(79,70,229,.12);padding:.75rem .85rem;border-radius:18px;font-size:14px;line-height:1.45;box-shadow:0 8px 24px rgba(0,0,0,.08);word-break:break-word;">${escapeHtml(msg.text)}</div>`).join('') : `<div style="font-size:13px;color:#6b7280;background:#ffffff;border:1px dashed rgba(99,102,241,.18);padding:.8rem .9rem;border-radius:16px;">Ask what button to press, where to save, how featuring works, or anything else about the site.</div>`;
-    host.innerHTML = `<div style="width:min(380px, calc(100vw - 24px));max-width:calc(100vw - 24px);background:#f8fafc;border:1px solid rgba(99,102,241,.16);border-radius:24px;box-shadow:0 18px 40px rgba(0,0,0,.18);overflow:hidden;"><div style="padding:.9rem 1rem;background:#4f46e5;color:#fff;display:flex;align-items:center;gap:.6rem;"><div style="font-weight:900;">Site helper${isPremiumSession() ? ' • Premium' : ''}</div><button type="button" data-chat-close="1" style="margin-left:auto;border:none;background:rgba(255,255,255,.18);color:#fff;border-radius:999px;padding:.35rem .65rem;font-weight:900;">Close</button></div><div data-chat-messages="1" style="padding:1rem;display:flex;flex-direction:column;gap:.7rem;max-height:min(45vh, 340px);overflow:auto;overscroll-behavior:contain;">${messages}${state.chatBusy ? '<div style="font-size:13px;color:#6b7280;">Thinking…</div>' : ''}</div><form data-chat-form="1" style="padding:0 1rem 1rem;display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;"><input data-chat-input="1" type="text" autocomplete="off" autocapitalize="sentences" spellcheck="true" placeholder="${isPremiumSession() ? 'Ask where to go or what to press' : 'Premium helper lives in Subscription'}" value="${escapeHtml(state.chatDraft || '')}" style="flex:1 1 220px;border:1px solid rgba(99,102,241,.18);border-radius:999px;padding:.9rem 1rem;background:#fff;font-size:16px;min-width:0;" /><button type="submit" ${isPremiumSession() ? '' : 'disabled'} style="border:none;background:#4f46e5;color:#fff;border-radius:999px;padding:.85rem 1rem;font-weight:900;white-space:nowrap;${isPremiumSession() ? '' : 'opacity:.5;cursor:not-allowed;'}">Send</button></form></div>`;
+
+    /* ── Gather context for suggestions ── */
+    const richCtx = (brain && brain.gatherRichContext) ? brain.gatherRichContext() : {};
+    richCtx.signedIn = !!(state.session && state.session.credential);
+    richCtx.isPremium = isPremiumSession();
+    richCtx.currentTab = state.activePage || 'main';
+
+    /* ── Build message HTML with markdown + feedback ── */
+    const renderMd = (brain && brain.renderMarkdown) ? brain.renderMarkdown : escapeHtml;
+    const msgs = state.chatMessages.length ? state.chatMessages.slice(-15) : [];
+    const isDark = document.documentElement.classList.contains('dark') || document.body.classList.contains('dark');
+
+    let messagesHtml = '';
+    if (!msgs.length) {
+      messagesHtml = `<div class="stepper-helper-empty" style="font-size:13px;color:#6b7280;background:#ffffff;border:1px dashed rgba(99,102,241,.18);padding:.9rem 1rem;border-radius:16px;line-height:1.5;">
+        <strong>Hi! I'm your dance helper.</strong> I can answer questions about:
+        <ul style="margin:.4rem 0 0;padding-left:1.1rem;"><li>Creating & editing dances</li><li>Saving, syncing & exporting</li><li>Featured Choreo & badges</li><li>Line dance step terminology</li><li>PDF import & AI tools</li><li>Troubleshooting & tips</li></ul></div>`;
+    } else {
+      messagesHtml = msgs.map(function (msg, idx) {
+        const isUser = msg.role === 'user';
+        const globalIdx = state.chatMessages.length - msgs.length + idx;
+        const content = isUser ? escapeHtml(msg.text) : renderMd(msg.text);
+        const feedbackHtml = !isUser ? `<div class="stepper-helper-feedback"><button class="stepper-helper-fb-btn" data-fb-idx="${globalIdx}" data-fb-val="up" title="Helpful">👍</button><button class="stepper-helper-fb-btn" data-fb-idx="${globalIdx}" data-fb-val="down" title="Not helpful">👎</button></div>` : '';
+        return `<div class="stepper-helper-msg ${isUser ? 'stepper-helper-msg-user' : 'stepper-helper-msg-assistant'}" style="align-self:${isUser ? 'flex-end' : 'stretch'};max-width:${isUser ? '85%' : '100%'};background:${isUser ? '#4f46e5' : '#ffffff'};color:${isUser ? '#ffffff' : '#111827'};border:1px solid rgba(79,70,229,.12);padding:.75rem .85rem;border-radius:${isUser ? '18px 18px 4px 18px' : '18px 18px 18px 4px'};font-size:14px;line-height:1.5;box-shadow:0 4px 16px rgba(0,0,0,.06);word-break:break-word;">${content}${feedbackHtml}</div>`;
+      }).join('');
+    }
+
+    /* ── Typing indicator ── */
+    const typingHtml = state.chatBusy
+      ? `<div class="stepper-helper-msg" style="align-self:stretch;background:#ffffff;border:1px solid rgba(79,70,229,.12);padding:.65rem .85rem;border-radius:18px 18px 18px 4px;box-shadow:0 4px 16px rgba(0,0,0,.06);">${(brain && brain.typingIndicatorHtml) ? brain.typingIndicatorHtml() : '<span style="color:#6b7280;font-size:13px;">Thinking…</span>'}</div>`
+      : '';
+
+    /* ── Quick-action suggestion chips ── */
+    const suggestions = (brain && brain.getQuickSuggestions) ? brain.getQuickSuggestions(richCtx) : [];
+    const chipsHtml = suggestions.length && !state.chatBusy
+      ? `<div data-chat-chips="1" style="padding:.5rem 1rem 0;display:flex;flex-wrap:wrap;gap:6px;">${suggestions.map(function (s) { return `<button type="button" class="stepper-helper-chip" data-chip-text="${escapeHtml(s)}">${escapeHtml(s)}</button>`; }).join('')}</div>`
+      : '';
+
+    /* ── Header with clear chat button ── */
+    const clearBtn = state.chatMessages.length
+      ? `<button type="button" class="stepper-helper-clear-btn" data-chat-clear="1" title="Clear chat history">Clear</button>`
+      : '';
+
+    /* ── Full panel ── */
+    host.innerHTML = `<div class="stepper-helper-panel" style="width:min(400px, calc(100vw - 24px));max-width:calc(100vw - 24px);background:#f8fafc;border:1px solid rgba(99,102,241,.16);border-radius:24px;box-shadow:0 18px 48px rgba(0,0,0,.2);overflow:hidden;">
+      <div class="stepper-helper-header" style="padding:.85rem 1rem;background:#4f46e5;color:#fff;display:flex;align-items:center;gap:.5rem;">
+        <span style="font-size:18px;">🤖</span>
+        <div style="font-weight:900;flex:1;">Site Helper${isPremiumSession() ? ' <span style="font-size:11px;background:rgba(255,255,255,.22);padding:2px 8px;border-radius:999px;margin-left:4px;">PRO</span>' : ''}</div>
+        ${clearBtn}
+        <button type="button" data-chat-close="1" style="border:none;background:rgba(255,255,255,.18);color:#fff;border-radius:999px;padding:.3rem .6rem;font-weight:900;cursor:pointer;transition:background .15s;" title="Close">✕</button>
+      </div>
+      <div data-chat-messages="1" style="padding:.85rem;display:flex;flex-direction:column;gap:.6rem;max-height:min(50vh, 380px);overflow:auto;overscroll-behavior:contain;scroll-behavior:smooth;">
+        ${messagesHtml}${typingHtml}
+      </div>
+      ${chipsHtml}
+      <form data-chat-form="1" style="padding:.6rem 1rem .85rem;display:flex;gap:.5rem;align-items:center;">
+        <input data-chat-input="1" type="text" autocomplete="off" autocapitalize="sentences" spellcheck="true" placeholder="${isPremiumSession() ? 'Ask me anything about the site…' : (state.session && state.session.credential ? 'Upgrade to Premium for AI chat' : 'Ask a question…')}" value="${escapeHtml(state.chatDraft || '')}" style="flex:1 1 200px;border:1px solid rgba(99,102,241,.18);border-radius:999px;padding:.8rem 1rem;background:#fff;font-size:15px;min-width:0;transition:border-color .15s;" />
+        <button type="submit" style="border:none;background:#4f46e5;color:#fff;border-radius:999px;padding:.8rem 1rem;font-weight:900;white-space:nowrap;cursor:pointer;transition:background .15s;">Send</button>
+      </form>
+    </div>`;
+
+    /* ── Auto-scroll to bottom ── */
     const list = host.querySelector('[data-chat-messages="1"]');
     if (list) list.scrollTop = list.scrollHeight;
-    host.querySelector('[data-chat-close="1"]').addEventListener('click', ()=>{ state.chatOpen = false; renderSiteHelper(); });
-    const input = host.querySelector('[data-chat-input="1"]');
-    if (input) {
-      input.addEventListener('input', ()=>{ state.chatDraft = input.value; });
-    }
-    host.querySelector('[data-chat-form="1"]').addEventListener('submit', (event)=>{
-      event.preventDefault();
+  }
+
+  function _ensureHelperDelegation(host) {
+    if (host._stepperDelegated) return;
+    host._stepperDelegated = true;
+    host.addEventListener('click', function (e) {
+      const target = e.target.closest ? e.target.closest('[data-chat-open="1"],[data-chat-close="1"],[data-chat-clear="1"],[data-chip-text],[data-fb-idx]') : null;
+      if (!target) return;
+      if (target.hasAttribute('data-chat-open')) {
+        if (isCompactViewport()) state.communityGlossaryOpen = false;
+        state.chatOpen = true;
+        const brain2 = window.__stepperHelperBrain;
+        if (brain2 && brain2.getOnboardingMessage) {
+          const welcome = brain2.getOnboardingMessage({});
+          if (welcome) state.chatMessages.unshift(welcome);
+        }
+        renderCommunityGlossary(); renderSiteHelper();
+      } else if (target.hasAttribute('data-chat-close')) {
+        state.chatOpen = false;
+        const brain2 = window.__stepperHelperBrain;
+        if (brain2 && brain2.saveChatHistory) brain2.saveChatHistory(state.chatMessages);
+        renderSiteHelper();
+      } else if (target.hasAttribute('data-chat-clear')) {
+        state.chatMessages = [];
+        state.chatDraft = '';
+        const brain2 = window.__stepperHelperBrain;
+        if (brain2 && brain2.clearChatHistory) brain2.clearChatHistory();
+        renderSiteHelper();
+      } else if (target.hasAttribute('data-chip-text')) {
+        const chipText = target.getAttribute('data-chip-text');
+        if (!chipText) return;
+        state.chatMessages.push({ role:'user', text: chipText });
+        state.chatDraft = '';
+        const brain2 = window.__stepperHelperBrain;
+        if (brain2 && brain2.saveChatHistory) brain2.saveChatHistory(state.chatMessages);
+        renderSiteHelper();
+        askSiteHelper(chipText);
+      } else if (target.hasAttribute('data-fb-idx')) {
+        const idx = parseInt(target.getAttribute('data-fb-idx'), 10);
+        const val = target.getAttribute('data-fb-val');
+        const brain2 = window.__stepperHelperBrain;
+        if (brain2 && brain2.saveFeedback) brain2.saveFeedback(idx, val);
+        target.classList.add('voted');
+        target.style.opacity = '1';
+        const parent = target.parentElement;
+        if (parent) {
+          const siblings = parent.querySelectorAll('.stepper-helper-fb-btn');
+          for (let s = 0; s < siblings.length; s++) {
+            if (siblings[s] !== target) { siblings[s].style.opacity = '.2'; siblings[s].style.pointerEvents = 'none'; }
+          }
+        }
+      }
+    });
+    host.addEventListener('submit', function (e) {
+      const form = e.target.closest ? e.target.closest('[data-chat-form="1"]') : null;
+      if (!form) return;
+      e.preventDefault();
       const value = String(state.chatDraft || '').trim();
       if (!value) return;
       state.chatMessages.push({ role:'user', text:value });
       state.chatDraft = '';
+      const brain2 = window.__stepperHelperBrain;
+      if (brain2 && brain2.saveChatHistory) brain2.saveChatHistory(state.chatMessages);
       renderSiteHelper();
       askSiteHelper(value);
+    });
+    host.addEventListener('input', function (e) {
+      if (e.target && e.target.matches && e.target.matches('[data-chat-input="1"]')) {
+        state.chatDraft = e.target.value;
+      }
     });
   }
 
