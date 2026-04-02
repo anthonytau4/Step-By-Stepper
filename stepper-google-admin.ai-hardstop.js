@@ -5480,11 +5480,11 @@ Newest user question: ${question}`;
 
     /* ── Try enhanced brain local knowledge base (free for all users) ── */
     if (brain && brain.findLocalAnswer) {
-      var richCtx = brain.gatherRichContext ? brain.gatherRichContext() : {};
+      const richCtx = brain.gatherRichContext ? brain.gatherRichContext() : {};
       richCtx.signedIn = !!(state.session && state.session.credential);
       richCtx.isPremium = isPremiumSession();
       richCtx.currentTab = state.activePage || 'main';
-      var localAnswer = brain.findLocalAnswer(prompt, richCtx);
+      const localAnswer = brain.findLocalAnswer(prompt, richCtx);
       if (localAnswer) {
         state.chatMessages.push({ role:'assistant', text: localAnswer });
         state.chatBusy = false;
