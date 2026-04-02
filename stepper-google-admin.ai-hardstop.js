@@ -5453,6 +5453,47 @@ Newest user question: ${question}`;
   askSiteHelper = async function(question){
     const prompt = String(question || '').trim();
     if (!prompt) return;
+    const brain = window.__stepperHelperBrain;
+
+    /* ── Try local worksheet-build handler first (approve/deny, step-adding) ── */
+    const localHandled = tryHandleSiteHelperLocally(prompt);
+    if (localHandled && localHandled.handled) {
+      state.chatMessages.push({ role:'assistant', text: localHandled.message || 'Done.' });
+      state.chatBusy = false;
+      if (brain && brain.saveChatHistory) brain.saveChatHistory(state.chatMessages);
+      renderCommunityGlossary();
+      state._helperSignature = '';
+      renderSiteHelper();
+      return;
+    }
+
+    /* ── Try page action commands (navigate, dark mode, save, etc.) ── */
+    const actionResult = tryHelperPageAction(prompt);
+    if (actionResult && actionResult.handled) {
+      state.chatMessages.push({ role:'assistant', text: actionResult.message || 'Done.' });
+      state.chatBusy = false;
+      if (brain && brain.saveChatHistory) brain.saveChatHistory(state.chatMessages);
+      state._helperSignature = '';
+      renderSiteHelper();
+      return;
+    }
+
+    /* ── Try enhanced brain local knowledge base (free for all users) ── */
+    if (brain && brain.findLocalAnswer) {
+      var richCtx = brain.gatherRichContext ? brain.gatherRichContext() : {};
+      richCtx.signedIn = !!(state.session && state.session.credential);
+      richCtx.isPremium = isPremiumSession();
+      richCtx.currentTab = state.activePage || 'main';
+      var localAnswer = brain.findLocalAnswer(prompt, richCtx);
+      if (localAnswer) {
+        state.chatMessages.push({ role:'assistant', text: localAnswer });
+        state.chatBusy = false;
+        if (brain.saveChatHistory) brain.saveChatHistory(state.chatMessages);
+        renderSiteHelper();
+        return;
+      }
+    }
+
     state.chatBusy = true;
     renderSiteHelper();
     await refreshSession().catch(() => null);
@@ -5571,6 +5612,7 @@ Newest user question: ${question}`;
       state.chatMessages.push({ role:'assistant', text: message ? `AI helper error: ${message}` : 'AI helper error: the backend could not produce a usable response.' });
     } finally {
       state.chatBusy = false;
+      if (brain && brain.saveChatHistory) brain.saveChatHistory(state.chatMessages);
       renderSiteHelper();
     }
   };
