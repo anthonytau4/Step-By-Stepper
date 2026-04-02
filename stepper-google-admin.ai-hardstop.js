@@ -800,6 +800,7 @@
 
   function applyHelperPlanToWorksheet(plan){
     if (!plan || !Array.isArray(plan.steps) || !plan.steps.length) return { applied: false, message: '' };
+    const sectionSize = 8;
     let data = ensureAppData();
     const forceFresh = !!(plan && plan.resetDance);
     if ((forceFresh || shouldStartFreshWorksheet(plan.prompt)) && !currentWorksheetHasSteps()) {
@@ -822,8 +823,25 @@
       data.sections.push(target);
     }
     if (!Array.isArray(target.steps)) target.steps = [];
-    plan.steps.forEach((step) => {
+    /* ── Count existing steps to know when to create new section ── */
+    let countAccum = 0;
+    target.steps.forEach(function(step){
+      if (!step || step.type !== 'step') return;
+      var cl = compactWhitespace(step.count || step.counts || '');
+      var nums = (cl.match(/\d+/g) || []).map(Number).filter(Number.isFinite);
+      countAccum += nums.length >= 2 ? Math.max(1, nums[nums.length - 1] - nums[0] + 1) : (nums.length === 1 ? nums[0] : 1);
+    });
+    plan.steps.forEach(function(step){
+      var cl = compactWhitespace(step.count || step.counts || '');
+      var nums = (cl.match(/\d+/g) || []).map(Number).filter(Number.isFinite);
+      var span = nums.length >= 2 ? Math.max(1, nums[nums.length - 1] - nums[0] + 1) : (nums.length === 1 ? nums[0] : 1);
+      if (plan.steps.length > sectionSize && countAccum > 0 && countAccum + span > sectionSize) {
+        target = { id:createLocalId('section'), name:'Section ' + (data.sections.length + 1), steps:[] };
+        data.sections.push(target);
+        countAccum = 0;
+      }
       target.steps.push(buildGlossaryApplyStep(step));
+      countAccum += span;
     });
     writeAppData(data);
     updateSavedSignature('');
@@ -831,7 +849,7 @@
     openBuildWorksheet();
     const customCount = plan.steps.filter((step) => !step.fromGlossary).length;
     const summary = plan.steps.slice(0, 6).map((step) => step.name).join(', ');
-    const bits = [`Done. I added ${plan.steps.length} step${plan.steps.length === 1 ? '' : 's'} to ${target.name}.`];
+    const bits = [`Done. I added ${plan.steps.length} step${plan.steps.length === 1 ? '' : 's'}.`];
     if (plan.meta && plan.meta.title) bits.push(`Dance name set to ${plan.meta.title}.`);
     if (plan.meta && plan.meta.counts) bits.push(`Counts set to ${plan.meta.counts}.`);
     if (plan.meta && plan.meta.walls) bits.push(`Walls set to ${plan.meta.walls}.`);
@@ -856,6 +874,62 @@
       ? readable[0]
       : `${readable.slice(0, -1).join(', ')} and ${readable[readable.length - 1]}`;
     return `I can build that, but I still need the ${joined}. Send it like: Name: Midnight Run. Counts: 32. Walls: 4. Steps: vine right, vine left, rock back recover, coaster step.`;
+  }
+
+  function isVagueStepRequest(steps){
+    if (!Array.isArray(steps) || !steps.length) return false;
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      if (!step) continue;
+      if (!step.fromGlossary && !step.needsName && !step.needsCount) {
+        const name = compactWhitespace(step.name || '').toLowerCase();
+        const desc = compactWhitespace(step.description || '').toLowerCase();
+        if (/^(custom step|step|move|something|anything|idk)$/i.test(name)) return true;
+        if (name.split(/\s+/).length <= 1 && !step.fromGlossary && !/\b(vine|rock|coaster|sailor|shuffle|pivot|kick|jazz|rumba|mambo|charleston|weave|stomp|clap|touch|heel|toe|walk|turn|cross|monterey|lock|swivel|scuff|brush|hitch|hop)\b/i.test(name)) return true;
+        if (!desc || desc === 'custom step.' || desc === name + '.') return true;
+      }
+    }
+    return false;
+  }
+
+  function buildStepPreviewMessage(steps, meta){
+    const lines = [];
+    if (meta && meta.title) lines.push('**Dance:** ' + meta.title);
+    if (meta && meta.counts) lines.push('**Counts:** ' + meta.counts);
+    if (meta && meta.walls) lines.push('**Walls:** ' + meta.walls);
+    if (lines.length) lines.push('');
+    let currentFoot = getLocalExpectedStartFoot();
+    const sectionSize = 8;
+    let countAccum = 0;
+    let sectionNum = 1;
+    const data = readAppData();
+    const existingSections = (data && Array.isArray(data.sections)) ? data.sections.length : 0;
+    steps.forEach(function(step, idx){
+      const foot = compactWhitespace(step.foot || '').toUpperCase();
+      const startLabel = (foot === 'R' || foot === 'L') ? (foot === 'R' ? 'Right' : 'Left') : '';
+      const countLabel = compactWhitespace(step.count || step.counts || '');
+      const countNums = (countLabel.match(/\d+/g) || []).map(Number).filter(Number.isFinite);
+      const span = countNums.length >= 2 ? Math.max(1, countNums[countNums.length - 1] - countNums[0] + 1) : (countNums.length === 1 ? countNums[0] : 1);
+      if (steps.length > sectionSize && countAccum > 0 && countAccum + span > sectionSize) {
+        sectionNum += 1;
+        countAccum = 0;
+        lines.push('');
+        lines.push('**--- Section ' + (existingSections + sectionNum) + ' ---**');
+      }
+      if (idx === 0 && steps.length > sectionSize) {
+        lines.push('**--- Section ' + (existingSections + 1) + ' ---**');
+      }
+      countAccum += span;
+      const badge = step.fromGlossary ? ' ✅' : ' ✏️';
+      const footNote = startLabel ? ' (starts ' + startLabel + ')' : '';
+      lines.push((idx + 1) + '. **' + compactWhitespace(step.name || 'Custom Step') + '**' + badge + footNote + (countLabel ? ' — counts ' + countLabel : ''));
+      if (step.description && step.description !== (step.name + '.')) {
+        lines.push('   _' + step.description + '_');
+      }
+    });
+    lines.push('');
+    lines.push('Confirm sheet addition?');
+    return lines.join('\n');
   }
 
   function resolveHelperWorksheetIntent(input){
@@ -887,16 +961,104 @@
       state.chatPending = plan;
       return { handled: true, message: buildHelperFollowUp(plan), applied: false };
     }
-    state.chatPending = null;
-    const result = applyHelperPlanToWorksheet({ prompt: mergedPrompt, meta, steps });
-    return { handled: !!result.applied, message: result.message, applied: !!result.applied };
+    /* ── Detect vague / non-specific step requests ── */
+    if (isVagueStepRequest(steps)) {
+      const vagueNames = steps.filter(function(s){ return !s.fromGlossary; }).map(function(s){ return '"' + compactWhitespace(s.name || s.source || '') + '"'; }).join(', ');
+      const plan = { type:'worksheet-build', prompt: mergedPrompt, meta, steps, needs: [] };
+      state.chatPending = plan;
+      return { handled: true, message: 'I want to make sure I get this right. ' + (vagueNames ? 'The step ' + vagueNames + ' isn\'t specific enough for me to match confidently.' : 'That step isn\'t specific enough.') + ' Could you describe the footwork, direction, or give a standard name? For example: "vine right", "rock back recover", "coaster step", or describe it like "step right, cross behind, step right, touch".', applied: false };
+    }
+    /* ── Show confirmation preview instead of applying immediately ── */
+    state.chatPending = { type:'worksheet-confirm', prompt: mergedPrompt, meta: meta, steps: steps, createSection: !!(pending && pending.createSection) };
+    const preview = buildStepPreviewMessage(steps, meta);
+    return { handled: true, message: preview, applied: false, showConfirmButtons: true };
+  }
+
+  function applyConfirmedHelperPlan(pending){
+    if (!pending || !Array.isArray(pending.steps) || !pending.steps.length) return { applied: false, message: '' };
+    /* ── Smart section splitting: new section every 8 counts ── */
+    const sectionSize = 8;
+    let data = ensureAppData();
+    const forceFresh = !!(pending.resetDance);
+    if ((forceFresh || shouldStartFreshWorksheet(pending.prompt)) && !currentWorksheetHasSteps()) {
+      data = createBlankAppData();
+    }
+    if (!data.meta || typeof data.meta !== 'object') data.meta = createBlankAppData().meta;
+    if (!Array.isArray(data.sections)) data.sections = [];
+    if (!data.sections.length) data.sections.push({ id:createLocalId('section'), name:'Section 1', steps:[] });
+    if (pending.meta && typeof pending.meta === 'object') {
+      if (pending.meta.title) data.meta.title = pending.meta.title;
+      if (pending.meta.counts) data.meta.counts = pending.meta.counts;
+      if (pending.meta.walls) data.meta.walls = pending.meta.walls;
+      if (pending.meta.type) data.meta.type = pending.meta.type;
+      if (pending.meta.level) data.meta.level = pending.meta.level;
+    }
+    let target = data.sections[data.sections.length - 1];
+    const wantsNewSection = !!(pending.createSection) || /\b(new section|add a section|another section|new part|add a part)\b/i.test(String(pending.prompt || ''));
+    if (!target || wantsNewSection) {
+      target = { id:createLocalId('section'), name:'Section ' + (data.sections.length + 1), steps:[] };
+      data.sections.push(target);
+    }
+    if (!Array.isArray(target.steps)) target.steps = [];
+    /* ── Count existing steps to know when to create new section ── */
+    let countAccum = 0;
+    target.steps.forEach(function(step){
+      if (!step || step.type !== 'step') return;
+      var cl = compactWhitespace(step.count || step.counts || '');
+      var nums = (cl.match(/\d+/g) || []).map(Number).filter(Number.isFinite);
+      countAccum += nums.length >= 2 ? Math.max(1, nums[nums.length - 1] - nums[0] + 1) : (nums.length === 1 ? nums[0] : 1);
+    });
+    pending.steps.forEach(function(step){
+      var cl = compactWhitespace(step.count || step.counts || '');
+      var nums = (cl.match(/\d+/g) || []).map(Number).filter(Number.isFinite);
+      var span = nums.length >= 2 ? Math.max(1, nums[nums.length - 1] - nums[0] + 1) : (nums.length === 1 ? nums[0] : 1);
+      if (pending.steps.length > sectionSize && countAccum > 0 && countAccum + span > sectionSize) {
+        target = { id:createLocalId('section'), name:'Section ' + (data.sections.length + 1), steps:[] };
+        data.sections.push(target);
+        countAccum = 0;
+      }
+      target.steps.push(buildGlossaryApplyStep(step));
+      countAccum += span;
+    });
+    writeAppData(data);
+    updateSavedSignature('');
+    renderPages();
+    openBuildWorksheet();
+    var customCount = pending.steps.filter(function(step){ return !step.fromGlossary; }).length;
+    var summary = pending.steps.slice(0, 6).map(function(step){ return step.name; }).join(', ');
+    var bits = ['Done. I added ' + pending.steps.length + ' step' + (pending.steps.length === 1 ? '' : 's') + '.'];
+    if (pending.meta && pending.meta.title) bits.push('Dance name set to ' + pending.meta.title + '.');
+    if (pending.meta && pending.meta.counts) bits.push('Counts set to ' + pending.meta.counts + '.');
+    if (pending.meta && pending.meta.walls) bits.push('Walls set to ' + pending.meta.walls + '.');
+    if (summary) bits.push('Added: ' + summary + (pending.steps.length > 6 ? ', …' : '.'));
+    if (customCount) bits.push(customCount + ' of those step' + (customCount === 1 ? ' was' : 's were') + ' added as custom worksheet step' + (customCount === 1 ? '' : 's') + ' rather than glossary matches.');
+    return { applied: true, message: bits.join(' ') };
   }
 
   function tryHandleSiteHelperLocally(question){
     const prompt = compactWhitespace(question);
-    const hasPending = !!(state.chatPending && state.chatPending.type === 'worksheet-build');
+    const hasPendingBuild = !!(state.chatPending && state.chatPending.type === 'worksheet-build');
+    const hasPendingConfirm = !!(state.chatPending && state.chatPending.type === 'worksheet-confirm');
     if (!prompt) return null;
-    if (hasPending || looksLikeDanceBuildPrompt(prompt)) {
+    /* ── Handle approve / deny for pending confirmation ── */
+    if (hasPendingConfirm) {
+      const lower = prompt.toLowerCase();
+      if (/\b(yes|approve|confirm|ok|go ahead|do it|apply|add it|sure|yep|yeah)\b/.test(lower)) {
+        const pending = state.chatPending;
+        state.chatPending = null;
+        const result = applyConfirmedHelperPlan(pending);
+        playDecisionSound('approve');
+        return { handled: true, message: '✅ ' + result.message, applied: !!result.applied };
+      }
+      if (/\b(no|deny|cancel|nope|nah|stop|nevermind|never mind|reject)\b/.test(lower)) {
+        state.chatPending = null;
+        playDecisionSound('deny');
+        return { handled: true, message: 'No worries — I cancelled that addition. Let me know if you want to try something different!', applied: false };
+      }
+      /* User sent something else while confirm is pending — treat as a new build request that replaces the pending one */
+      state.chatPending = null;
+    }
+    if (hasPendingBuild || hasPendingConfirm || looksLikeDanceBuildPrompt(prompt)) {
       const result = resolveHelperWorksheetIntent(prompt);
       if (result && result.handled) return result;
     }
@@ -905,9 +1067,12 @@
 
   async function tryHandleSiteHelperWithBackend(question){
     const prompt = compactWhitespace(question);
-    const hasPending = !!(state.chatPending && state.chatPending.type === 'worksheet-build');
+    const hasPendingBuild = !!(state.chatPending && state.chatPending.type === 'worksheet-build');
+    const hasPendingConfirm = !!(state.chatPending && state.chatPending.type === 'worksheet-confirm');
     if (!prompt) return null;
-    if (!(hasPending || looksLikeDanceBuildPrompt(prompt))) return null;
+    /* ── Confirmation is handled locally, skip backend ── */
+    if (hasPendingConfirm) return tryHandleSiteHelperLocally(prompt);
+    if (!(hasPendingBuild || looksLikeDanceBuildPrompt(prompt))) return null;
     try {
       const data = await authFetch('/api/ai/worksheet-builder', {
         method: 'POST',
@@ -2715,7 +2880,11 @@
 
     /* ── Quick-action suggestion chips ── */
     const suggestions = (brain && brain.getQuickSuggestions) ? brain.getQuickSuggestions(richCtx) : [];
-    const chipsHtml = suggestions.length && !state.chatBusy
+    const hasPendingConfirm = !!(state.chatPending && state.chatPending.type === 'worksheet-confirm');
+    const confirmBtnsHtml = hasPendingConfirm
+      ? `<div data-confirm-actions="1" style="padding:.5rem 1rem 0;display:flex;gap:8px;justify-content:center;"><button type="button" data-helper-approve="1" style="border:none;background:#16a34a;color:#fff;padding:.65rem 1.2rem;border-radius:999px;font-weight:900;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(22,163,74,.25);transition:background .15s;">✓ Approve</button><button type="button" data-helper-deny="1" style="border:none;background:#dc2626;color:#fff;padding:.65rem 1.2rem;border-radius:999px;font-weight:900;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(220,38,38,.25);transition:background .15s;">✕ Deny</button></div>`
+      : '';
+    const chipsHtml = !hasPendingConfirm && suggestions.length && !state.chatBusy
       ? `<div data-chat-chips="1" style="padding:.5rem 1rem 0;display:flex;flex-wrap:wrap;gap:6px;">${suggestions.map(function (s) { return `<button type="button" class="stepper-helper-chip" data-chip-text="${escapeHtml(s)}">${escapeHtml(s)}</button>`; }).join('')}</div>`
       : '';
 
@@ -2727,7 +2896,7 @@
     /* ── Full panel ── */
     host.innerHTML = `<div class="stepper-helper-panel" style="width:min(400px, calc(100vw - 24px));max-width:calc(100vw - 24px);background:#f8fafc;border:1px solid rgba(99,102,241,.16);border-radius:24px;box-shadow:0 18px 48px rgba(0,0,0,.2);overflow:hidden;">
       <div class="stepper-helper-header" style="padding:.85rem 1rem;background:#4f46e5;color:#fff;display:flex;align-items:center;gap:.5rem;">
-        <span style="font-size:18px;">🤖</span>
+        <span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#1F2A44,#312E81);box-shadow:0 2px 6px rgba(0,0,0,.18);position:relative;flex-shrink:0;"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 512 512" fill="none"><rect x="24" y="24" width="464" height="464" rx="112" fill="url(#_hfg)"/><defs><linearGradient id="_hfg" x1="64" y1="56" x2="448" y2="456" gradientUnits="userSpaceOnUse"><stop stop-color="#1F2A44"/><stop offset="1" stop-color="#312E81"/></linearGradient><linearGradient id="_hfa" x1="110" y1="392" x2="408" y2="160" gradientUnits="userSpaceOnUse"><stop stop-color="#F97316"/><stop offset="1" stop-color="#FDBA74"/></linearGradient></defs><path d="M116 344C116 326.327 130.327 312 148 312H230V392H148C130.327 392 116 377.673 116 360V344Z" fill="#F8FAFC" fill-opacity=".96"/><path d="M196 264C196 246.327 210.327 232 228 232H310V312H228C210.327 312 196 297.673 196 280V264Z" fill="#F8FAFC" fill-opacity=".96"/><path d="M276 184C276 166.327 290.327 152 308 152H390C407.673 152 422 166.327 422 184V232H308C290.327 232 276 217.673 276 200V184Z" fill="#F8FAFC" fill-opacity=".96"/><path d="M148 392L148 360C148 342.327 162.327 328 180 328H230V312H228C210.327 312 196 297.673 196 280V264C196 246.327 210.327 232 228 232H310V216C310 198.327 324.327 184 342 184H390" stroke="url(#_hfa)" stroke-width="36" stroke-linecap="round" stroke-linejoin="round"/><circle cx="390" cy="184" r="26" fill="#FDBA74"/><circle cx="390" cy="184" r="10" fill="#FFF7ED"/></svg><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" style="position:absolute;bottom:-1px;right:-1px;filter:drop-shadow(0 1px 1px rgba(0,0,0,.3));"><circle cx="12" cy="12" r="12" fill="#a78bfa"/><path d="M7 13l2-5h6l2 5M8 16h8M10 13v3M14 13v3" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
         <div style="font-weight:900;flex:1;">Site Helper${isPremiumSession() ? ' <span style="font-size:11px;background:rgba(255,255,255,.22);padding:2px 8px;border-radius:999px;margin-left:4px;">PRO</span>' : ''}</div>
         ${clearBtn}
         <button type="button" data-chat-close="1" style="border:none;background:rgba(255,255,255,.18);color:#fff;border-radius:999px;padding:.3rem .6rem;font-weight:900;cursor:pointer;transition:background .15s;" title="Close">✕</button>
@@ -2736,6 +2905,7 @@
         ${messagesHtml}${typingHtml}
       </div>
       ${chipsHtml}
+      ${confirmBtnsHtml}
       <form data-chat-form="1" style="padding:.6rem 1rem .85rem;display:flex;gap:.5rem;align-items:center;">
         <input data-chat-input="1" type="text" autocomplete="off" autocapitalize="sentences" spellcheck="true" placeholder="${isPremiumSession() ? 'Ask me anything about the site…' : (state.session && state.session.credential ? 'Upgrade to Premium for AI chat' : 'Ask a question…')}" value="${escapeHtml(state.chatDraft || '')}" style="flex:1 1 200px;border:1px solid rgba(99,102,241,.18);border-radius:999px;padding:.8rem 1rem;background:#fff;font-size:15px;min-width:0;transition:border-color .15s;" />
         <button type="submit" style="border:none;background:#4f46e5;color:#fff;border-radius:999px;padding:.8rem 1rem;font-weight:900;white-space:nowrap;cursor:pointer;transition:background .15s;">Send</button>
@@ -2751,8 +2921,24 @@
     if (host._stepperDelegated) return;
     host._stepperDelegated = true;
     host.addEventListener('click', function (e) {
-      const target = e.target.closest ? e.target.closest('[data-chat-open="1"],[data-chat-close="1"],[data-chat-clear="1"],[data-chip-text],[data-fb-idx]') : null;
+      const target = e.target.closest ? e.target.closest('[data-chat-open="1"],[data-chat-close="1"],[data-chat-clear="1"],[data-chip-text],[data-fb-idx],[data-helper-approve="1"],[data-helper-deny="1"]') : null;
       if (!target) return;
+      if (target.hasAttribute('data-helper-approve')) {
+        state.chatMessages.push({ role:'user', text: 'Approve' });
+        const brain2 = window.__stepperHelperBrain;
+        if (brain2 && brain2.saveChatHistory) brain2.saveChatHistory(state.chatMessages);
+        renderSiteHelper();
+        askSiteHelper('approve');
+        return;
+      }
+      if (target.hasAttribute('data-helper-deny')) {
+        state.chatMessages.push({ role:'user', text: 'Deny' });
+        const brain2 = window.__stepperHelperBrain;
+        if (brain2 && brain2.saveChatHistory) brain2.saveChatHistory(state.chatMessages);
+        renderSiteHelper();
+        askSiteHelper('deny');
+        return;
+      }
       if (target.hasAttribute('data-chat-open')) {
         if (isCompactViewport()) state.communityGlossaryOpen = false;
         state.chatOpen = true;
