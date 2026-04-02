@@ -1250,6 +1250,33 @@
       var result = autoGenerateCountsForWorksheet();
       return { handled: true, message: '✅ Auto-generated counts for ' + result.sections + ' section' + (result.sections === 1 ? '' : 's') + '. Total: ' + result.totalCounts + ' counts.' };
     }
+    /* ── Archive current dance ── */
+    if (/\barchive\b.*\b(dance|this|current|worksheet)\b/.test(q) || /\barchive it\b/.test(q)) {
+      var archEntry = buildCurrentDanceEntry();
+      if (!archEntry) return { handled: true, message: 'No dance loaded to archive.' };
+      var nowArch = _toggleArchive(archEntry.id);
+      state.savedDancesUiSignature = '';
+      return { handled: true, message: nowArch ? '📦 Dance **archived**. It won\'t show in your main saves list but you can find it under the Archived filter.' : '📤 Dance **unarchived**. It\'s back in your main saves list.' };
+    }
+    /* ── Create folder (alias for group) ── */
+    if (/\b(create|new|make)\b.*\b(folder|group)\b\s+["']?(.+?)["']?\s*$/i.test(q)) {
+      var folderMatch = q.match(/\b(?:folder|group)\b\s+["']?(.+?)["']?\s*$/i);
+      if (folderMatch && folderMatch[1]) {
+        var fn = folderMatch[1].trim();
+        var fgroups = _getDanceGroups();
+        if (!fgroups[fn]) fgroups[fn] = [];
+        _saveDanceGroups(fgroups);
+        state.savedDancesUiSignature = '';
+        renderPages();
+        return { handled: true, message: '📁 Created folder **' + escapeHtml(fn) + '**. Move dances into it from the Saved Dances page.' };
+      }
+    }
+    if (/\b(list|show)\b.*\b(folder|group)/.test(q) || /\bmy (folders|groups)\b/.test(q)) {
+      var fgroups2 = _getDanceGroups();
+      var fnames = Object.keys(fgroups2);
+      if (!fnames.length) return { handled: true, message: 'You don\'t have any folders yet. Say "create folder [name]" to make one.' };
+      return { handled: true, message: '📁 Your folders:\n' + fnames.map(function(n){ return '- **' + escapeHtml(n) + '** (' + (fgroups2[n] || []).length + ' dances)'; }).join('\n') };
+    }
     /* ── Dance info summary ── */
     if (/\b(dance info|current dance|what am i|worksheet info|what\'s loaded)\b/.test(q) || /\btell me about\b.*\b(current|this)\b.*\b(dance|worksheet)\b/.test(q)) {
       var appd = readAppData();
@@ -1314,7 +1341,7 @@
         '**Dance type:** "Set dance type 8-count", "Set dance type waltz"\n' +
         '**Random dance:** "Generate a random 10/10 dance", "Random perfect flow section"\n' +
         '**Quick add:** "Add to worksheet vine right", "Put on sheet coaster step"\n' +
-        '**Groups:** "Create group [name]", "List groups"\n' +
+        '**Groups & Folders:** "Create folder [name]", "List folders", "Archive this dance"\n' +
         '**Collaboration:** "Invite collaborator user@email.com", "List collaborators"\n' +
         '**Display:** "Dark mode", "Light mode", "Scroll to top"\n' +
         '**Info:** "Dance info", "What\'s loaded"\n\n' +
@@ -2003,12 +2030,23 @@
     const style = document.createElement('style');
     style.id = 'stepper-google-admin-style';
     style.textContent = `
+      /* ── Host layout ── */
       #${HOST_ID} { width: 100%; }
-      #${HOST_ID}[hidden] { display: none !important; }
-      .stepper-google-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; }
-      .stepper-google-pill { display:inline-flex; align-items:center; gap:.45rem; border-radius:999px; padding:.5rem .85rem; font-size:.72rem; font-weight:900; letter-spacing:.16em; text-transform:uppercase; }
-      .stepper-google-stat { border-radius:1rem; border:1px solid rgba(99,102,241,.16); padding:1rem; }
-      .stepper-google-badge-row { display:flex; flex-wrap:wrap; gap:.65rem; }
+      #${HOST_ID}[hidden] { display: none !important; height: 0 !important; overflow: hidden !important; }
+
+      /* ── Tab content isolation: prevent editor/sheet bleeding ── */
+      #${HOST_ID} > .space-y-5 > section[hidden] {
+        display: none !important; height: 0 !important; overflow: hidden !important;
+        pointer-events: none; visibility: hidden;
+      }
+
+      /* ── Grid & stat cards ── */
+      .stepper-google-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; }
+      .stepper-google-pill { display:inline-flex; align-items:center; gap:.45rem; border-radius:999px; padding:5px 12px; font-size:11px; font-weight:900; letter-spacing:.12em; text-transform:uppercase; }
+      .stepper-google-stat { border-radius:16px; border:1px solid rgba(99,102,241,.12); padding:14px 16px; text-align:center; }
+      .stepper-google-badge-row { display:flex; flex-wrap:wrap; gap:.65rem; align-items:center; }
+
+      /* ── Badge buttons ── */
       .stepper-google-badge-btn { border-radius:999px; padding:.6rem .95rem; font-weight:900; letter-spacing:.08em; text-transform:uppercase; border:1px solid transparent; transition:transform .18s ease, box-shadow .18s ease, opacity .18s ease; }
       .stepper-google-badge-btn:hover { transform:translateY(-1px); box-shadow:0 10px 24px rgba(0,0,0,.12); }
       .stepper-google-badge-btn[data-tone="bronze"] { background:#f7eadf; color:#8a4b25; border-color:#e4c4ad; }
@@ -2017,20 +2055,43 @@
       .dark .stepper-google-badge-btn[data-tone="bronze"] { background:rgba(180,83,9,.16); color:#fed7aa; border-color:rgba(251,146,60,.28); }
       .dark .stepper-google-badge-btn[data-tone="silver"] { background:rgba(148,163,184,.12); color:#e5e7eb; border-color:rgba(148,163,184,.25); }
       .dark .stepper-google-badge-btn[data-tone="gold"] { background:rgba(250,204,21,.16); color:#fde68a; border-color:rgba(250,204,21,.3); }
-      .stepper-google-input { width:100%; border-radius:1rem; border:1px solid rgba(148,163,184,.28); padding:.9rem 1rem; background:transparent; }
-      .stepper-google-cta { display:inline-flex; align-items:center; justify-content:center; gap:.65rem; border-radius:1rem; padding:.85rem 1.1rem; font-weight:900; border:1px solid rgba(99,102,241,.18); }
-      .stepper-google-danger { border-color:rgba(239,68,68,.22); }
+
+      /* ── Form inputs ── */
+      .stepper-google-input { width:100%; border-radius:14px; border:1px solid rgba(148,163,184,.22); padding:.85rem 1rem; background:transparent; transition:border-color .2s ease, box-shadow .2s ease; }
+      .stepper-google-input:focus { border-color:rgba(99,102,241,.45); box-shadow:0 0 0 3px rgba(99,102,241,.12); }
+
+      /* ── CTA buttons ── */
+      .stepper-google-cta { display:inline-flex; align-items:center; justify-content:center; gap:.55rem; border-radius:14px; padding:10px 18px; font-weight:800; font-size:13px; border:1px solid rgba(99,102,241,.14); cursor:pointer; transition:transform .15s ease, box-shadow .2s ease, background .15s ease; }
+      .stepper-google-cta:hover { transform:translateY(-1px); box-shadow:0 6px 20px rgba(0,0,0,.10); }
+      .stepper-google-cta:active { transform:scale(.97); }
+      .stepper-google-danger { border-color:rgba(239,68,68,.18); }
+      .stepper-google-danger:hover { background:rgba(239,68,68,.06) !important; }
+
+      /* ── Member & list items ── */
       .stepper-google-muted-list { display:grid; gap:.85rem; }
       .stepper-google-member-item { display:flex; align-items:center; justify-content:space-between; gap:1rem; }
       .stepper-google-google-btn > div { display:flex; justify-content:center; }
-      .stepper-extra-tab { min-width: 108px; justify-content:center; font-weight:900; }
+
+      /* ── Extra tabs ── */
+      .stepper-extra-tab { min-width: 108px; justify-content:center; font-weight:900; border-radius:12px !important; transition: background .2s ease, color .2s ease; }
       .dark .stepper-extra-tab { color:#f5f5f5 !important; }
       .stepper-extra-tab-icon svg { width:18px; height:18px; }
+
+      /* ── Floating hosts ── */
       #stepper-site-helper-host, #stepper-community-glossary-host { max-width: calc(100vw - 24px); }
+
+      /* ── Archive styles ── */
+      .stepper-cloud-archived { opacity:.45; filter:grayscale(.5); order: 999; transition: opacity .25s ease, filter .25s ease; }
+      .stepper-cloud-archived:hover { opacity:.7; filter:grayscale(.2); }
+
+      /* ── Responsive ── */
       @media (max-width: 980px) {
         .stepper-extra-tab { min-width: 94px; }
       }
-      @media (max-width: 640px) { .stepper-extra-tab { min-width: 88px; } }
+      @media (max-width: 640px) {
+        .stepper-extra-tab { min-width: 88px; }
+        .stepper-google-badge-row { gap: .4rem; }
+      }
     `;
     document.head.appendChild(style);
   }
@@ -3615,6 +3676,23 @@
     }
     return '';
   }
+  function _getArchivedDances(){
+    try { return JSON.parse(localStorage.getItem('stepper_archived_dances') || '[]'); } catch { return []; }
+  }
+  function _setArchivedDances(list){
+    try { localStorage.setItem('stepper_archived_dances', JSON.stringify(list || [])); } catch { /* noop */ }
+  }
+  function _isDanceArchived(danceId){
+    return _getArchivedDances().indexOf(danceId) !== -1;
+  }
+  function _toggleArchive(danceId){
+    var archived = _getArchivedDances();
+    var idx = archived.indexOf(danceId);
+    if (idx !== -1) archived.splice(idx, 1);
+    else archived.push(danceId);
+    _setArchivedDances(archived);
+    return idx === -1; /* returns true if now archived */
+  }
 
   function patchSavedDancesPage(force){
     const page = document.getElementById('stepper-saved-dances-page');
@@ -3642,33 +3720,37 @@
     /* ── Group management ── */
     const groups = _getDanceGroups();
     const groupNames = Object.keys(groups);
-    const groupFilterHtml = signedIn && groupNames.length ? `<div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;"><span style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;opacity:.7;">Filter by group:</span><button type="button" data-group-filter="" class="stepper-google-pill" style="cursor:pointer;font-size:12px;">All</button>${groupNames.map(function(gn){ return '<button type="button" data-group-filter="' + escapeHtml(gn) + '" class="stepper-google-pill" style="cursor:pointer;font-size:12px;">' + escapeHtml(gn) + ' (' + (groups[gn] || []).length + ')</button>'; }).join('')}</div>` : '';
+    const archivedList = _getArchivedDances();
+    const archivedCount = signedIn ? state.cloudSaves.filter(function(it){ return archivedList.indexOf(it.id) !== -1; }).length : 0;
+    const groupFilterHtml = signedIn ? `<div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;"><span style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;opacity:.7;">Filter:</span><button type="button" data-group-filter="" class="stepper-google-pill" style="cursor:pointer;font-size:12px;">All</button>${groupNames.map(function(gn){ return '<button type="button" data-group-filter="' + escapeHtml(gn) + '" class="stepper-google-pill" style="cursor:pointer;font-size:12px;">' + escapeHtml(gn) + ' (' + (groups[gn] || []).length + ')</button>'; }).join('')}${archivedCount ? '<button type="button" data-group-filter="__archived" class="stepper-google-pill" style="cursor:pointer;font-size:12px;opacity:.6;">📦 Archived (' + archivedCount + ')</button>' : ''}</div>` : '';
 
-    const cloudCards = signedIn && state.cloudSaves.length ? state.cloudSaves.slice(0, 20).map(item => {
+    const cloudCards = signedIn && state.cloudSaves.length ? state.cloudSaves.slice(0, 30).map(item => {
       const itemGroup = _getDanceGroup(item.id);
+      const isArchived = archivedList.indexOf(item.id) !== -1;
       const groupOptions = groupNames.map(function(gn){ return '<option value="' + escapeHtml(gn) + '"' + (gn === itemGroup ? ' selected' : '') + '>' + escapeHtml(gn) + '</option>'; }).join('');
       return `
-      <article class="rounded-3xl border p-5 sm:p-6 ${theme.soft}" data-stepper-cloud-id="${escapeHtml(item.id)}" data-dance-group="${escapeHtml(itemGroup)}">
+      <article class="rounded-3xl border p-5 sm:p-6 ${theme.soft}${isArchived ? ' stepper-cloud-archived' : ''}" data-stepper-cloud-id="${escapeHtml(item.id)}" data-dance-group="${escapeHtml(itemGroup)}" data-archived="${isArchived ? 'true' : 'false'}" style="${isArchived ? 'display:none;' : ''}">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div class="min-w-0" style="flex:1 1 200px;">
-            <h3 class="text-lg font-black tracking-tight">${escapeHtml(item.title || 'Untitled Dance')}</h3>
+            <h3 class="text-lg font-black tracking-tight">${escapeHtml(item.title || 'Untitled Dance')}${isArchived ? ' <span style="font-size:11px;opacity:.6;">📦 archived</span>' : ''}</h3>
             <p class="mt-1 text-sm font-semibold ${theme.subtle}">${escapeHtml(item.choreographer || 'Uncredited')}${item.country ? ` • ${escapeHtml(item.country)}` : ''}</p>
             <p class="mt-2 text-sm ${theme.subtle}">Updated ${escapeHtml(formatDate(item.updatedAt))}</p>
           </div>
-          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+          <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
             <span class="stepper-google-pill ${theme.orange}">${escapeHtml(item.level || 'Unlabelled')}</span>
-            ${groupNames.length ? `<select data-action="set-group" style="font-size:12px;padding:4px 8px;border-radius:999px;border:1px solid rgba(99,102,241,.2);background:#fff;cursor:pointer;"><option value="">No group</option>${groupOptions}</select>` : ''}
-            <button type="button" class="stepper-google-cta ${theme.button}" data-action="load-cloud" style="white-space:nowrap;">Load</button>
-            <button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="delete-cloud" style="white-space:nowrap;">Delete</button>
+            ${groupNames.length ? `<select data-action="set-group" style="font-size:11px;padding:3px 8px;border-radius:999px;border:1px solid rgba(99,102,241,.18);background:transparent;cursor:pointer;"><option value="">No group</option>${groupOptions}</select>` : ''}
+            <button type="button" class="stepper-google-cta ${theme.button}" data-action="load-cloud" style="white-space:nowrap;padding:6px 12px;font-size:12px;">Load</button>
+            <button type="button" class="stepper-google-cta ${theme.button}" data-action="archive-cloud" style="white-space:nowrap;padding:6px 12px;font-size:12px;opacity:.7;" title="${isArchived ? 'Unarchive' : 'Archive'}">${isArchived ? '📤' : '📦'}</button>
+            <button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="delete-cloud" style="white-space:nowrap;padding:6px 12px;font-size:12px;">✕</button>
           </div>
         </div>
-        <div class="mt-4 stepper-google-grid text-sm">
+        ${isArchived ? '' : `<div class="mt-4 stepper-google-grid text-sm">
           <div class="stepper-google-stat ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Counts</div><div class="mt-1 font-bold">${escapeHtml(item.counts || '-')}</div></div>
           <div class="stepper-google-stat ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Walls</div><div class="mt-1 font-bold">${escapeHtml(item.walls || '-')}</div></div>
           <div class="stepper-google-stat ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Sections</div><div class="mt-1 font-bold">${escapeHtml(String(item.sections || 0))}</div></div>
           <div class="stepper-google-stat ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Steps</div><div class="mt-1 font-bold">${escapeHtml(String(item.steps || 0))}</div></div>
         </div>
-        <div class="mt-4">${buildPreviewSheetHtml(item, theme, 'Save this dance once and the sheet preview will show here.')}</div>
+        <div class="mt-4">${buildPreviewSheetHtml(item, theme, 'Save this dance once and the sheet preview will show here.')}</div>`}
       </article>`;
     }).join('') : `<div class="rounded-3xl border p-6 sm:p-8 text-center ${theme.soft}"><p class="text-lg font-black">${signedIn ? 'No cloud saves yet.' : 'Sign in to use cloud saves.'}</p><p class="mt-2 text-sm ${theme.subtle}">${signedIn ? 'Use Save Changes to push the current worksheet into your Google-linked cloud saves. Loading a different dance will replace the current worksheet.' : 'Local saves still work without signing in, but Google cloud saves follow you onto other devices.'}</p></div>`;
 
@@ -3681,14 +3763,21 @@
       </section>
     `;
 
-    /* ── Group filter buttons ── */
+    /* ── Group & archive filter buttons ── */
     wrap.querySelectorAll('[data-group-filter]').forEach(function(btn){
       btn.addEventListener('click', function(){
         var gf = btn.getAttribute('data-group-filter');
         var cards = wrap.querySelectorAll('[data-stepper-cloud-id]');
         cards.forEach(function(card){
           var cg = card.getAttribute('data-dance-group') || '';
-          card.style.display = (!gf || cg === gf) ? '' : 'none';
+          var isArch = card.getAttribute('data-archived') === 'true';
+          if (gf === '__archived') {
+            card.style.display = isArch ? '' : 'none';
+          } else if (!gf) {
+            card.style.display = isArch ? 'none' : '';
+          } else {
+            card.style.display = (!isArch && cg === gf) ? '' : 'none';
+          }
         });
       });
     });
@@ -3711,6 +3800,13 @@
       if (loadBtn) loadBtn.addEventListener('click', () => { if (item) loadDanceIntoWorksheet(item); });
       const deleteBtn = card.querySelector('[data-action="delete-cloud"]');
       if (deleteBtn) deleteBtn.addEventListener('click', () => { if (item) deleteCloudSave(item.id); });
+      /* ── Archive toggle ── */
+      const archiveBtn = card.querySelector('[data-action="archive-cloud"]');
+      if (archiveBtn) archiveBtn.addEventListener('click', function(){
+        var nowArchived = _toggleArchive(saveId);
+        state.savedDancesUiSignature = '';
+        patchSavedDancesPage(true);
+      });
       /* ── Group dropdown ── */
       const groupSelect = card.querySelector('[data-action="set-group"]');
       if (groupSelect) groupSelect.addEventListener('change', function(){
@@ -4259,6 +4355,12 @@
     setVisibility(adminPage, showAdmin);
     host.hidden = !state.activePage;
     host.style.display = state.activePage ? '' : 'none';
+    /* ── Enforce contain on hidden pages to prevent bleed ── */
+    [signInPage, adminPage, subscriptionPage].forEach(function(el){
+      if (!el) return;
+      if (el.hidden) { el.style.overflow = 'hidden'; el.style.height = '0'; el.style.pointerEvents = 'none'; }
+      else { el.style.overflow = ''; el.style.height = ''; el.style.pointerEvents = ''; }
+    });
     if (!state.activePage) {
       showNativeExtraHost();
       if (state.ui.mainEl) state.ui.mainEl.style.display = '';
