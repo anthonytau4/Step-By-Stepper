@@ -4282,16 +4282,23 @@
     /* ── Username input: live availability check ── */
     const usernameInput = page.querySelector('[data-stepper-username-input]');
     const usernameStatus = page.querySelector('[data-stepper-username-status]');
+    const _usernameDisallowed = /[<>"'&\\\/]/;
+    const _validateUsername = (raw) => {
+      if (!raw || raw.length < 2) return raw && raw.length === 1 ? 'Must be at least 2 characters.' : '';
+      if (raw.length > 30) return 'Must be 30 characters or fewer.';
+      if (_usernameDisallowed.test(raw)) return 'Contains disallowed characters.';
+      return null;
+    };
     let _usernameCheckTimer = null;
     if (usernameInput && usernameStatus) {
       usernameInput.addEventListener('input', () => {
         clearTimeout(_usernameCheckTimer);
         const raw = String(usernameInput.value || '').trim();
-        if (!raw || raw.length < 2) { usernameStatus.textContent = raw.length === 1 ? 'Must be at least 2 characters.' : ''; return; }
-        if (raw.length > 30) { usernameStatus.textContent = 'Must be 30 characters or fewer.'; return; }
-        if (/[<>"'&\\\/]/.test(raw)) { usernameStatus.textContent = 'Contains disallowed characters.'; return; }
-        if (state.session && state.session.displayName && raw === state.session.displayName) { usernameStatus.textContent = 'This is your current username.'; return; }
+        const validationError = _validateUsername(raw);
+        if (validationError !== null) { usernameStatus.textContent = validationError; usernameStatus.style.color = ''; return; }
+        if (state.session && state.session.displayName && raw === state.session.displayName) { usernameStatus.textContent = 'This is your current username.'; usernameStatus.style.color = ''; return; }
         usernameStatus.textContent = 'Checking…';
+        usernameStatus.style.color = '';
         _usernameCheckTimer = setTimeout(async () => {
           try {
             const result = await authFetch('/api/user/check-display-name?name=' + encodeURIComponent(raw));
@@ -4306,9 +4313,8 @@
     if (saveUsernameBtn) {
       saveUsernameBtn.addEventListener('click', async () => {
         const raw = String((usernameInput || {}).value || '').trim();
-        if (!raw || raw.length < 2) { alert('Username must be at least 2 characters.'); return; }
-        if (raw.length > 30) { alert('Username must be 30 characters or fewer.'); return; }
-        if (/[<>"'&\\\/]/.test(raw)) { alert('Username contains disallowed characters.'); return; }
+        const validationError = _validateUsername(raw);
+        if (validationError) { alert(validationError); return; }
         saveUsernameBtn.disabled = true;
         saveUsernameBtn.textContent = 'Saving…';
         try {

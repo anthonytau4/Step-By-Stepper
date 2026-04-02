@@ -122,14 +122,16 @@
 
   /* ── Normalize friend item: derive .name and .email for "the other person" ── */
   function normalizeFriendItem(f) {
-    if (f.direction === 'sent') {
-      f.name = f.toDisplayName || f.toName || f.toEmail || '';
-      f.email = f.toEmail || '';
+    var copy = {};
+    for (var k in f) { if (Object.prototype.hasOwnProperty.call(f, k)) copy[k] = f[k]; }
+    if (copy.direction === 'sent') {
+      copy.name = copy.toDisplayName || copy.toName || copy.toEmail || '';
+      copy.email = copy.toEmail || '';
     } else {
-      f.name = f.fromDisplayName || f.fromName || f.fromEmail || '';
-      f.email = f.fromEmail || '';
+      copy.name = copy.fromDisplayName || copy.fromName || copy.fromEmail || '';
+      copy.email = copy.fromEmail || '';
     }
-    return f;
+    return copy;
   }
 
   /* ── Data refresh ── */
