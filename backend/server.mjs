@@ -1899,7 +1899,7 @@ app.post("/api/auth/google", async (req, res) => {
     const bucket = touchUser(db, profile, userKey);
     assertNotSuspended(bucket, profile);
     await writeDb(db);
-    res.json({ ok: true, profile, isAdmin: isAdminProfile(profile, db) || String(bucket?.role || '').trim().toLowerCase() === 'admin', isModerator: isModeratorBucket(bucket), role: getRoleForBucket(bucket, profile), onlineCount: getOnlineUsers(db).length, membership: bucket?.membership || getUserMembership(null, profile), suspension: suspensionPayload(bucket) });
+    res.json({ ok: true, profile, displayName: bucket.displayName || "", isAdmin: isAdminProfile(profile, db) || String(bucket?.role || '').trim().toLowerCase() === 'admin', isModerator: isModeratorBucket(bucket), role: getRoleForBucket(bucket, profile), onlineCount: getOnlineUsers(db).length, membership: bucket?.membership || getUserMembership(null, profile), suspension: suspensionPayload(bucket) });
   } catch (error) {
     res.status(error.status || 401).json({ ok: false, error: error?.message || "Google sign-in failed." });
   }
@@ -1910,7 +1910,7 @@ app.get("/api/auth/me", requireGoogleUser, async (req, res) => {
   const bucket = touchUser(db, req.stepperUser, userKeyFromClaims(req.stepperClaims));
   assertNotSuspended(bucket, req.stepperUser);
   await writeDb(db);
-  res.json({ ok: true, profile: req.stepperUser, isAdmin: isAdminProfile(req.stepperUser, db) || String(bucket?.role || '').trim().toLowerCase() === 'admin', isModerator: isModeratorBucket(bucket), role: getRoleForBucket(bucket, req.stepperUser), onlineCount: getOnlineUsers(db).length, membership: bucket?.membership || getUserMembership(null, req.stepperUser), suspension: suspensionPayload(bucket) });
+  res.json({ ok: true, profile: req.stepperUser, displayName: bucket.displayName || "", isAdmin: isAdminProfile(req.stepperUser, db) || String(bucket?.role || '').trim().toLowerCase() === 'admin', isModerator: isModeratorBucket(bucket), role: getRoleForBucket(bucket, req.stepperUser), onlineCount: getOnlineUsers(db).length, membership: bucket?.membership || getUserMembership(null, req.stepperUser), suspension: suspensionPayload(bucket) });
 });
 
 app.get("/api/presence", async (_req, res) => {
@@ -2084,9 +2084,19 @@ app.get("/api/friends/list", requireGoogleUser, async (req, res) => {
   const key = userKeyFromClaims(req.stepperClaims);
   const email = normalizeEmail(req.stepperUser?.email);
   const list = Array.isArray(db.friends) ? db.friends : [];
+  const lookupDisplayName = (userKey, userEmail) => {
+    if (userKey && db.users[userKey]?.displayName) return db.users[userKey].displayName;
+    const normalized = normalizeEmail(userEmail);
+    const found = Object.values(db.users || {}).find(b => normalizeEmail(b?.profile?.email) === normalized);
+    return found?.displayName || "";
+  };
   const items = list.filter(f => f && (f.fromKey === key || f.toEmail === email)).map(f => {
     const isSender = f.fromKey === key;
-    return Object.assign({}, f, { direction: isSender ? "sent" : "received" });
+    return Object.assign({}, f, {
+      direction: isSender ? "sent" : "received",
+      fromDisplayName: lookupDisplayName(f.fromKey, f.fromEmail),
+      toDisplayName: lookupDisplayName("", f.toEmail)
+    });
   });
   res.json({ ok: true, items });
 });
@@ -2166,6 +2176,48 @@ app.post("/api/friends/chat", requireGoogleUser, async (req, res) => {
     .filter(m => m && m.friendshipId === friendId)
     .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
   res.json({ ok: true, messages });
+});
+
+/* ── Display Name endpoints ── */
+
+app.get("/api/user/display-name", requireGoogleUser, async (req, res) => {
+  const db = await readDb();
+  const key = userKeyFromClaims(req.stepperClaims);
+  const bucket = db.users[key] || {};
+  res.json({ ok: true, displayName: bucket.displayName || "" });
+});
+
+app.post("/api/user/display-name", requireGoogleUser, async (req, res) => {
+  const raw = String(req.body?.displayName || "").trim();
+  if (!raw || raw.length < 2) return res.status(400).json({ ok: false, error: "Display name must be at least 2 characters." });
+  if (raw.length > 30) return res.status(400).json({ ok: false, error: "Display name must be 30 characters or fewer." });
+  if (/[<>"'&\\\/]/.test(raw)) return res.status(400).json({ ok: false, error: "Display name contains disallowed characters." });
+  const displayName = raw;
+  const db = await readDb();
+  const key = userKeyFromClaims(req.stepperClaims);
+  touchUser(db, req.stepperUser, key);
+  const lowerName = displayName.toLowerCase();
+  const taken = Object.entries(db.users || {}).some(([k, bucket]) => {
+    if (k === key) return false;
+    return String(bucket?.displayName || "").trim().toLowerCase() === lowerName;
+  });
+  if (taken) return res.status(409).json({ ok: false, error: "That display name is already taken. Please choose another." });
+  db.users[key].displayName = displayName;
+  await writeDb(db);
+  res.json({ ok: true, displayName });
+});
+
+app.get("/api/user/check-display-name", requireGoogleUser, async (req, res) => {
+  const raw = String(req.query?.name || "").trim();
+  if (!raw) return res.json({ ok: true, available: false, error: "Name is empty." });
+  const db = await readDb();
+  const key = userKeyFromClaims(req.stepperClaims);
+  const lowerName = raw.toLowerCase();
+  const taken = Object.entries(db.users || {}).some(([k, bucket]) => {
+    if (k === key) return false;
+    return String(bucket?.displayName || "").trim().toLowerCase() === lowerName;
+  });
+  res.json({ ok: true, available: !taken });
 });
 
 app.post("/api/submissions/request", requireGoogleUser, async (req, res) => {
