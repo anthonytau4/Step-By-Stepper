@@ -218,7 +218,7 @@
 
     /* ── Keyboard Shortcuts ────────────────────────────── */
     { patterns: [/\bkeyboard\b/, /\bshortcut\b/, /\bhotkey\b/],
-      answer: '**Keyboard shortcuts:**\n• **Ctrl+Z / ⌘Z** — Undo\n• **Ctrl+Y / ⌘Shift+Z** — Redo\n• **Ctrl+S / ⌘S** — Save (when signed in)\n• **Tab** — Move between fields\n• **Enter** — Confirm/submit\n• **Escape** — Close panels and dialogs' },
+      answer: '**Keyboard shortcuts:**\n• **Ctrl+Z / ⌘Z** — Undo\n• **Ctrl+Y / ⌘Shift+Z** — Redo\n• **Ctrl+B / ⌘B** — Bold\n• **Ctrl+I / ⌘I** — Italic\n• **Ctrl+U / ⌘U** — Underline\n• **Ctrl+D** — Toggle dark mode\n• **Ctrl+1** — Build tab\n• **Ctrl+2** — Sheet tab\n• **Ctrl+3** — What\'s New tab\n• **Ctrl+4** — Saved Dances tab\n• **Ctrl+5** — Friends tab\n• **Ctrl+6** — Glossary tab\n• **Ctrl+/** — Toggle help panel\n• **Tab** — Move between fields\n• **Enter** — Confirm/submit\n• **Escape** — Close panels and dialogs' },
 
     /* ── Phrasing ─────────────────────────────────────── */
     { patterns: [/\bphras(ed|ing)\b/],

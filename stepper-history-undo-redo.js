@@ -264,11 +264,26 @@
     } catch {}
   }
 
+  function findTabButton(label){
+    if (label === 'Saved Dances') return document.getElementById('stepper-saved-dances-tab') || Array.from(document.querySelectorAll('button')).find(function(b){ return (b.textContent||'').trim() === 'My Saved Dances'; });
+    if (label === 'Friends') return document.getElementById('stepper-friends-tab');
+    if (label === 'Glossary') return document.getElementById('stepper-glossary-tab');
+    return Array.from(document.querySelectorAll('button')).find(function(b){ return (b.textContent||'').trim() === label; });
+  }
+
   function installKeyboardShortcuts(){
     if (document.body && document.body.__stepperHistoryKeyWired) return;
     if (document.body) document.body.__stepperHistoryKeyWired = true;
     document.addEventListener('keydown', (event) => {
-      if (!isEditorSurfaceVisible()) return;
+      if (!isEditorSurfaceVisible()) {
+        /* Global shortcuts that work on any page */
+        if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+        const key = String(event.key || '').toLowerCase();
+        if (key === '1') { event.preventDefault(); const b = findTabButton('Build'); if (b) b.click(); return; }
+        if (key === '2') { event.preventDefault(); const b = findTabButton('Sheet'); if (b) b.click(); return; }
+        if (key === '3') { event.preventDefault(); const b = findTabButton("What's New"); if (b) b.click(); return; }
+        return;
+      }
       if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
       const key = String(event.key || '').toLowerCase();
       if (isTextEntryElement(event.target)) return;
@@ -278,6 +293,31 @@
       } else if (key === 'y' || (key === 'z' && event.shiftKey)) {
         event.preventDefault();
         redo();
+      } else if (key === 'd' && !event.shiftKey) {
+        /* Ctrl+D = Toggle dark mode */
+        event.preventDefault();
+        try {
+          const dataKey = 'linedance_builder_data_v13';
+          const raw = localStorage.getItem(dataKey);
+          const data = raw ? JSON.parse(raw) : {};
+          data.isDarkMode = !data.isDarkMode;
+          localStorage.setItem(dataKey, JSON.stringify(data));
+          window.dispatchEvent(new Event('storage'));
+        } catch {}
+      } else if (key >= '1' && key <= '6') {
+        event.preventDefault();
+        const tabs = ['Build', 'Sheet', "What's New", 'Saved Dances', 'Friends', 'Glossary'];
+        const b = findTabButton(tabs[parseInt(key, 10) - 1]);
+        if (b) b.click();
+      } else if (key === '/') {
+        /* Ctrl+/ = Toggle help panel */
+        event.preventDefault();
+        const helpPanel = document.getElementById('stepper-help-panel');
+        if (helpPanel) helpPanel.hidden = !helpPanel.hidden;
+      } else if (key === 'escape') {
+        /* Escape = Close open panels */
+        const helpPanel = document.getElementById('stepper-help-panel');
+        if (helpPanel && !helpPanel.hidden) { helpPanel.hidden = true; event.preventDefault(); }
       }
     }, true);
   }

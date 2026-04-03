@@ -206,14 +206,22 @@
   }
 
   function boot(){
-    reflectRouteState(currentRouteFromPath() || 'editor');
+    /* On every page load / reload, always navigate to the editor (main page) */
+    reflectRouteState('editor');
+    setCanonicalPath('editor', true);
     startWatching();
     bindButtons();
     let tries = 0;
     const timer = window.setInterval(() => {
       tries += 1;
-      const ready = kickRouteSync(tries === 1);
-      if ((ready && tries > 2) || tries > 40) window.clearInterval(timer);
+      bindButtons();
+      const build = getRouteButton('editor');
+      if (build && !build.__stepperBootClicked) {
+        build.__stepperBootClicked = true;
+        applyingRoute = true;
+        try { build.click(); } finally { window.setTimeout(() => { applyingRoute = false; }, 50); }
+      }
+      if ((build && tries > 2) || tries > 40) window.clearInterval(timer);
     }, 250);
   }
 

@@ -390,12 +390,18 @@
   function sendDanceInvite(friend, danceId) {
     if (!isSignedIn()) return;
     var base = getApiBase().replace(/\/+$/, '');
+    /* Include current dance JSON so the invited person gets the dance data */
+    var currentDanceJson = null;
+    try {
+      var data = JSON.parse(localStorage.getItem(BUILDER_DATA_KEY) || 'null');
+      if (data) currentDanceJson = data;
+    } catch (e) { /* ignore */ }
     fetch(base + '/api/collaborators/invite', {
       method: 'POST',
       mode: 'cors',
       credentials: 'omit',
       headers: authHeaders(),
-      body: JSON.stringify({ danceId: danceId, email: friend.email })
+      body: JSON.stringify({ danceId: danceId, email: friend.email, danceData: currentDanceJson })
     })
       .then(function (r) { return r.json(); })
       .then(function (data) {
