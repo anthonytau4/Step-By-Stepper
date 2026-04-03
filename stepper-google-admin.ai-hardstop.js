@@ -4085,12 +4085,12 @@
           btn.textContent = 'No dance';
           return;
         }
-        var currentDanceJson = null;
-        try { currentDanceJson = readAppData(); } catch(e){ /* ignore */ }
+        var currentDanceData = null;
+        try { currentDanceData = readAppData(); } catch(e){ /* ignore */ }
         authFetch('/api/collaborators/invite', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ danceId: danceEntry.id, email: email, danceData: currentDanceJson })
+          body: JSON.stringify({ danceId: danceEntry.id, email: email, danceData: currentDanceData })
         }).then(function(data){
           if (data && data.ok) {
             btn.textContent = '✓ Sent!';
