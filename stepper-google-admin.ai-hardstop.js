@@ -3997,9 +3997,119 @@
     const wide = window.innerWidth >= 980;
     if (!hasSession || !entry || !wide || state.activePage) { host.style.display='none'; host.innerHTML=''; return; }
     host.style.display='';
-    host.innerHTML = `<div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end;"><button type="button" data-quick="feature" style="border:1px solid rgba(99,102,241,.18);background:#fff;padding:.75rem 1rem;border-radius:999px;font-weight:900;box-shadow:0 10px 30px rgba(0,0,0,.12);">Send to host for featuring</button><button type="button" data-quick="site" style="border:1px solid rgba(99,102,241,.18);background:#fff;padding:.75rem 1rem;border-radius:999px;font-weight:900;box-shadow:0 10px 30px rgba(0,0,0,.12);">Upload to site</button></div>`;
+    const btnStyle = 'border:1px solid rgba(99,102,241,.18);background:#fff;padding:.75rem 1rem;border-radius:999px;font-weight:900;box-shadow:0 10px 30px rgba(0,0,0,.12);';
+    host.innerHTML = '<div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end;">' +
+      '<button type="button" data-quick="invite" style="' + btnStyle + 'background:#7c3aed;color:#fff;">&#x1F57A; Invite friends to current project</button>' +
+      '<button type="button" data-quick="feature" style="' + btnStyle + '">Send to host for featuring</button>' +
+      '<button type="button" data-quick="site" style="' + btnStyle + '">Upload to site</button>' +
+      '</div>';
     host.querySelector('[data-quick="feature"]').addEventListener('click', ()=>requestModeration('feature'));
     host.querySelector('[data-quick="site"]').addEventListener('click', ()=>requestModeration('site'));
+    host.querySelector('[data-quick="invite"]').addEventListener('click', ()=>showInviteFriendsOverlay());
+  }
+
+  /* ── Invite friends to current project overlay ── */
+  function showInviteFriendsOverlay(){
+    let overlay = document.getElementById('stepper-invite-friends-overlay');
+    if (overlay) { overlay.remove(); }
+    overlay = document.createElement('div');
+    overlay.id = 'stepper-invite-friends-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);';
+    const dark = !!(readAppData() || {}).isDarkMode;
+    const bg = dark ? '#1e1e2e' : '#fff';
+    const fg = dark ? '#e5e7eb' : '#1f2937';
+    const subtle = dark ? '#9ca3af' : '#6b7280';
+    const cardBg = dark ? 'background:#262639;border-color:#3f3f5c;color:#e5e7eb;' : 'background:#f9fafb;border-color:#e5e7eb;color:#1f2937;';
+
+    const entry = buildCurrentDanceEntry();
+    const danceName = entry ? entry.title : 'Untitled Dance';
+
+    const ft = window.__stepperFriendsTab;
+    const friends = ft ? ft.getFriends() : [];
+
+    let inner = '<div style="width:400px;max-width:92vw;max-height:80vh;border-radius:20px;padding:28px;position:relative;background:' + bg + ';color:' + fg + ';box-shadow:0 20px 60px rgba(0,0,0,.25);overflow-y:auto;" onclick="event.stopPropagation();">';
+    inner += '<button data-invite-overlay-close style="position:absolute;top:12px;right:12px;background:none;border:none;cursor:pointer;font-size:20px;color:' + fg + ';opacity:.5;">&times;</button>';
+    inner += '<h3 style="font-size:16px;font-weight:900;margin:0 0 4px;">&#x1F57A; Invite Friends</h3>';
+    inner += '<p style="font-size:13px;margin:0 0 16px;color:' + subtle + ';">Invite a friend to collaborate on <strong>' + escapeHtml(danceName) + '</strong></p>';
+
+    if (!friends.length) {
+      inner += '<div style="text-align:center;padding:24px;">';
+      inner += '<p style="font-size:13px;color:' + subtle + ';margin:0 0 12px;">No friends yet. Add friends in the Friends tab first!</p>';
+      inner += '<button data-invite-overlay-goto-friends style="background:#4f46e5;color:#fff;border:none;padding:10px 20px;border-radius:999px;font-weight:800;cursor:pointer;">Open Friends Tab</button>';
+      inner += '</div>';
+    } else {
+      inner += '<div style="display:grid;gap:8px;">';
+      for (let i = 0; i < friends.length; i++) {
+        const f = friends[i];
+        const name = f.name || f.email || 'Friend';
+        const email = f.email || '';
+        const initial = String(name).charAt(0).toUpperCase();
+        const colors = ['#4f46e5','#7c3aed','#db2777','#ea580c','#059669','#0891b2','#6366f1'];
+        const avatarBg = colors[initial.charCodeAt(0) % colors.length];
+        inner += '<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:14px;border:1px solid;' + cardBg + '">';
+        inner += '<div style="width:36px;height:36px;border-radius:999px;background:' + avatarBg + ';color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:15px;flex-shrink:0;">' + escapeHtml(initial) + '</div>';
+        inner += '<div style="flex:1;min-width:0;">';
+        inner += '<div style="font-weight:800;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(name) + '</div>';
+        inner += '<div style="font-size:11px;opacity:.6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(email) + '</div>';
+        inner += '</div>';
+        inner += '<button data-invite-overlay-send="' + escapeHtml(email) + '" style="background:#7c3aed;color:#fff;border:none;padding:8px 16px;border-radius:999px;font-weight:800;font-size:12px;cursor:pointer;white-space:nowrap;">Send Invite</button>';
+        inner += '</div>';
+      }
+      inner += '</div>';
+    }
+    inner += '<div id="stepper-invite-overlay-status" style="margin-top:12px;font-size:13px;text-align:center;"></div>';
+    inner += '</div>';
+    overlay.innerHTML = inner;
+    document.body.appendChild(overlay);
+
+    /* Close handlers */
+    overlay.addEventListener('click', function(e){ if (e.target === overlay) overlay.remove(); });
+    const closeBtn = overlay.querySelector('[data-invite-overlay-close]');
+    if (closeBtn) closeBtn.addEventListener('click', function(){ overlay.remove(); });
+
+    /* Go to friends tab */
+    const gotoBtn = overlay.querySelector('[data-invite-overlay-goto-friends]');
+    if (gotoBtn) gotoBtn.addEventListener('click', function(){ overlay.remove(); openPage('friends'); });
+
+    /* Send invite buttons */
+    overlay.querySelectorAll('[data-invite-overlay-send]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        const email = btn.getAttribute('data-invite-overlay-send');
+        if (!email) return;
+        btn.disabled = true;
+        btn.textContent = 'Sending…';
+        const statusEl = document.getElementById('stepper-invite-overlay-status');
+
+        const danceEntry = buildCurrentDanceEntry();
+        if (!danceEntry) {
+          btn.textContent = 'No dance';
+          return;
+        }
+        var currentDanceData = null;
+        try { currentDanceData = readAppData(); } catch(e){ /* ignore */ }
+        authFetch('/api/collaborators/invite', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ danceId: danceEntry.id, email: email, danceData: currentDanceData })
+        }).then(function(data){
+          if (data && data.ok) {
+            btn.textContent = '✓ Sent!';
+            btn.style.background = '#059669';
+            if (statusEl) statusEl.innerHTML = '<span style="color:#059669;">✅ Invite sent to ' + escapeHtml(email) + '</span>';
+          } else {
+            btn.textContent = 'Retry';
+            btn.disabled = false;
+            btn.style.background = '#dc2626';
+            if (statusEl) statusEl.innerHTML = '<span style="color:#dc2626;">⚠️ ' + escapeHtml((data && data.error) || 'Failed') + '</span>';
+          }
+        }).catch(function(){
+          btn.textContent = 'Retry';
+          btn.disabled = false;
+          btn.style.background = '#dc2626';
+          if (statusEl) statusEl.innerHTML = '<span style="color:#dc2626;">⚠️ Server might be down.</span>';
+        });
+      });
+    });
   }
 
   function getSavedDancesUiSignature(){
