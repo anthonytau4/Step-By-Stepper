@@ -42,7 +42,7 @@
     lastRefresh: 0,
     error: null,
     success: null,
-    activeView: 'list',  /* 'list' | 'pending' | 'add' | 'chat' */
+    activeView: 'list',  /* 'list' | 'pending' | 'add' | 'chat' | 'groups' | 'groupchat' | 'staffchat' */
     chatFriend: null,     /* currently chatting friend object */
     chatMessages: [],
     chatText: '',
@@ -57,7 +57,11 @@
     showingProfile: null,
     invitingToDance: null,
     createGroupName: '',
-    createGroupMembers: []
+    createGroupMembers: [],
+    staffChatMessages: [],
+    staffChatText: '',
+    staffChatLoading: false,
+    myRole: 'member'
   };
 
   /* ── Persistence ── */
@@ -314,6 +318,8 @@
     apiFetch('/api/friends/chat?friendId=' + encodeURIComponent(friendId), { headers: authHeaders() })
       .then(function (data) {
         friendsState.chatMessages = (data && Array.isArray(data.messages)) ? data.messages : [];
+        /* Mark messages as read after loading */
+        markChatAsRead(friendId);
       })
       .catch(function () {
         friendsState.error = 'Could not load chat messages.';
@@ -356,6 +362,112 @@
       var chatBox = document.querySelector('[data-friends-chat-messages]');
       if (chatBox) chatBox.scrollTop = chatBox.scrollHeight;
     }, 50);
+  }
+
+  /* ── Read receipts ── */
+  function markChatAsRead(friendId) {
+    if (!isSignedIn() || !friendId) return;
+    apiFetch('/api/friends/chat/read', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ friendId: friendId })
+    })
+      .then(function (data) {
+        if (data && Array.isArray(data.messages)) {
+          friendsState.chatMessages = data.messages;
+          renderFriendsPage();
+        }
+      })
+      .catch(function () { /* silent */ });
+  }
+
+  function renderMessageStatus(msg, isMe) {
+    if (!isMe) return '';
+    var status = msg.status || 'sent';
+    var statusIcon = '';
+    var statusLabel = '';
+    if (status === 'read') {
+      statusIcon = (_ic.checkRead || '<span style="color:#22c55e;">✓✓</span>');
+      statusLabel = 'Read';
+    } else if (status === 'delivered') {
+      statusIcon = (_ic.checkDouble || '<span style="opacity:.6;">✓✓</span>');
+      statusLabel = 'Delivered';
+    } else {
+      statusIcon = (_ic.checkSingle || '<span style="opacity:.5;">✓</span>');
+      statusLabel = 'Sent';
+    }
+    return '<span style="display:inline-flex;align-items:center;gap:3px;margin-left:4px;" title="' + statusLabel + '">' +
+      '<span style="font-size:10px;opacity:.6;">' + statusLabel + '</span>' +
+      '<span style="width:14px;height:14px;display:inline-flex;align-items:center;">' + statusIcon + '</span></span>';
+  }
+
+  /* ── Role badge helper ── */
+  function renderRoleBadge(role) {
+    if (!role) return '';
+    var r = String(role).toLowerCase();
+    if (r === 'admin') {
+      return '<span style="display:inline-flex;align-items:center;gap:2px;padding:1px 6px;border-radius:6px;font-size:9px;font-weight:900;letter-spacing:.3px;background:rgba(239,68,68,.15);color:#ef4444;margin-left:4px;vertical-align:middle;" title="Admin">' + (_ic.badgeAdmin || '🛡') + ' ADMIN</span>';
+    }
+    if (r === 'moderator') {
+      return '<span style="display:inline-flex;align-items:center;gap:2px;padding:1px 6px;border-radius:6px;font-size:9px;font-weight:900;letter-spacing:.3px;background:rgba(99,102,241,.15);color:#6366f1;margin-left:4px;vertical-align:middle;" title="Moderator">' + (_ic.badgeMod || '🛡') + ' MOD</span>';
+    }
+    return '';
+  }
+
+  /* ── Detect own role ── */
+  function fetchMyRole() {
+    if (!isSignedIn()) return;
+    apiFetch('/api/user/me', { headers: authHeaders() })
+      .then(function (data) {
+        if (data && data.role) {
+          friendsState.myRole = data.role;
+        }
+      })
+      .catch(function () { /* silent */ });
+  }
+
+  /* ── Staff/Moderator Chat ── */
+  function loadStaffChat() {
+    if (!isSignedIn()) return;
+    friendsState.staffChatLoading = true;
+    renderFriendsPage();
+    apiFetch('/api/staff-chat', { headers: authHeaders() })
+      .then(function (data) {
+        friendsState.staffChatMessages = (data && Array.isArray(data.messages)) ? data.messages : [];
+      })
+      .catch(function () {
+        friendsState.error = 'Could not load staff chat.';
+      })
+      .finally(function () {
+        friendsState.staffChatLoading = false;
+        renderFriendsPage();
+        scrollChatToBottom();
+      });
+  }
+
+  function sendStaffMessage(text) {
+    if (!isSignedIn()) return;
+    var trimmed = String(text || '').trim();
+    if (!trimmed) return;
+    friendsState.staffChatLoading = true;
+    renderFriendsPage();
+    apiFetch('/api/staff-chat', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ text: trimmed })
+    })
+      .then(function (data) {
+        friendsState.staffChatMessages = (data && Array.isArray(data.messages)) ? data.messages : [];
+        friendsState.staffChatText = '';
+      })
+      .catch(function () {
+        friendsState.error = 'Could not send staff message.';
+      })
+      .finally(function () {
+        friendsState.staffChatLoading = false;
+        renderFriendsPage();
+        scrollChatToBottom();
+      });
   }
 
   /* ── Block / Favorite / Profile helpers ── */
@@ -549,6 +661,8 @@
         html += renderGroupsView(theme);
       } else if (friendsState.activeView === 'groupchat') {
         html += renderGroupChatView(theme);
+      } else if (friendsState.activeView === 'staffchat') {
+        html += renderStaffChatView(theme);
       } else {
         html += renderFriendsList(theme);
       }
@@ -591,6 +705,11 @@
       { key: 'chat', label: 'Chat', icon: chatIcon, count: 0 },
       { key: 'groups', label: 'Groups', icon: groupIcon, count: friendsState.groupChats.length }
     ];
+    /* Staff chat visible to admins/moderators */
+    var role = String(friendsState.myRole || '').toLowerCase();
+    if (role === 'admin' || role === 'moderator') {
+      views.push({ key: 'staffchat', label: 'Staff Chat', icon: (_ic.shield || '🛡'), count: 0 });
+    }
     var html = '<div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;">';
     for (var i = 0; i < views.length; i++) {
       var v = views[i];
@@ -868,7 +987,10 @@
         html += '<div style="display:flex;justify-content:' + align + ';">';
         html += '<div style="max-width:75%;padding:10px 14px;border-radius:16px;font-size:13px;line-height:1.5;word-wrap:break-word;' + bubbleBg + '">';
         html += escapeHtml(msg.text || '');
-        html += '<div style="font-size:10px;opacity:.6;margin-top:4px;">' + escapeHtml(msg.senderName || '') + ' &middot; ' + formatTime(msg.createdAt) + '</div>';
+        html += '<div style="font-size:10px;opacity:.6;margin-top:4px;display:flex;align-items:center;gap:3px;flex-wrap:wrap;justify-content:' + (isMe ? 'flex-end' : 'flex-start') + ';">';
+        html += escapeHtml(msg.senderName || '') + renderRoleBadge(msg.senderRole) + ' &middot; ' + formatTime(msg.createdAt);
+        html += renderMessageStatus(msg, isMe);
+        html += '</div>';
         html += '</div></div>';
       }
     }
@@ -989,7 +1111,10 @@
         html += '<div style="display:flex;justify-content:' + align + ';">';
         html += '<div style="max-width:75%;padding:10px 14px;border-radius:16px;font-size:13px;line-height:1.5;word-wrap:break-word;' + bubbleBg + '">';
         html += escapeHtml(msg.text || '');
-        html += '<div style="font-size:10px;opacity:.6;margin-top:4px;">' + escapeHtml(msg.senderName || '') + ' &middot; ' + formatTime(msg.createdAt) + '</div>';
+        html += '<div style="font-size:10px;opacity:.6;margin-top:4px;display:flex;align-items:center;gap:3px;flex-wrap:wrap;justify-content:' + (isMe ? 'flex-end' : 'flex-start') + ';">';
+        html += escapeHtml(msg.senderName || '') + renderRoleBadge(msg.senderRole || msg.role) + ' &middot; ' + formatTime(msg.createdAt);
+        html += renderMessageStatus(msg, isMe);
+        html += '</div>';
         html += '</div></div>';
       }
     }
@@ -1000,6 +1125,58 @@
     html += '<input data-friends-group-input type="text" placeholder="Type a message…" value="' + escapeHtml(friendsState.groupChatText) + '" ';
     html += 'style="flex:1;border-radius:12px;border:1px solid;padding:10px 14px;font-size:13px;outline:none;' + theme.inputBg + '" />';
     html += '<button data-friends-group-send class="stepper-google-cta" style="background:#4f46e5;color:#fff;padding:10px 16px;border-radius:12px;font-weight:800;font-size:13px;white-space:nowrap;">Send</button>';
+    html += '</div>';
+
+    html += '</div>';
+    return html;
+  }
+
+  /* ── Staff / Moderator Chat view ── */
+  function renderStaffChatView(theme) {
+    var html = '';
+    var profile = getProfile();
+    var myEmail = (profile.email || '').toLowerCase();
+    var myRole = String(friendsState.myRole || '').toLowerCase();
+
+    html += '<div style="display:flex;flex-direction:column;height:440px;border:1px solid;border-radius:18px;overflow:hidden;' + theme.cardBg + '">';
+
+    /* Header */
+    html += '<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid;' + (theme.dark ? 'border-color:#2d2d44;background:#1e1e2e;' : 'border-color:#e5e7eb;background:#f9fafb;') + '">';
+    html += '<button data-friends-staffchat-back style="background:none;border:none;cursor:pointer;font-size:18px;opacity:.6;transition:opacity .2s;">&larr;</button>';
+    html += '<div style="width:32px;height:32px;border-radius:999px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:13px;flex-shrink:0;">' + (_ic.shield || '🛡') + '</div>';
+    html += '<div style="flex:1;min-width:0;"><div style="font-weight:800;font-size:14px;">Staff Chat</div>';
+    html += '<div class="' + theme.subtle + '" style="font-size:11px;">Admins &amp; Moderators only</div></div>';
+    html += renderRoleBadge(myRole);
+    html += '</div>';
+
+    /* Messages */
+    html += '<div data-friends-chat-messages style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:8px;">';
+    if (friendsState.staffChatLoading) {
+      html += '<div style="text-align:center;padding:20px;"><div class="stepper-friends-spinner"></div></div>';
+    } else if (!friendsState.staffChatMessages.length) {
+      html += '<div style="text-align:center;padding:40px 16px;opacity:.5;font-size:13px;">No staff messages yet. Start the conversation!</div>';
+    } else {
+      for (var i = 0; i < friendsState.staffChatMessages.length; i++) {
+        var msg = friendsState.staffChatMessages[i];
+        var isMe = (msg.email || '').toLowerCase() === myEmail;
+        var align = isMe ? 'flex-end' : 'flex-start';
+        var bubbleBg = isMe ? 'background:#4f46e5;color:#fff;' : (theme.dark ? 'background:#2d2d44;color:#e5e7eb;' : 'background:#f0f0f0;color:#1f2937;');
+        html += '<div style="display:flex;justify-content:' + align + ';">';
+        html += '<div style="max-width:75%;padding:10px 14px;border-radius:16px;font-size:13px;line-height:1.5;word-wrap:break-word;' + bubbleBg + '">';
+        html += escapeHtml(msg.text || '');
+        html += '<div style="font-size:10px;opacity:.6;margin-top:4px;display:flex;align-items:center;gap:3px;flex-wrap:wrap;justify-content:' + (isMe ? 'flex-end' : 'flex-start') + ';">';
+        html += escapeHtml(msg.name || '') + renderRoleBadge(msg.role) + ' &middot; ' + formatTime(msg.createdAt);
+        html += '</div>';
+        html += '</div></div>';
+      }
+    }
+    html += '</div>';
+
+    /* Input */
+    html += '<div style="display:flex;gap:8px;padding:12px 16px;border-top:1px solid;' + (theme.dark ? 'border-color:#2d2d44;background:#1e1e2e;' : 'border-color:#e5e7eb;background:#f9fafb;') + '">';
+    html += '<input data-friends-staff-input type="text" placeholder="Message staff…" value="' + escapeHtml(friendsState.staffChatText) + '" ';
+    html += 'style="flex:1;border-radius:12px;border:1px solid;padding:10px 14px;font-size:13px;outline:none;' + theme.inputBg + '" />';
+    html += '<button data-friends-staff-send class="stepper-google-cta" style="background:#4f46e5;color:#fff;padding:10px 16px;border-radius:12px;font-weight:800;font-size:13px;white-space:nowrap;">Send</button>';
     html += '</div>';
 
     html += '</div>';
@@ -1132,9 +1309,11 @@
     /* View switching */
     page.querySelectorAll('[data-friends-view]').forEach(function (btn) {
       btn.addEventListener('click', function () {
-        friendsState.activeView = btn.getAttribute('data-friends-view') || 'list';
+        var newView = btn.getAttribute('data-friends-view') || 'list';
+        friendsState.activeView = newView;
         friendsState.error = null;
         friendsState.success = null;
+        if (newView === 'staffchat') loadStaffChat();
         renderFriendsPage();
       });
     });
@@ -1355,6 +1534,23 @@
         renderFriendsPage();
       });
     });
+
+    /* Staff chat - send message */
+    var staffSend = page.querySelector('[data-friends-staff-send]');
+    var staffInput = page.querySelector('[data-friends-staff-input]');
+    if (staffSend && staffInput) {
+      staffSend.addEventListener('click', function () { sendStaffMessage(staffInput.value); });
+      staffInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') sendStaffMessage(staffInput.value); });
+      staffInput.addEventListener('input', function () { friendsState.staffChatText = staffInput.value; });
+      setTimeout(function () { staffInput.focus(); }, 100);
+    }
+
+    /* Staff chat - back */
+    var staffBack = page.querySelector('[data-friends-staffchat-back]');
+    if (staffBack) staffBack.addEventListener('click', function () {
+      friendsState.activeView = 'list';
+      renderFriendsPage();
+    });
   }
 
   /* ════════════════════════════════════════════════════════════
@@ -1386,6 +1582,7 @@
       /* Auto-refresh from backend when data is stale (>30 s) */
       if (isSignedIn() && Date.now() - friendsState.lastRefresh > 30000) {
         refreshFriends();
+        fetchMyRole();
       }
     },
     refresh: refreshFriends,

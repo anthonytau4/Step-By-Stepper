@@ -617,6 +617,221 @@
     ci(12, 12, 1));
 
   /* ════════════════════════════════════════════════════════════
+     MENU BAR ICONS (File, Edit, View, Format, etc.)
+     ════════════════════════════════════════════════════════════ */
+
+  /* 📄 File menu – page with fold */
+  icons.fileMenu = sq(B,
+    ps('M7 4h6.5l4.5 4.5V20H7V4z') +
+    ps('M13.5 4v4.5H18') +
+    ps('M9.5 12h5M9.5 15h3'));
+
+  /* ✏️ Edit menu – pencil on paper */
+  icons.editMenu = sq(B,
+    ps('M7 17.5h10') +
+    ps('M14 6.5l3 3-7.5 7.5H6.5V14L14 6.5z') +
+    ps('M12 8.5l3 3'));
+
+  /* 👁 View menu – eye */
+  icons.viewMenu = sq(T,
+    ps('M4.5 12c1.5-3.5 4.2-5.5 7.5-5.5s6 2 7.5 5.5c-1.5 3.5-4.2 5.5-7.5 5.5s-6-2-7.5-5.5z') +
+    '<circle cx="12" cy="12" r="2.8" fill="none" stroke="' + c + '" stroke-width="1.5"/>' +
+    ci(12, 12, 1.2));
+
+  /* ¶ Format menu – pilcrow / text style */
+  icons.formatMenu = sq(P,
+    '<text x="7" y="17" font-size="13" font-weight="900" font-family="Georgia,serif" fill="' + c + '">A</text>' +
+    ps('M14.5 6h3M14.5 6v12') +
+    ps('M13 18h6'));
+
+  /* ⊞ Insert menu – plus in box */
+  icons.insertMenu = sq(G,
+    ps('M6 6h12v12H6z') +
+    ps('M12 9v6M9 12h6', c, 2));
+
+  /* 🔧 Tools menu – wrench */
+  icons.toolsMenu = sq(S,
+    ps('M8.5 15.5l-2.5 2.5 2 2 2.5-2.5') +
+    ps('M14.5 5.5a4 4 0 0 0-5 5l-1 1 5-5a4 4 0 0 0 5 5l-5-5') +
+    ps('M17 7l-5 5'));
+
+  /* 🧩 Extensions menu – puzzle piece */
+  icons.extensionsMenu = sq(O,
+    ps('M7 10h2.5c0-1.2 1-2.2 2.5-2.2s2.5 1 2.5 2.2H17v4h-2.5c0 1.2-1 2.2-2.5 2.2s-2.5-1-2.5-2.2H7V10z'));
+
+  /* ❓ Help menu – question in circle */
+  icons.helpMenu = sq(T,
+    '<circle cx="12" cy="12" r="7" fill="none" stroke="' + c + '" stroke-width="1.5"/>' +
+    ps('M10 10a2.5 2.5 0 0 1 4 1c0 1.5-2 2-2 3') +
+    ci(12, 16.8, .9));
+
+  /* ════════════════════════════════════════════════════════════
+     CHAT / MESSAGING ICONS (read receipts, badges)
+     ════════════════════════════════════════════════════════════ */
+
+  /* ✓ Single check – sent */
+  icons.checkSingle = sq(S,
+    ps('M8 12l3 3 5-6', c, 1.8));
+
+  /* ✓✓ Double check – delivered */
+  icons.checkDouble = sq(B,
+    ps('M5.5 12l3 3 5-6', c, 1.6) +
+    ps('M9.5 12l3 3 5-6', c, 1.6));
+
+  /* ✓✓ Double check blue – read */
+  icons.checkRead = sq(G,
+    ps('M5.5 12l3 3 5-6', 'rgba(34,197,94,.9)', 1.8) +
+    ps('M9.5 12l3 3 5-6', 'rgba(34,197,94,.9)', 1.8));
+
+  /* 🛡✓ Admin badge – shield with star */
+  icons.badgeAdmin = sq(R,
+    ps('M12 4L6 7.5v4c0 4 2.5 6.5 6 8.5 3.5-2 6-4.5 6-8.5v-4L12 4z', c, 1.5) +
+    p('M12 8.5l1.2 2.4 2.6.4-1.9 1.9.5 2.6L12 14.5l-2.4 1.3.5-2.6-1.9-1.9 2.6-.4L12 8.5z'));
+
+  /* 🛡 Moderator badge – shield with checkmark */
+  icons.badgeMod = sq(B,
+    ps('M12 4L6 7.5v4c0 4 2.5 6.5 6 8.5 3.5-2 6-4.5 6-8.5v-4L12 4z', c, 1.5) +
+    ps('M9 12l2 2 4-4', c, 2));
+
+  /* 👑 Crown – owner/creator badge */
+  icons.crown = sq(Y,
+    ps('M5 16h14') +
+    ps('M5 16l2-7 3 3 2-5 2 5 3-3 2 7', c, 1.6));
+
+  /* 🔹 Member badge – diamond */
+  icons.badgeMember = sq(S,
+    p('M12 5l5 7-5 7-5-7 5-7z'));
+
+  /* ════════════════════════════════════════════════════════════
+     DETAILED ACTION ICONS (menu items)
+     ════════════════════════════════════════════════════════════ */
+
+  /* 📄+ New document */
+  icons.newDoc = sq(G,
+    ps('M8 4h5l4 4v11H8V4z') +
+    ps('M13 4v4h4') +
+    ps('M16 12v4M14 14h4'));
+
+  /* 📂 Open – folder open */
+  icons.open = sq(B,
+    ps('M5 8V17h14V10H12l-2-2H5z') +
+    ps('M5 17l2-5h14l-2 5'));
+
+  /* 💾 Save As – floppy with arrow */
+  icons.saveAs = sq(B,
+    ps('M6 6h9l3 3v9H6z') +
+    ps('M9 6v4h5V6') +
+    ps('M15 14l2 2-2 2'));
+
+  /* 📧 Email / Share */
+  icons.email = sq(B,
+    ps('M5 7h14v10H5z') +
+    ps('M5 7l7 5 7-5'));
+
+  /* ✂ Cut – scissors */
+  icons.cut = sq(R,
+    '<circle cx="9" cy="16" r="2" fill="none" stroke="' + c + '" stroke-width="1.5"/>' +
+    '<circle cx="15" cy="16" r="2" fill="none" stroke="' + c + '" stroke-width="1.5"/>' +
+    ps('M9 14l3-5 3 5M12 9V5'));
+
+  /* 📋 Paste */
+  icons.paste = sq(B,
+    ps('M10 4h4M7 6h10v13H7z') +
+    ps('M10 10h4M10 13h4'));
+
+  /* 🔎+ Zoom In */
+  icons.zoomIn = sq(B,
+    '<circle cx="11" cy="11" r="4.5" fill="none" stroke="' + c + '" stroke-width="1.5"/>' +
+    ps('M14.5 14.5l3.5 3.5') +
+    ps('M9 11h4M11 9v4'));
+
+  /* 🔎- Zoom Out */
+  icons.zoomOut = sq(B,
+    '<circle cx="11" cy="11" r="4.5" fill="none" stroke="' + c + '" stroke-width="1.5"/>' +
+    ps('M14.5 14.5l3.5 3.5') +
+    ps('M9 11h4'));
+
+  /* ⛶ Fullscreen */
+  icons.fullscreen = sq(S,
+    ps('M5 9V5h4M15 5h4v4M5 15v4h4M19 15v4h-4', c, 1.8));
+
+  /* 📏 Ruler – ruler tool */
+  icons.ruler = sq(S,
+    ps('M6 6l12 12M6 10l2-2M10 6l2-2M10 14l2-2M14 10l2-2M14 18l2-2M18 14l2-2', c, 1.4));
+
+  /* 🔤 Spelling – A with underline */
+  icons.spelling = sq(T,
+    '<text x="12" y="14" text-anchor="middle" font-size="10" font-weight="800" fill="' + c + '">Aa</text>' +
+    ps('M6 17h12', '#ef4444', 1.8));
+
+  /* 🔢 Word Count */
+  icons.wordCount = sq(S,
+    '<text x="12" y="14" text-anchor="middle" font-size="9" font-weight="800" fill="' + c + '">123</text>' +
+    ps('M7 17h10'));
+
+  /* 📐 Alignment – left align */
+  icons.alignLeft = sq(S,
+    ps('M6 7h12M6 10.5h8M6 14h10M6 17.5h6', c, 1.6));
+
+  /* 📐 Alignment – center align */
+  icons.alignCenter = sq(S,
+    ps('M6 7h12M8 10.5h8M7 14h10M9 17.5h6', c, 1.6));
+
+  /* 📐 Alignment – right align */
+  icons.alignRight = sq(S,
+    ps('M6 7h12M10 10.5h8M8 14h10M12 17.5h6', c, 1.6));
+
+  /* B Bold */
+  icons.bold = sq(S,
+    '<text x="12" y="16" text-anchor="middle" font-size="12" font-weight="900" fill="' + c + '">B</text>');
+
+  /* I Italic */
+  icons.italic = sq(S,
+    '<text x="12" y="16" text-anchor="middle" font-size="12" font-weight="700" font-style="italic" fill="' + c + '">I</text>');
+
+  /* U Underline */
+  icons.underline = sq(S,
+    '<text x="12" y="14.5" text-anchor="middle" font-size="11" font-weight="700" fill="' + c + '">U</text>' +
+    ps('M8 17.5h8', c, 1.5));
+
+  /* S Strikethrough */
+  icons.strikethrough = sq(S,
+    '<text x="12" y="16" text-anchor="middle" font-size="12" font-weight="700" fill="' + c + '">S</text>' +
+    ps('M7 12h10', c, 1.5));
+
+  /* 🖼 Image – photo frame */
+  icons.image = sq(T,
+    ps('M6 6h12v12H6z') +
+    ci(10, 10, 1.5) +
+    ps('M6 16l3.5-4 2.5 3 3-4 3 5'));
+
+  /* 📊 Table – grid */
+  icons.table = sq(B,
+    ps('M6 6h12v12H6z') +
+    ps('M6 10h12M6 14h12M10 6v12M14 6v12', c, 1.2));
+
+  /* ¶ Paragraph */
+  icons.paragraph = sq(S,
+    ps('M10 4h7M13 4v16M10 4a3 3 0 0 0 0 6h3'));
+
+  /* ∞ Special Characters */
+  icons.specialChar = sq(P,
+    ps('M5 12c0-2 1.5-4 3.5-4s3.5 2 3.5 4-1.5 4-3.5 4S5 14 5 12z') +
+    ps('M12 12c0-2 1.5-4 3.5-4s3.5 2 3.5 4-1.5 4-3.5 4S12 14 12 12z'));
+
+  /* 📊 Chart – bar chart */
+  icons.chart = sq(G,
+    ps('M6 18h12') +
+    ps('M8 18v-6M11 18v-9M14 18v-5M17 18v-11', c, 2.2));
+
+  /* 🧮 Calculator */
+  icons.calculator = sq(S,
+    ps('M7 4h10v16H7z') +
+    ps('M9 7h6v3H9z') +
+    ci(9.5, 13, .8) + ci(12, 13, .8) + ci(14.5, 13, .8) +
+    ci(9.5, 16, .8) + ci(12, 16, .8) + ci(14.5, 16, .8));
+
+  /* ════════════════════════════════════════════════════════════
      PUBLIC API
      ════════════════════════════════════════════════════════════ */
   window.__stepperIcons = icons;
