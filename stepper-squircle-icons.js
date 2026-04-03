@@ -407,6 +407,216 @@
     ci(12, 17, 1.2));
 
   /* ════════════════════════════════════════════════════════════
+     EXTENDED UI ICONS (40)
+     ════════════════════════════════════════════════════════════ */
+
+  /* # Hashtag – counts / numbers */
+  icons.hashtag = sq(S,
+    ps('M10 5.5l-1 13M15 5.5l-1 13M6 9.5h12M6 14.5h12', c, 1.8));
+
+  /* ↕ Sort – up/down sort arrows */
+  icons.sort = sq(S,
+    ps('M9 17V7M9 7l-3 3M9 7l3 3', c, 1.8) +
+    ps('M15 7v10M15 17l-3-3M15 17l3-3', c, 1.8));
+
+  /* ▽ Filter – funnel */
+  icons.filter = sq(S,
+    ps('M5.5 6.5h13l-5 6v4l-3 2v-6z', c, 1.8));
+
+  /* ⧉ Copy – overlapping rectangles */
+  icons.copy = sq(B,
+    ps('M10 5.5h7.5v7.5H10z') +
+    ps('M6.5 9h7.5v7.5H6.5z'));
+
+  /* 🔗 Link – chain link */
+  icons.link = sq(B,
+    ps('M10 8H8.5a4 4 0 0 0 0 8H10') +
+    ps('M14 8h1.5a4 4 0 0 1 0 8H14') +
+    ps('M10 12h4'));
+
+  /* 🕐 Clock – clock face */
+  icons.clock = sq(S,
+    '<circle cx="12" cy="12" r="6.5" fill="none" stroke="' + c + '" stroke-width="1.6"/>' +
+    ps('M12 8v4.5l3 2'));
+
+  /* 📅 Calendar – calendar page */
+  icons.calendar = sq(S,
+    ps('M7 7h10v11H7z') +
+    ps('M7 10.5h10') +
+    ps('M9.5 5v3.5M14.5 5v3.5'));
+
+  /* 📌 Pin – pushpin */
+  icons.pin = sq(Y,
+    '<circle cx="12" cy="8" r="2.8" fill="none" stroke="' + c + '" stroke-width="1.6"/>' +
+    ps('M12 10.8v7.2') +
+    ps('M9 13.5h6'));
+
+  /* 🔖 Bookmark – bookmark ribbon */
+  icons.bookmark = sq(Y,
+    ps('M8 4.5h8v15l-4-3-4 3V4.5z', c, 1.8));
+
+  /* ❤ Heart – heart shape */
+  icons.heart = sq(R,
+    p('M12 18.5l-.8-.7C7 14 5 11.8 5 9.2 5 7 6.8 5.2 9 5.2c1.2 0 2.4.6 3 1.4.6-.8 1.8-1.4 3-1.4 2.2 0 4 1.8 4 4.2 0 2.6-2 4.8-6.2 8.4l-.8.7z'));
+
+  /* 🛡 Shield – admin / security */
+  icons.shield = sq(B,
+    ps('M12 4.5L6 7.5v4c0 4 2.5 6.5 6 8.5 3.5-2 6-4.5 6-8.5v-4L12 4.5z', c, 1.8));
+
+  /* 🌐 Globe – earth */
+  icons.globe = sq(T,
+    '<circle cx="12" cy="12" r="6.5" fill="none" stroke="' + c + '" stroke-width="1.6"/>' +
+    ps('M5.5 12h13') +
+    ps('M12 5.5c-2.5 2-3.5 4-3.5 6.5s1 4.5 3.5 6.5') +
+    ps('M12 5.5c2.5 2 3.5 4 3.5 6.5s-1 4.5-3.5 6.5'));
+
+  /* ⚙ Settings – gear */
+  icons.settings = sq(S,
+    '<circle cx="12" cy="12" r="3" fill="none" stroke="' + c + '" stroke-width="1.6"/>' +
+    ps('M12 5v2M12 17v2M5 12h2M17 12h2M7.4 7.4l1.5 1.5M15.1 15.1l1.5 1.5M7.4 16.6l1.5-1.5M15.1 8.9l1.5-1.5', c, 2));
+
+  /* ⤢ Expand – maximize arrows */
+  icons.expand = sq(S,
+    ps('M9 5H5v4M15 5h4v4M5 15v4h4M19 15v4h-4', c, 1.8));
+
+  /* ⤡ Collapse – minimize arrows */
+  icons.collapse = sq(S,
+    ps('M5 9h4V5M15 5v4h4M5 15h4v4M15 19v-4h4', c, 1.8));
+
+  /* ☰ List – bullet lines */
+  icons.list = sq(S,
+    ci(7, 7.5, 1) + ci(7, 12, 1) + ci(7, 16.5, 1) +
+    ps('M10 7.5h7M10 12h7M10 16.5h7'));
+
+  /* ⊞ Grid – four squares */
+  icons.grid = sq(S,
+    ps('M5.5 5.5h5v5h-5zM13.5 5.5h5v5h-5zM5.5 13.5h5v5h-5zM13.5 13.5h5v5h-5z', c, 1.6));
+
+  /* ▶ Play – play triangle */
+  icons.play = sq(G,
+    p('M8 5.5v13l9.5-6.5z'));
+
+  /* ⏸ Pause – pause bars */
+  icons.pause = sq(S,
+    ps('M8 6.5h2v11H8zM14 6.5h2v11h-2z', c, 1.8));
+
+  /* ♪ Music – music note */
+  icons.music = sq(P,
+    ps('M14 5.5v9.5') +
+    '<circle cx="11" cy="16.5" r="2.3" fill="none" stroke="' + c + '" stroke-width="1.6"/>' +
+    ps('M14 5.5l3.5-1.5'));
+
+  /* 🖨 Print – printer */
+  icons.print = sq(S,
+    ps('M8 15H6V10h12v5h-2') +
+    ps('M8 10V5h8v5') +
+    ps('M8 13h8v5.5H8z'));
+
+  /* ↗ Export – box with arrow out */
+  icons.export = sq(B,
+    ps('M12 14V4.5M12 4.5l-3 3M12 4.5l3 3') +
+    ps('M7 9v9h10V9'));
+
+  /* ↙ Import – box with arrow in */
+  icons.import = sq(B,
+    ps('M12 4.5v9.5M12 14l-3-3M12 14l3-3') +
+    ps('M7 9v9h10V9'));
+
+  /* ↺ Undo – counter-clockwise arrow */
+  icons.undo = sq(B,
+    ps('M17 8H9a4.5 4.5 0 0 0 0 9h5', c, 1.8) +
+    ps('M12 5l-3 3 3 3'));
+
+  /* ↻ Redo – clockwise arrow */
+  icons.redo = sq(B,
+    ps('M7 8h8a4.5 4.5 0 0 1 0 9h-5', c, 1.8) +
+    ps('M12 5l3 3-3 3'));
+
+  /* 👤+ User Plus – person with plus */
+  icons.userPlus = sq(G,
+    ci(9, 8, 2.2) +
+    ps('M5 17c0-2.5 1.8-4.5 4-4.5s4 2 4 4.5') +
+    ps('M17.5 9v4M15.5 11h4'));
+
+  /* 👤✓ User Check – person with checkmark */
+  icons.userCheck = sq(G,
+    ci(9, 8, 2.2) +
+    ps('M5 17c0-2.5 1.8-4.5 4-4.5s4 2 4 4.5') +
+    ps('M15 11l1.5 1.5 3-3'));
+
+  /* ⊘ Block – circle with diagonal line */
+  icons.block = sq(R,
+    '<circle cx="12" cy="12" r="6.5" fill="none" stroke="' + c + '" stroke-width="1.8"/>' +
+    ps('M7.5 16.5l9-9', c, 1.8));
+
+  /* 💬 Message – chat bubble with lines */
+  icons.message = sq(B,
+    ps('M6 7h12v8H10l-3 3v-3H6z') +
+    ps('M9 10h6M9 13h4'));
+
+  /* 👥👥 Group – multiple people */
+  icons.group = sq(P,
+    ci(12, 7, 2) + ci(7, 9, 1.7) + ci(17, 9, 1.7) +
+    ps('M8.5 18c0-2 1.5-3.5 3.5-3.5s3.5 1.5 3.5 3.5') +
+    ps('M4 17.5c0-1.5 1.2-2.8 3-3') +
+    ps('M20 17.5c0-1.5-1.2-2.8-3-3'));
+
+  /* 🏆 Trophy – trophy cup */
+  icons.trophy = sq(Y,
+    ps('M8 5h8v4a4 4 0 0 1-8 0V5z') +
+    ps('M6 5v2a2 2 0 0 0 2 2M18 5v2a2 2 0 0 1-2 2') +
+    ps('M12 13v3M9 17.5h6'));
+
+  /* 📈 Trending – trending up line */
+  icons.trending = sq(G,
+    ps('M5 17l5-5 3 3 6-8', c, 2) +
+    ps('M15 7h4v4'));
+
+  /* ⚡ Zap – lightning bolt */
+  icons.zap = sq(Y,
+    ps('M13 5l-5 7h4l-1 7 6-9h-5z', c, 1.8));
+
+  /* % Percent – percentage symbol */
+  icons.percent = sq(S,
+    '<circle cx="9" cy="8.5" r="2" fill="none" stroke="' + c + '" stroke-width="1.6"/>' +
+    '<circle cx="15" cy="15.5" r="2" fill="none" stroke="' + c + '" stroke-width="1.6"/>' +
+    ps('M16 6.5L8 17.5', c, 1.6));
+
+  /* ? Help – question mark in circle */
+  icons.help = sq(T,
+    '<circle cx="12" cy="12" r="6.5" fill="none" stroke="' + c + '" stroke-width="1.6"/>' +
+    ps('M10 10a2.5 2.5 0 0 1 4.5 1c0 1.5-2.5 2-2.5 3') +
+    ci(12, 16.5, .8));
+
+  /* 🔑 Key – key shape */
+  icons.key = sq(Y,
+    '<circle cx="9" cy="12" r="3" fill="none" stroke="' + c + '" stroke-width="1.6"/>' +
+    ps('M12 12h6M18 12v2M15.5 12v1.5'));
+
+  /* 🏷 Tag – label */
+  icons.tag = sq(B,
+    ps('M5 12l7.5-7H18v5.5L10.5 18 5 12z', c, 1.8) +
+    ci(15.5, 8.5, 1.2));
+
+  /* ☰☰ Layers – stacked layers */
+  icons.layers = sq(B,
+    ps('M12 6l7 4-7 4-7-4 7-4z') +
+    ps('M5 13l7 4 7-4') +
+    ps('M5 16l7 4 7-4'));
+
+  /* 🗄 Database – cylinder */
+  icons.database = sq(S,
+    ps('M7 7c0-1.5 2.2-2.5 5-2.5s5 1 5 2.5') +
+    ps('M7 7v10c0 1.5 2.2 2.5 5 2.5s5-1 5-2.5V7') +
+    ps('M7 12c0 1.5 2.2 2.5 5 2.5s5-1 5-2.5'));
+
+  /* ⊕ Crosshair – target reticle */
+  icons.crosshair = sq(B,
+    '<circle cx="12" cy="12" r="5" fill="none" stroke="' + c + '" stroke-width="1.6"/>' +
+    ps('M12 5v3M12 16v3M5 12h3M16 12h3') +
+    ci(12, 12, 1));
+
+  /* ════════════════════════════════════════════════════════════
      PUBLIC API
      ════════════════════════════════════════════════════════════ */
   window.__stepperIcons = icons;
