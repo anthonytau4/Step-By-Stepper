@@ -62,7 +62,7 @@
     window.addEventListener('popstate', () => queueEnsure(80));
     window.addEventListener('storage', () => queueEnsure(150));
     document.addEventListener('visibilitychange', () => { if (!document.hidden) queueEnsure(120); });
-    setInterval(() => { if (!document.hidden) ensure(); }, 8000);
+    setInterval(() => { if (!document.hidden) ensure(); }, 20000);
   }
 
   function updateButtonVisibility() {
@@ -85,7 +85,7 @@
     window.addEventListener('popstate', queueVisibilityRefresh);
     window.addEventListener('storage', queueVisibilityRefresh);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) queueVisibilityRefresh(); });
-    setInterval(() => { if (!document.hidden) updateButtonVisibility(); }, 3000);
+    setInterval(() => { if (!document.hidden) updateButtonVisibility(); }, 12000);
   }
 
   // --- Wait for app ---

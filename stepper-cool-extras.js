@@ -26,6 +26,16 @@
   if (window.__stepperCoolExtrasInstalled) return;
   window.__stepperCoolExtrasInstalled = true;
 
+  if (window.__stepperLowPowerMode !== false) {
+    window.__stepperCoolExtras = {
+      setTheme: function(){},
+      getThemes: function(){ return []; },
+      getCurrentTheme: function(){ return 'default'; },
+      toggleFocusMode: function(){ return false; }
+    };
+    return;
+  }
+
   /* ── Helpers ────────────────────────────────────────────────────── */
   const STORAGE_KEY = 'linedance_builder_data_v13';
   const THEME_KEY  = 'stepper_theme_preset';

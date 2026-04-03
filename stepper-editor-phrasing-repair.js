@@ -519,7 +519,8 @@
       });
       if (relevant) schedule(true);
     });
-    observer.observe(document.documentElement || document.body, { childList:true, subtree:true });
+    const observeTarget = document.querySelector('main') || document.getElementById('root') || document.body;
+    observer.observe(observeTarget, { childList:true, subtree:true });
     window.addEventListener('storage', () => schedule(false));
     window.addEventListener('popstate', () => schedule(true));
     window.addEventListener('stepperphrasedchange', () => schedule(false));
@@ -530,7 +531,7 @@
       const shouldExist = isEditorRoute() && isEditorSurfaceVisible();
       if (shouldExist && (!host || !inlineHost || inlineHost.hidden)) schedule(true);
       if (!shouldExist && inlineHost && !inlineHost.hidden) schedule(true);
-    }, 1500);
+    }, 8000);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once:true });

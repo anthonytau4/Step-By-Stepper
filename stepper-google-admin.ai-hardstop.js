@@ -33,10 +33,10 @@
   const DEFAULT_BACKEND_BASE = 'https://step-by-stepper.onrender.com';
   const ALT_BACKEND_BASE = 'https://api.step-by-stepper.com';
   const FALLBACK_GOOGLE_CLIENT_ID = '1038282546217-a7qv2i1puevmtjf38f6sv761vt7he26s.apps.googleusercontent.com';
-  const SYNC_INTERVAL_MS = 15000;
-  const PRESENCE_INTERVAL_MS = 60000;
-  const FEATURED_SYNC_INTERVAL_MS = 45000;
-  const LIVE_QUEUE_SYNC_INTERVAL_MS = 15000;
+  const SYNC_INTERVAL_MS = 30000;
+  const PRESENCE_INTERVAL_MS = 90000;
+  const FEATURED_SYNC_INTERVAL_MS = 120000;
+  const LIVE_QUEUE_SYNC_INTERVAL_MS = 45000;
 
   const state = {
     activePage: null,
@@ -175,7 +175,7 @@
 
   function shouldRunLiveQueueTask(){
     if (!canRunForegroundTask() || !(state.session && state.session.credential)) return false;
-    return ['admin','moderator','signin','subscription','friends','glossary','pdfimport','settings','templates'].includes(String(state.activePage || ''));
+    return ['admin','moderator','signin','subscription','friends','glossary','pdfimport'].includes(String(state.activePage || ''));
   }
 
   function scheduleRenderPages(delay){
@@ -5167,34 +5167,52 @@
 
   async function prime(){
     ensureStyles();
-    if (location.protocol === 'http:' || location.protocol === 'https:') {
-      const savedBase = normalizeApiBase(localStorage.getItem(API_BASE_KEY) || '');
-      const preferredBase = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') ? 'http://localhost:3000' : DEFAULT_BACKEND_BASE;
-      if (!savedBase || savedBase === 'http://localhost:3000' || savedBase === 'https://localhost:3000' || savedBase === normalizeApiBase(location.origin)) saveApiBase(preferredBase);
-      await chooseWorkingApiBase(state.apiBase || preferredBase);
-    }
     if (!locateUi()) return;
     ensureHost();
     _initSectionContextMenu();
     wireStartupBackendBase();
     wireSecurityDeterrent();
-    await refreshConfig();
-    await refreshPresence();
-    if (state.session && state.session.credential) {
-      await refreshSession();
-      await heartbeat();
-      await refreshCloudSaves();
-    state.savedDancesUiSignature = '';
-      await restoreLatestCloudSaveIfNeeded();
-      await syncCurrentDanceToBackend(false);
-      await refreshNotifications();
-      await refreshSubscription();
-      await confirmCheckoutIfPresent();
-      if (isAdminSession()) { await refreshAdminDances(); await refreshSubmissions(); await refreshGlossaryRequests(); }
-    }
-    await refreshGlossaryApproved();
-    await syncFeaturedFromBackend();
-    renderPages();
+    renderPages(true);
+
+    window.setTimeout(() => {
+      const preferredBase = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') ? 'http://localhost:3000' : DEFAULT_BACKEND_BASE;
+      const savedBase = normalizeApiBase(localStorage.getItem(API_BASE_KEY) || '');
+      if ((location.protocol === 'http:' || location.protocol === 'https:')) {
+        if (!savedBase || savedBase === 'http://localhost:3000' || savedBase === 'https://localhost:3000' || savedBase === normalizeApiBase(location.origin)) saveApiBase(preferredBase);
+        chooseWorkingApiBase(state.apiBase || preferredBase).catch(() => {});
+      }
+    }, 250);
+
+    window.setTimeout(async () => {
+      try {
+        await refreshConfig();
+        if (!document.hidden) await refreshPresence();
+        if (state.session && state.session.credential) {
+          await refreshSession();
+          await heartbeat();
+          await refreshCloudSaves();
+          state.savedDancesUiSignature = '';
+          await restoreLatestCloudSaveIfNeeded();
+          if (hasUnsavedChanges()) await syncCurrentDanceToBackend(false);
+          await refreshNotifications();
+          await refreshSubscription();
+          await confirmCheckoutIfPresent();
+          if (isAdminSession() && (state.activePage === 'admin' || state.activePage === 'moderator')) {
+            await refreshAdminDances();
+            await refreshSubmissions();
+            await refreshGlossaryRequests();
+          }
+        }
+        if (state.activePage === 'glossary' || state.activePage === 'friends' || state.activePage === 'admin' || state.activePage === 'moderator') {
+          await refreshGlossaryApproved();
+        }
+        await syncFeaturedFromBackend();
+      } catch (error) {
+        console.warn('[Stepper] Deferred admin bootstrap failed', error);
+      } finally {
+        renderPages(true);
+      }
+    }, 1200);
   }
 
   if (document.readyState === 'loading') {
