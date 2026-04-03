@@ -26,6 +26,10 @@
   var TAB_ID  = 'stepper-friends-tab';
   var FRIENDS_KEY = 'stepper_friends_v1';
   var PENDING_KEY = 'stepper_friends_pending_v1';
+  var BLOCKED_KEY = 'stepper_friends_blocked_v1';
+  var FAVORITES_KEY = 'stepper_friends_favorites_v1';
+  var GROUPS_KEY = 'stepper_friends_groups_v1';
+  var BUILDER_DATA_KEY = 'linedance_builder_data_v13';
 
   /* ── Local state ── */
   var friendsState = {
@@ -42,7 +46,18 @@
     chatFriend: null,     /* currently chatting friend object */
     chatMessages: [],
     chatText: '',
-    chatLoading: false
+    chatLoading: false,
+    blockedFriends: [],
+    favoriteFriends: [],
+    groupChats: [],
+    activeGroupChat: null,
+    groupChatMessages: [],
+    groupChatText: '',
+    groupChatLoading: false,
+    showingProfile: null,
+    invitingToDance: null,
+    createGroupName: '',
+    createGroupMembers: []
   };
 
   /* ── Persistence ── */
@@ -58,11 +73,22 @@
   function loadPendingLocal() {
     try { return JSON.parse(localStorage.getItem(PENDING_KEY) || '[]'); } catch (e) { return []; }
   }
+  function loadBlocked() { try { return JSON.parse(localStorage.getItem(BLOCKED_KEY) || '[]'); } catch (e) { return []; } }
+  function saveBlocked(list) { try { localStorage.setItem(BLOCKED_KEY, JSON.stringify(list || [])); } catch (e) { /* quota */ } }
+  function loadFavorites() { try { return JSON.parse(localStorage.getItem(FAVORITES_KEY) || '[]'); } catch (e) { return []; } }
+  function saveFavorites(list) { try { localStorage.setItem(FAVORITES_KEY, JSON.stringify(list || [])); } catch (e) { /* quota */ } }
+  function loadGroups() { try { return JSON.parse(localStorage.getItem(GROUPS_KEY) || '[]'); } catch (e) { return []; } }
+  function saveGroups(list) { try { localStorage.setItem(GROUPS_KEY, JSON.stringify(list || [])); } catch (e) { /* quota */ } }
+
+  /* Load persisted blocked/favorites/groups into state */
+  friendsState.blockedFriends = loadBlocked();
+  friendsState.favoriteFriends = loadFavorites();
+  friendsState.groupChats = loadGroups();
 
   /* ── Theme helper (re-use from admin) ── */
   function isDarkMode() {
     try {
-      var data = JSON.parse(localStorage.getItem('linedance_builder_data_v13') || 'null');
+      var data = JSON.parse(localStorage.getItem(BUILDER_DATA_KEY) || 'null');
       return !!(data && data.isDarkMode);
     } catch (e) { return false; }
   }
@@ -179,6 +205,27 @@
       renderFriendsPage();
       return;
     }
+
+    /* Duplicate prevention */
+    var alreadyFriend = friendsState.friends.some(function (f) { return (f.email || '').toLowerCase() === trimmed; });
+    if (alreadyFriend) {
+      friendsState.error = trimmed + ' is already your friend!';
+      renderFriendsPage();
+      return;
+    }
+    var alreadySent = friendsState.pendingSent.some(function (f) { return (f.email || '').toLowerCase() === trimmed; });
+    if (alreadySent) {
+      friendsState.error = 'You already sent a friend invite to ' + trimmed + '.';
+      renderFriendsPage();
+      return;
+    }
+    var alreadyReceived = friendsState.pendingReceived.some(function (f) { return (f.email || '').toLowerCase() === trimmed; });
+    if (alreadyReceived) {
+      friendsState.error = trimmed + ' already sent you an invite! Check your Pending tab.';
+      renderFriendsPage();
+      return;
+    }
+
     friendsState.loading = true;
     friendsState.error = null;
     friendsState.success = null;
@@ -311,6 +358,121 @@
     }, 50);
   }
 
+  /* ── Block / Favorite / Profile helpers ── */
+  function toggleBlock(friendId) {
+    var idx = friendsState.blockedFriends.indexOf(friendId);
+    if (idx !== -1) { friendsState.blockedFriends.splice(idx, 1); }
+    else { friendsState.blockedFriends.push(friendId); }
+    saveBlocked(friendsState.blockedFriends);
+    renderFriendsPage();
+  }
+  function toggleFavorite(friendId) {
+    var idx = friendsState.favoriteFriends.indexOf(friendId);
+    if (idx !== -1) { friendsState.favoriteFriends.splice(idx, 1); }
+    else { friendsState.favoriteFriends.push(friendId); }
+    saveFavorites(friendsState.favoriteFriends);
+    renderFriendsPage();
+  }
+  function isBlocked(friendId) { return friendsState.blockedFriends.indexOf(friendId) !== -1; }
+  function isFavorite(friendId) { return friendsState.favoriteFriends.indexOf(friendId) !== -1; }
+  function showProfile(friend) { friendsState.showingProfile = friend; renderFriendsPage(); }
+  function hideProfile() { friendsState.showingProfile = null; renderFriendsPage(); }
+
+  /* ── Invite to Dance / Project ── */
+  function showInviteToDance(friend) {
+    friendsState.invitingToDance = friend;
+    renderFriendsPage();
+  }
+  function hideInviteToDance() {
+    friendsState.invitingToDance = null;
+    renderFriendsPage();
+  }
+  function sendDanceInvite(friend, danceId) {
+    if (!isSignedIn()) return;
+    var base = getApiBase().replace(/\/+$/, '');
+    fetch(base + '/api/collaborators/invite', {
+      method: 'POST',
+      mode: 'cors',
+      credentials: 'omit',
+      headers: authHeaders(),
+      body: JSON.stringify({ danceId: danceId, email: friend.email })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data && data.ok) {
+          friendsState.success = 'Dance invite sent to ' + (friend.name || friend.email) + '!';
+        } else {
+          friendsState.error = (data && data.error) || 'Could not send dance invite.';
+        }
+        friendsState.invitingToDance = null;
+        renderFriendsPage();
+      })
+      .catch(function () {
+        friendsState.error = 'Could not send the dance invite. Server might be down.';
+        friendsState.invitingToDance = null;
+        renderFriendsPage();
+      });
+  }
+
+  /* ── Group chat functions ── */
+  function createGroupChat(name, memberIds) {
+    if (!name || !name.trim()) { friendsState.error = 'Please enter a group name.'; renderFriendsPage(); return; }
+    if (!memberIds || memberIds.length < 1) { friendsState.error = 'Add at least one friend to the group.'; renderFriendsPage(); return; }
+    var group = {
+      id: 'group-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+      name: name.trim(),
+      members: memberIds,
+      createdAt: new Date().toISOString(),
+      messages: []
+    };
+    friendsState.groupChats.push(group);
+    saveGroups(friendsState.groupChats);
+    friendsState.createGroupName = '';
+    friendsState.createGroupMembers = [];
+    friendsState.success = 'Group "' + group.name + '" created!';
+    friendsState.activeView = 'groups';
+    renderFriendsPage();
+  }
+  function openGroupChat(groupId) {
+    var group = friendsState.groupChats.find(function (g) { return g.id === groupId; });
+    if (!group) return;
+    friendsState.activeGroupChat = group;
+    friendsState.groupChatMessages = group.messages || [];
+    friendsState.groupChatText = '';
+    friendsState.activeView = 'groupchat';
+    renderFriendsPage();
+  }
+  function sendGroupMessage(text) {
+    if (!friendsState.activeGroupChat) return;
+    var trimmed = String(text || '').trim();
+    if (!trimmed) return;
+    var profile = getProfile();
+    var msg = {
+      id: 'gmsg-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+      senderName: profile.name || profile.email || 'You',
+      senderEmail: (profile.email || '').toLowerCase(),
+      text: trimmed,
+      createdAt: new Date().toISOString()
+    };
+    friendsState.activeGroupChat.messages = friendsState.activeGroupChat.messages || [];
+    friendsState.activeGroupChat.messages.push(msg);
+    friendsState.groupChatMessages = friendsState.activeGroupChat.messages;
+    friendsState.groupChatText = '';
+    saveGroups(friendsState.groupChats);
+    renderFriendsPage();
+    scrollChatToBottom();
+  }
+  function deleteGroupChat(groupId) {
+    friendsState.groupChats = friendsState.groupChats.filter(function (g) { return g.id !== groupId; });
+    saveGroups(friendsState.groupChats);
+    if (friendsState.activeGroupChat && friendsState.activeGroupChat.id === groupId) {
+      friendsState.activeGroupChat = null;
+      friendsState.activeView = 'groups';
+    }
+    friendsState.success = 'Group deleted.';
+    renderFriendsPage();
+  }
+
   /* ════════════════════════════════════════════════════════════
      RENDER
      ════════════════════════════════════════════════════════════ */
@@ -377,12 +539,26 @@
         html += renderPendingInvites(theme);
       } else if (friendsState.activeView === 'chat') {
         html += renderChatView(theme);
+      } else if (friendsState.activeView === 'groups') {
+        html += renderGroupsView(theme);
+      } else if (friendsState.activeView === 'groupchat') {
+        html += renderGroupChatView(theme);
       } else {
         html += renderFriendsList(theme);
       }
     }
 
-    html += '</div></div>';
+    html += '</div>';
+
+    /* Overlays */
+    if (friendsState.showingProfile) {
+      html += renderProfileOverlay(theme);
+    }
+    if (friendsState.invitingToDance) {
+      html += renderDanceInviteOverlay(theme);
+    }
+
+    html += '</div>';
 
     page.innerHTML = html;
     wireEvents(page);
@@ -401,11 +577,13 @@
 
   function renderSubNav(theme) {
     var chatIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+    var groupIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>';
     var views = [
       { key: 'list', label: 'My Friends', icon: _ic.people, count: friendsState.friends.length },
       { key: 'pending', label: 'Pending', icon: _ic.mail, count: friendsState.pendingSent.length + friendsState.pendingReceived.length },
       { key: 'add', label: 'Add Friend', icon: _ic.add, count: 0 },
-      { key: 'chat', label: 'Chat', icon: chatIcon, count: 0 }
+      { key: 'chat', label: 'Chat', icon: chatIcon, count: 0 },
+      { key: 'groups', label: 'Groups', icon: groupIcon, count: friendsState.groupChats.length }
     ];
     var html = '<div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;">';
     for (var i = 0; i < views.length; i++) {
@@ -455,6 +633,10 @@
     var html = '';
     var friends = friendsState.friends;
 
+    /* Filter out blocked friends */
+    var visibleFriends = friends.filter(function (f) { return !isBlocked(f.id); });
+    var blockedCount = friends.length - visibleFriends.length;
+
     /* Search bar */
     if (friends.length > 3) {
       html += '<div style="margin-bottom:16px;">';
@@ -464,13 +646,23 @@
     }
 
     /* Filter */
-    var filtered = friends;
+    var filtered = visibleFriends;
     if (friendsState.searchQuery) {
       var q = friendsState.searchQuery.toLowerCase();
-      filtered = friends.filter(function (f) {
+      filtered = visibleFriends.filter(function (f) {
         return (f.name || '').toLowerCase().indexOf(q) !== -1 || (f.email || '').toLowerCase().indexOf(q) !== -1;
       });
     }
+
+    /* Sort: favorites first, then alphabetical */
+    filtered.sort(function (a, b) {
+      var aFav = isFavorite(a.id) ? 0 : 1;
+      var bFav = isFavorite(b.id) ? 0 : 1;
+      if (aFav !== bFav) return aFav - bFav;
+      var aName = (a.name || a.email || '').toLowerCase();
+      var bName = (b.name || b.email || '').toLowerCase();
+      return aName < bName ? -1 : (aName > bName ? 1 : 0);
+    });
 
     if (!filtered.length) {
       html += '<div style="text-align:center;padding:32px 16px;">';
@@ -493,6 +685,15 @@
       html += renderFriendCard(f, theme);
     }
     html += '</div>';
+
+    /* Blocked count */
+    if (blockedCount > 0) {
+      html += '<div style="text-align:center;margin-top:16px;">';
+      html += '<p class="' + theme.subtle + '" style="font-size:12px;margin:0;">' + blockedCount + ' blocked friend' + (blockedCount > 1 ? 's' : '') + ' hidden. ';
+      html += '<span style="color:#4f46e5;font-size:12px;font-weight:700;">Click a friend\'s profile to unblock.</span>';
+      html += '</p></div>';
+    }
+
     return html;
   }
 
@@ -501,11 +702,12 @@
     var initial = String(friend.name || friend.email || '?').charAt(0).toUpperCase();
     var colors = ['#4f46e5','#7c3aed','#db2777','#ea580c','#059669','#0891b2','#6366f1'];
     var bgColor = colors[initial.charCodeAt(0) % colors.length];
+    var fav = isFavorite(friend.id);
 
     html += '<div style="display:flex;align-items:center;gap:14px;padding:14px 16px;border-radius:16px;border:1px solid;transition:all .2s ease;' + theme.cardBg + '">';
 
-    /* Avatar */
-    html += '<div style="width:44px;height:44px;border-radius:999px;background:' + bgColor + ';color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:18px;flex-shrink:0;">';
+    /* Avatar - clickable for profile */
+    html += '<div data-friends-profile-open="' + escapeHtml(friend.id || '') + '" style="width:44px;height:44px;border-radius:999px;background:' + bgColor + ';color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:18px;flex-shrink:0;cursor:pointer;" title="View profile">';
     if (friend.picture) {
       html += '<img src="' + escapeHtml(friend.picture) + '" alt="" style="width:44px;height:44px;border-radius:999px;object-fit:cover;" />';
     } else {
@@ -513,15 +715,20 @@
     }
     html += '</div>';
 
-    /* Info */
-    html += '<div style="flex:1;min-width:0;">';
-    html += '<div style="font-weight:800;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(friend.name || 'Friend') + '</div>';
+    /* Info - clickable for profile */
+    html += '<div style="flex:1;min-width:0;cursor:pointer;" data-friends-profile-open="' + escapeHtml(friend.id || '') + '">';
+    html += '<div style="font-weight:800;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">';
+    if (fav) {
+      html += '<span style="color:#eab308;margin-right:4px;" title="Favorite">&#9733;</span>';
+    }
+    html += escapeHtml(friend.name || 'Friend') + '</div>';
     html += '<div class="' + theme.subtle + '" style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(friend.email || '') + '</div>';
     html += '</div>';
 
-    /* Status */
+    /* Actions */
     html += '<div style="display:flex;align-items:center;gap:6px;">';
     html += '<span style="width:8px;height:8px;border-radius:999px;background:#22c55e;display:inline-block;" title="Connected"></span>';
+    html += '<button data-friends-invite-dance="' + escapeHtml(friend.id || '') + '" title="Invite to dance" style="background:none;border:none;cursor:pointer;font-size:14px;opacity:.5;transition:opacity .2s;">&#x1F57A;</button>';
     html += '<button data-friends-chat-open="' + escapeHtml(friend.id || '') + '" title="Chat" style="background:none;border:none;cursor:pointer;font-size:16px;opacity:.5;transition:opacity .2s;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button>';
     html += '<button data-friends-remove="' + escapeHtml(friend.id || friend.email || '') + '" title="Remove friend" style="background:none;border:none;cursor:pointer;font-size:16px;opacity:.4;transition:opacity .2s;">' + _ic.close + '</button>';
     html += '</div>';
@@ -672,6 +879,223 @@
     return html;
   }
 
+  /* ── Groups view ── */
+  function renderGroupsView(theme) {
+    var html = '';
+    var groups = friendsState.groupChats;
+
+    html += '<div class="' + theme.soft + '" style="border:1px solid;border-radius:18px;padding:24px;margin-bottom:16px;">';
+    html += '<h3 style="font-size:16px;font-weight:800;margin:0 0 4px;">Create New Group</h3>';
+    html += '<p class="' + theme.subtle + '" style="font-size:13px;margin:0 0 14px;">Start a group chat with your friends.</p>';
+
+    html += '<div style="margin-bottom:12px;">';
+    html += '<input data-friends-group-name type="text" placeholder="Group name…" value="' + escapeHtml(friendsState.createGroupName) + '" ';
+    html += 'style="width:100%;border-radius:12px;border:1px solid;padding:10px 16px;font-size:14px;outline:none;box-sizing:border-box;' + theme.inputBg + '" />';
+    html += '</div>';
+
+    var friends = friendsState.friends.filter(function (f) { return !isBlocked(f.id); });
+    if (friends.length) {
+      html += '<div style="margin-bottom:12px;max-height:160px;overflow-y:auto;display:grid;gap:6px;">';
+      for (var i = 0; i < friends.length; i++) {
+        var f = friends[i];
+        var checked = friendsState.createGroupMembers.indexOf(f.id) !== -1;
+        var checkBg = checked
+          ? 'background:#4f46e5;color:#fff;border-color:#4f46e5;'
+          : (theme.dark ? 'background:#1f2937;border-color:#374151;color:#d1d5db;' : 'background:#f9fafb;border-color:#e5e7eb;color:#374151;');
+        html += '<label data-friends-group-member="' + escapeHtml(f.id) + '" style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:10px;border:1px solid;cursor:pointer;font-size:13px;transition:all .2s ease;' + checkBg + '">';
+        html += '<input type="checkbox" ' + (checked ? 'checked' : '') + ' style="display:none;" />';
+        html += '<span style="font-weight:700;">' + (checked ? '&#9745;' : '&#9744;') + '</span>';
+        html += '<span>' + escapeHtml(f.name || f.email || 'Friend') + '</span>';
+        html += '</label>';
+      }
+      html += '</div>';
+    } else {
+      html += '<p class="' + theme.subtle + '" style="font-size:13px;margin:0 0 12px;">Add some friends first to create a group.</p>';
+    }
+
+    html += '<button data-friends-create-group class="stepper-google-cta" style="background:#4f46e5;color:#fff;padding:10px 20px;border-radius:12px;font-weight:800;font-size:13px;">Create Group</button>';
+    html += '</div>';
+
+    /* Existing groups */
+    if (groups.length) {
+      html += '<h3 style="font-size:14px;font-weight:800;margin:0 0 10px;">Your Groups</h3>';
+      html += '<div style="display:grid;gap:10px;">';
+      for (var j = 0; j < groups.length; j++) {
+        var g = groups[j];
+        var lastMsg = (g.messages && g.messages.length) ? g.messages[g.messages.length - 1] : null;
+        html += '<div style="display:flex;align-items:center;gap:14px;padding:14px 16px;border-radius:16px;border:1px solid;' + theme.cardBg + '">';
+        html += '<div style="width:44px;height:44px;border-radius:999px;background:#7c3aed;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:16px;flex-shrink:0;">' + escapeHtml(g.name.charAt(0).toUpperCase()) + '</div>';
+        html += '<div style="flex:1;min-width:0;cursor:pointer;" data-friends-group-open="' + escapeHtml(g.id) + '">';
+        html += '<div style="font-weight:800;font-size:14px;">' + escapeHtml(g.name) + '</div>';
+        html += '<div class="' + theme.subtle + '" style="font-size:12px;">' + g.members.length + ' member' + (g.members.length !== 1 ? 's' : '');
+        if (lastMsg) {
+          html += ' &middot; ' + escapeHtml((lastMsg.senderName || '').split(' ')[0]) + ': ' + escapeHtml(lastMsg.text.length > 30 ? lastMsg.text.slice(0, 30) + '…' : lastMsg.text);
+        }
+        html += '</div></div>';
+        html += '<div style="display:flex;gap:6px;">';
+        html += '<button data-friends-group-open="' + escapeHtml(g.id) + '" class="stepper-google-cta" style="background:#4f46e5;color:#fff;padding:8px 14px;border-radius:10px;font-size:12px;font-weight:800;">Open</button>';
+        html += '<button data-friends-group-delete="' + escapeHtml(g.id) + '" style="background:none;border:none;cursor:pointer;font-size:16px;opacity:.4;" title="Delete group">' + _ic.close + '</button>';
+        html += '</div></div>';
+      }
+      html += '</div>';
+    } else {
+      html += '<div style="text-align:center;padding:20px;">';
+      html += '<p class="' + theme.subtle + '" style="font-size:13px;margin:0;">No groups yet. Create one above!</p>';
+      html += '</div>';
+    }
+
+    return html;
+  }
+
+  /* ── Group chat view ── */
+  function renderGroupChatView(theme) {
+    var html = '';
+    var group = friendsState.activeGroupChat;
+    var profile = getProfile();
+    var myEmail = (profile.email || '').toLowerCase();
+
+    if (!group) {
+      friendsState.activeView = 'groups';
+      return renderGroupsView(theme);
+    }
+
+    html += '<div style="display:flex;flex-direction:column;height:400px;border:1px solid;border-radius:18px;overflow:hidden;' + theme.cardBg + '">';
+
+    /* Header */
+    html += '<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid;' + (theme.dark ? 'border-color:#2d2d44;background:#1e1e2e;' : 'border-color:#e5e7eb;background:#f9fafb;') + '">';
+    html += '<button data-friends-group-back style="background:none;border:none;cursor:pointer;font-size:18px;opacity:.6;transition:opacity .2s;">&larr;</button>';
+    html += '<div style="width:32px;height:32px;border-radius:999px;background:#7c3aed;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:14px;flex-shrink:0;">' + escapeHtml(group.name.charAt(0).toUpperCase()) + '</div>';
+    html += '<div style="flex:1;min-width:0;"><div style="font-weight:800;font-size:14px;">' + escapeHtml(group.name) + '</div>';
+    html += '<div class="' + theme.subtle + '" style="font-size:11px;">' + group.members.length + ' member' + (group.members.length !== 1 ? 's' : '') + '</div></div>';
+    html += '</div>';
+
+    /* Messages */
+    html += '<div data-friends-chat-messages style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:8px;">';
+    var msgs = friendsState.groupChatMessages;
+    if (!msgs.length) {
+      html += '<div style="text-align:center;padding:40px 16px;opacity:.5;font-size:13px;">No messages yet. Say hello to the group!</div>';
+    } else {
+      for (var i = 0; i < msgs.length; i++) {
+        var msg = msgs[i];
+        var isMe = (msg.senderEmail || '').toLowerCase() === myEmail;
+        var align = isMe ? 'flex-end' : 'flex-start';
+        var bubbleBg = isMe ? 'background:#4f46e5;color:#fff;' : (theme.dark ? 'background:#2d2d44;color:#e5e7eb;' : 'background:#f0f0f0;color:#1f2937;');
+        html += '<div style="display:flex;justify-content:' + align + ';">';
+        html += '<div style="max-width:75%;padding:10px 14px;border-radius:16px;font-size:13px;line-height:1.5;word-wrap:break-word;' + bubbleBg + '">';
+        html += escapeHtml(msg.text || '');
+        html += '<div style="font-size:10px;opacity:.6;margin-top:4px;">' + escapeHtml(msg.senderName || '') + ' &middot; ' + formatTime(msg.createdAt) + '</div>';
+        html += '</div></div>';
+      }
+    }
+    html += '</div>';
+
+    /* Input */
+    html += '<div style="display:flex;gap:8px;padding:12px 16px;border-top:1px solid;' + (theme.dark ? 'border-color:#2d2d44;background:#1e1e2e;' : 'border-color:#e5e7eb;background:#f9fafb;') + '">';
+    html += '<input data-friends-group-input type="text" placeholder="Type a message…" value="' + escapeHtml(friendsState.groupChatText) + '" ';
+    html += 'style="flex:1;border-radius:12px;border:1px solid;padding:10px 14px;font-size:13px;outline:none;' + theme.inputBg + '" />';
+    html += '<button data-friends-group-send class="stepper-google-cta" style="background:#4f46e5;color:#fff;padding:10px 16px;border-radius:12px;font-weight:800;font-size:13px;white-space:nowrap;">Send</button>';
+    html += '</div>';
+
+    html += '</div>';
+    return html;
+  }
+
+  /* ── Profile overlay ── */
+  function renderProfileOverlay(theme) {
+    var friend = friendsState.showingProfile;
+    if (!friend) return '';
+    var initial = String(friend.name || friend.email || '?').charAt(0).toUpperCase();
+    var colors = ['#4f46e5','#7c3aed','#db2777','#ea580c','#059669','#0891b2','#6366f1'];
+    var bgColor = colors[initial.charCodeAt(0) % colors.length];
+    var fav = isFavorite(friend.id);
+    var blocked = isBlocked(friend.id);
+
+    var html = '';
+    html += '<div data-friends-profile-close style="position:absolute;inset:0;background:rgba(0,0,0,.45);z-index:100;display:flex;align-items:center;justify-content:center;border-radius:24px;">';
+    html += '<div style="width:320px;max-width:90%;border-radius:20px;padding:28px;text-align:center;position:relative;' + (theme.dark ? 'background:#1e1e2e;color:#e5e7eb;' : 'background:#fff;color:#1f2937;') + 'box-shadow:0 20px 60px rgba(0,0,0,.25);" onclick="event.stopPropagation();">';
+
+    /* Close */
+    html += '<button data-friends-profile-close style="position:absolute;top:12px;right:12px;background:none;border:none;cursor:pointer;font-size:18px;opacity:.5;">' + _ic.close + '</button>';
+
+    /* Avatar */
+    html += '<div style="width:72px;height:72px;border-radius:999px;background:' + bgColor + ';color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:30px;margin:0 auto 12px;">';
+    if (friend.picture) {
+      html += '<img src="' + escapeHtml(friend.picture) + '" alt="" style="width:72px;height:72px;border-radius:999px;object-fit:cover;" />';
+    } else {
+      html += initial;
+    }
+    html += '</div>';
+
+    html += '<div style="font-weight:900;font-size:18px;margin-bottom:2px;">' + escapeHtml(friend.name || 'Friend') + '</div>';
+    html += '<div class="' + theme.subtle + '" style="font-size:13px;margin-bottom:18px;">' + escapeHtml(friend.email || '') + '</div>';
+
+    /* Action buttons */
+    html += '<div style="display:flex;flex-direction:column;gap:8px;">';
+
+    /* Favorite */
+    html += '<button data-friends-favorite="' + escapeHtml(friend.id) + '" class="stepper-google-cta" style="width:100%;padding:10px;border-radius:12px;font-weight:800;font-size:13px;' + (fav ? 'background:#eab308;color:#fff;' : (theme.dark ? 'background:#374151;color:#d1d5db;' : 'background:#f3f4f6;color:#374151;')) + '">';
+    html += (fav ? '&#9733; Unfavorite' : '&#9734; Favorite') + '</button>';
+
+    /* Block */
+    html += '<button data-friends-block="' + escapeHtml(friend.id) + '" class="stepper-google-cta" style="width:100%;padding:10px;border-radius:12px;font-weight:800;font-size:13px;' + (blocked ? 'background:#ef4444;color:#fff;' : (theme.dark ? 'background:#374151;color:#d1d5db;' : 'background:#f3f4f6;color:#374151;')) + '">';
+    html += (blocked ? '&#x1F6AB; Unblock' : '&#x1F6AB; Block') + '</button>';
+
+    /* Invite to Dance */
+    html += '<button data-friends-invite-dance="' + escapeHtml(friend.id || '') + '" class="stepper-google-cta" style="width:100%;padding:10px;border-radius:12px;font-weight:800;font-size:13px;background:#7c3aed;color:#fff;">';
+    html += '&#x1F57A; Invite to Dance</button>';
+
+    /* Chat */
+    html += '<button data-friends-profile-chat="' + escapeHtml(friend.id || '') + '" class="stepper-google-cta" style="width:100%;padding:10px;border-radius:12px;font-weight:800;font-size:13px;background:#4f46e5;color:#fff;">';
+    html += '&#x1F4AC; Chat</button>';
+
+    html += '</div>';
+    html += '</div></div>';
+    return html;
+  }
+
+  /* ── Dance invite overlay ── */
+  function renderDanceInviteOverlay(theme) {
+    var friend = friendsState.invitingToDance;
+    if (!friend) return '';
+
+    var dances = [];
+    try {
+      var data = JSON.parse(localStorage.getItem(BUILDER_DATA_KEY) || 'null');
+      if (data && Array.isArray(data.dances)) dances = data.dances;
+    } catch (e) { /* ignore */ }
+
+    var html = '';
+    html += '<div data-friends-invite-close style="position:absolute;inset:0;background:rgba(0,0,0,.45);z-index:100;display:flex;align-items:center;justify-content:center;border-radius:24px;">';
+    html += '<div style="width:360px;max-width:90%;border-radius:20px;padding:28px;position:relative;' + (theme.dark ? 'background:#1e1e2e;color:#e5e7eb;' : 'background:#fff;color:#1f2937;') + 'box-shadow:0 20px 60px rgba(0,0,0,.25);" onclick="event.stopPropagation();">';
+
+    /* Close */
+    html += '<button data-friends-invite-close style="position:absolute;top:12px;right:12px;background:none;border:none;cursor:pointer;font-size:18px;opacity:.5;">' + _ic.close + '</button>';
+
+    html += '<h3 style="font-size:16px;font-weight:900;margin:0 0 4px;">Invite ' + escapeHtml(friend.name || friend.email || 'Friend') + '</h3>';
+    html += '<p class="' + theme.subtle + '" style="font-size:13px;margin:0 0 16px;">Select a dance to invite them to collaborate on.</p>';
+
+    if (!dances.length) {
+      html += '<div style="text-align:center;padding:20px;">';
+      html += '<p class="' + theme.subtle + '" style="font-size:13px;margin:0;">No saved dances found. Create a dance first!</p>';
+      html += '</div>';
+    } else {
+      html += '<div style="max-height:240px;overflow-y:auto;display:grid;gap:8px;">';
+      for (var i = 0; i < dances.length; i++) {
+        var d = dances[i];
+        var danceName = d.name || d.title || ('Dance #' + (i + 1));
+        var danceId = d.id || d._id || i;
+        html += '<button data-friends-send-dance-invite="' + escapeHtml(String(danceId)) + '" style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:14px;border:1px solid;cursor:pointer;text-align:left;font-size:13px;font-weight:700;transition:all .2s ease;' + theme.cardBg + '">';
+        html += '<span>&#x1F57A;</span><span style="flex:1;">' + escapeHtml(danceName) + '</span>';
+        html += '<span style="font-size:11px;opacity:.6;">Send</span>';
+        html += '</button>';
+      }
+      html += '</div>';
+    }
+
+    html += '</div></div>';
+    return html;
+  }
+
   function formatTime(isoStr) {
     if (!isoStr) return '';
     try {
@@ -788,6 +1212,133 @@
       chatInput.addEventListener('input', function () { friendsState.chatText = chatInput.value; });
       if (friendsState.chatFriend) setTimeout(function () { chatInput.focus(); }, 100);
     }
+
+    /* Profile overlay close */
+    page.querySelectorAll('[data-friends-profile-close]').forEach(function (el) {
+      el.addEventListener('click', function () { hideProfile(); });
+    });
+
+    /* Toggle favorite */
+    page.querySelectorAll('[data-friends-favorite]').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        toggleFavorite(btn.getAttribute('data-friends-favorite'));
+      });
+    });
+
+    /* Toggle block */
+    page.querySelectorAll('[data-friends-block]').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        toggleBlock(btn.getAttribute('data-friends-block'));
+      });
+    });
+
+    /* Show profile */
+    page.querySelectorAll('[data-friends-profile-open]').forEach(function (el) {
+      el.addEventListener('click', function () {
+        var fId = el.getAttribute('data-friends-profile-open');
+        var friend = friendsState.friends.find(function (f) { return f.id === fId; });
+        if (friend) showProfile(friend);
+      });
+    });
+
+    /* Dance invite - open overlay */
+    page.querySelectorAll('[data-friends-invite-dance]').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var fId = btn.getAttribute('data-friends-invite-dance');
+        var friend = friendsState.friends.find(function (f) { return f.id === fId; });
+        if (friend) showInviteToDance(friend);
+      });
+    });
+
+    /* Dance invite - close overlay */
+    page.querySelectorAll('[data-friends-invite-close]').forEach(function (el) {
+      el.addEventListener('click', function () { hideInviteToDance(); });
+    });
+
+    /* Send dance invite */
+    page.querySelectorAll('[data-friends-send-dance-invite]').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var danceId = btn.getAttribute('data-friends-send-dance-invite');
+        if (friendsState.invitingToDance) sendDanceInvite(friendsState.invitingToDance, danceId);
+      });
+    });
+
+    /* Chat from profile */
+    page.querySelectorAll('[data-friends-profile-chat]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var fId = btn.getAttribute('data-friends-profile-chat');
+        var friend = friendsState.friends.find(function (f) { return f.id === fId; });
+        if (friend) {
+          friendsState.showingProfile = null;
+          openChat(friend);
+        }
+      });
+    });
+
+    /* Group chat - create */
+    var createGroupBtn = page.querySelector('[data-friends-create-group]');
+    if (createGroupBtn) {
+      createGroupBtn.addEventListener('click', function () {
+        createGroupChat(friendsState.createGroupName, friendsState.createGroupMembers);
+      });
+    }
+
+    /* Group chat - open */
+    page.querySelectorAll('[data-friends-group-open]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        openGroupChat(btn.getAttribute('data-friends-group-open'));
+      });
+    });
+
+    /* Group chat - delete */
+    page.querySelectorAll('[data-friends-group-delete]').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        if (confirm('Delete this group?')) deleteGroupChat(btn.getAttribute('data-friends-group-delete'));
+      });
+    });
+
+    /* Group chat - send message */
+    var groupSend = page.querySelector('[data-friends-group-send]');
+    var groupInput = page.querySelector('[data-friends-group-input]');
+    if (groupSend && groupInput) {
+      groupSend.addEventListener('click', function () { sendGroupMessage(groupInput.value); });
+      groupInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') sendGroupMessage(groupInput.value); });
+      groupInput.addEventListener('input', function () { friendsState.groupChatText = groupInput.value; });
+      if (friendsState.activeGroupChat) setTimeout(function () { groupInput.focus(); }, 100);
+    }
+
+    /* Group chat - back */
+    var groupBack = page.querySelector('[data-friends-group-back]');
+    if (groupBack) groupBack.addEventListener('click', function () {
+      friendsState.activeGroupChat = null;
+      friendsState.groupChatMessages = [];
+      friendsState.activeView = 'groups';
+      renderFriendsPage();
+    });
+
+    /* Group name input */
+    var groupNameInput = page.querySelector('[data-friends-group-name]');
+    if (groupNameInput) {
+      groupNameInput.addEventListener('input', function () {
+        friendsState.createGroupName = groupNameInput.value;
+      });
+    }
+
+    /* Group member toggle */
+    page.querySelectorAll('[data-friends-group-member]').forEach(function (el) {
+      el.addEventListener('click', function () {
+        var mId = el.getAttribute('data-friends-group-member');
+        var idx = friendsState.createGroupMembers.indexOf(mId);
+        if (idx !== -1) { friendsState.createGroupMembers.splice(idx, 1); }
+        else { friendsState.createGroupMembers.push(mId); }
+        renderFriendsPage();
+      });
+    });
   }
 
   /* ════════════════════════════════════════════════════════════
