@@ -212,13 +212,23 @@
 
     /* ── General Navigation ───────────────────────────── */
     { patterns: [/\btabs?\b/, /\bwhere (do|should|can) i\b/, /\bnavigate\b/, /\bfind\b/],
-      answer: 'Here are the main tabs:\n• **Build** — Create and edit dances\n• **Sheet** — Clean print-ready view + PDF import\n• **What\'s New** — Site changelog\n• **My Saved Dances** — Your cloud saves\n• **Featured Choreo** — Public featured dances\n• **Sign In** — Google auth, AI tools, moderator, subscription' },
+      answer: 'Here are the main tabs:\n• **Build** — Create and edit dances\n• **Sheet** — Clean print-ready view\n• **What\'s New** — Site changelog\n• **My Saved Dances** — Your cloud saves\n• **Featured Choreo** — Public featured dances\n• **Friends** — Collaboration & chat\n• **Glossary** — 100+ step definitions\n• **PDF Import** — Import stepsheet PDFs\n• **Music** — BPM tools, tap tempo & metronome\n• **Templates** — Pre-built dance starters\n• **Settings** — Fonts, theme & preferences\n• **Sign In** — Google auth, AI tools, subscription\n\nSay **"go to [tab name]"** and I\'ll take you there!' },
     { patterns: [/\bhome\b/, /\bmain page\b/],
       answer: 'The main page is the **Build** tab where you create and edit your dance. Click the site logo or "Build" tab to return to it from any page.' },
+    { patterns: [/\bsettings?\b.*\bwhere\b|\bwhere\b.*\bsettings?\b|\bpreferences?\b/],
+      answer: 'The **Settings** tab lets you customize fonts (60+ choices!), theme, accent colors, editor behavior, print options, notifications, accessibility, and more. Say **"go to settings"** and I\'ll open it for you!' },
+    { patterns: [/\bmusic\b.*\bwhere\b|\bwhere\b.*\bmusic\b|\bbpm\b|\btempo\b|\bmetronome\b/],
+      answer: 'The **Music** tab has BPM tools including a tap-tempo calculator, visual metronome, count calculator, and a BPM reference guide for different dance styles. Say **"go to music"** to open it!' },
+    { patterns: [/\btemplate\b|\bstarter\b|\bpre.?built\b|\bquick start\b/],
+      answer: 'The **Templates** tab has 12+ pre-built dance templates for Beginner, Improver, Intermediate, and Advanced levels. Each includes real steps you can load directly into the editor. Say **"go to templates"** to browse them!' },
+    { patterns: [/\bfont\b|\btypeface\b|\bchange font\b/],
+      answer: 'You can choose from **60+ fonts** in the **Settings** tab under Appearance. Categories include System, Sans-Serif, Serif, Display, Handwriting, and Monospace fonts. Each shows a live preview. Say **"go to settings"** to try them!' },
+    { patterns: [/\bpremium\b.*\b(ai|helper|assistant)\b|\b(ai|helper|assistant)\b.*\bpremium\b/],
+      answer: '**Free AI Helper** can answer questions about the site and navigate you to any tab.\n**Premium AI Helper** (with subscription) can also: build dances, add/remove steps, judge your choreography, generate counts, and take actions directly in the editor.\n\nSay **"go to subscription"** to learn about upgrading!' },
 
     /* ── Keyboard Shortcuts ────────────────────────────── */
     { patterns: [/\bkeyboard\b/, /\bshortcut\b/, /\bhotkey\b/],
-      answer: '**Keyboard shortcuts:**\n• **Ctrl+Z / ⌘Z** — Undo\n• **Ctrl+Y / ⌘Shift+Z** — Redo\n• **Ctrl+B / ⌘B** — Bold\n• **Ctrl+I / ⌘I** — Italic\n• **Ctrl+U / ⌘U** — Underline\n• **Ctrl+D** — Toggle dark mode\n• **Ctrl+1** — Build tab\n• **Ctrl+2** — Sheet tab\n• **Ctrl+3** — What\'s New tab\n• **Ctrl+4** — Saved Dances tab\n• **Ctrl+5** — Friends tab\n• **Ctrl+6** — Glossary tab\n• **Ctrl+/** — Toggle help panel\n• **Tab** — Move between fields\n• **Enter** — Confirm/submit\n• **Escape** — Close panels and dialogs' },
+      answer: '**Keyboard shortcuts:**\n• **Ctrl+Z / ⌘Z** — Undo\n• **Ctrl+Y / ⌘Shift+Z** — Redo\n• **Ctrl+B / ⌘B** — Bold\n• **Ctrl+I / ⌘I** — Italic\n• **Ctrl+U / ⌘U** — Underline\n• **Ctrl+Shift+X** — Strikethrough\n• **Ctrl+D** — Toggle dark mode\n• **Ctrl+1** — Build tab\n• **Ctrl+2** — Sheet tab\n• **Ctrl+3** — What\'s New tab\n• **Ctrl+4** — Saved Dances tab\n• **Ctrl+5** — Friends tab\n• **Ctrl+6** — Glossary tab\n• **Ctrl+/** — Toggle help panel\n• **Tab** — Move between fields\n• **Enter** — Confirm/submit\n• **Escape** — Close panels and dialogs' },
 
     /* ── Phrasing ─────────────────────────────────────── */
     { patterns: [/\bphras(ed|ing)\b/],

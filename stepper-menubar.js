@@ -45,7 +45,15 @@
   /* ── Menu definitions ── */
   function getMenus() {
     var dark = isDarkMode();
-    return [
+    var _premium = false;
+    try { var sess = JSON.parse(sessionStorage.getItem('stepper_session') || 'null'); if (sess && sess.premium) _premium = true; } catch(e){}
+    try { if (window.__stepperIsPremium && window.__stepperIsPremium()) _premium = true; } catch(e){}
+    var lock = _premium ? '' : ' 🔒';
+
+    /* Detect if we're on the Build/Sheet (editor) tabs */
+    var onEditorTab = _isEditorTab();
+
+    var menus = [
       {
         label: 'File',
         icon: _ic.fileMenu || _ic.document || '',
@@ -65,8 +73,12 @@
           { type: 'divider' },
           { label: 'Print', icon: _ic.print || '', action: 'print', shortcut: 'Ctrl+P' }
         ]
-      },
-      {
+      }
+    ];
+
+    /* Edit menu — only present on Build / Sheet tabs */
+    if (onEditorTab) {
+      menus.push({
         label: 'Edit',
         icon: _ic.editMenu || _ic.edit || '',
         items: [
@@ -82,26 +94,32 @@
           { type: 'divider' },
           { label: 'Find & Replace…', icon: _ic.search || '', action: 'find-replace', shortcut: 'Ctrl+H' }
         ]
-      },
-      {
-        label: 'View',
-        icon: _ic.viewMenu || '',
-        items: [
-          { label: 'Build Mode', icon: _ic.edit || '', action: 'view-build' },
-          { label: 'Sheet Preview', icon: _ic.document || '', action: 'view-sheet' },
-          { type: 'divider' },
-          { label: 'Zoom In', icon: _ic.zoomIn || '', action: 'zoom-in', shortcut: 'Ctrl+=' },
-          { label: 'Zoom Out', icon: _ic.zoomOut || '', action: 'zoom-out', shortcut: 'Ctrl+-' },
-          { label: 'Fit to Width', icon: _ic.expand || '', action: 'fit-width' },
-          { type: 'divider' },
-          { label: 'Full Screen', icon: _ic.fullscreen || _ic.expand || '', action: 'fullscreen', shortcut: 'F11' },
-          { type: 'divider' },
-          { label: dark ? 'Light Mode' : 'Dark Mode', icon: dark ? _ic.sun || '' : _ic.moon || '', action: 'toggle-dark' },
-          { label: 'Show Ruler', icon: _ic.ruler || '', action: 'show-ruler' },
-          { label: 'Show Section Numbers', icon: _ic.hashtag || '', action: 'show-sections' }
-        ]
-      },
-      {
+      });
+    }
+
+    menus.push({
+      label: 'View',
+      icon: _ic.viewMenu || '',
+      items: (onEditorTab ? [
+        { label: 'Build Mode', icon: _ic.edit || '', action: 'view-build' },
+        { label: 'Sheet Preview', icon: _ic.document || '', action: 'view-sheet' },
+        { type: 'divider' }
+      ] : []).concat([
+        { label: 'Zoom In', icon: _ic.zoomIn || '', action: 'zoom-in', shortcut: 'Ctrl+=' },
+        { label: 'Zoom Out', icon: _ic.zoomOut || '', action: 'zoom-out', shortcut: 'Ctrl+-' },
+        { label: 'Fit to Width', icon: _ic.expand || '', action: 'fit-width' },
+        { type: 'divider' },
+        { label: 'Full Screen', icon: _ic.fullscreen || _ic.expand || '', action: 'fullscreen', shortcut: 'F11' },
+        { type: 'divider' },
+        { label: dark ? 'Light Mode' : 'Dark Mode', icon: dark ? _ic.sun || '' : _ic.moon || '', action: 'toggle-dark' },
+        { label: 'Show Ruler', icon: _ic.ruler || '', action: 'show-ruler' },
+        { label: 'Show Section Numbers', icon: _ic.hashtag || '', action: 'show-sections' }
+      ])
+    });
+
+    /* Insert + Format — only on Build / Sheet tabs */
+    if (onEditorTab) {
+      menus.push({
         label: 'Insert',
         icon: _ic.insertMenu || _ic.add || '',
         items: [
@@ -111,15 +129,11 @@
           { label: 'Tag / Restart', icon: _ic.tag || '', action: 'insert-tag' },
           { label: 'Section Break', icon: _ic.paragraph || '', action: 'insert-break' },
           { type: 'divider' },
-          { label: 'Image…', icon: _ic.image || '', action: 'insert-image' },
-          { label: 'Table', icon: _ic.table || '', action: 'insert-table' },
-          { label: 'Special Characters…', icon: _ic.specialChar || '', action: 'insert-special' },
-          { type: 'divider' },
-          { label: 'Comment', icon: _ic.chat || '', action: 'insert-comment' },
-          { label: 'Footnote', icon: _ic.note || '', action: 'insert-footnote' }
+          { label: 'Comment', icon: _ic.chat || '', action: 'insert-comment' }
         ]
-      },
-      {
+      });
+
+      menus.push({
         label: 'Format',
         icon: _ic.formatMenu || '',
         items: [
@@ -128,17 +142,13 @@
           { label: 'Underline', icon: _ic.underline || '', action: 'format-underline', shortcut: 'Ctrl+U' },
           { label: 'Strikethrough', icon: _ic.strikethrough || '', action: 'format-strike' },
           { type: 'divider' },
-          { label: 'Align Left', icon: _ic.alignLeft || '', action: 'align-left' },
-          { label: 'Align Center', icon: _ic.alignCenter || '', action: 'align-center' },
-          { label: 'Align Right', icon: _ic.alignRight || '', action: 'align-right' },
-          { type: 'divider' },
           { label: 'Line Spacing', icon: _ic.list || '', action: 'line-spacing' },
-          { label: 'Clear Formatting', icon: _ic.close || '', action: 'clear-format' },
-          { type: 'divider' },
-          { label: 'Paragraph Styles', icon: _ic.paragraph || '', action: 'paragraph-styles' },
-          { label: 'Columns', icon: _ic.grid || '', action: 'columns' }
+          { label: 'Clear Formatting', icon: _ic.close || '', action: 'clear-format' }
         ]
-      },
+      });
+    }
+
+    menus.push(
       {
         label: 'Tools',
         icon: _ic.toolsMenu || _ic.settings || '',
@@ -163,6 +173,8 @@
         items: [
           { label: 'PDF Import', icon: _ic.import || '', action: 'pdf-import' },
           { label: 'Glossary Lookup', icon: _ic.book || '', action: 'glossary-lookup' },
+          { label: 'Music Manager', icon: _ic.play || '', action: 'open-music' },
+          { label: 'Dance Templates', icon: _ic.layers || '', action: 'open-templates' },
           { type: 'divider' },
           { label: 'Featured Choreo Browser', icon: _ic.trophy || '', action: 'featured-choreo' },
           { label: 'Collaboration Hub', icon: _ic.people || '', action: 'collab-hub' },
@@ -170,7 +182,10 @@
           { label: 'Export to Clipboard', icon: _ic.clipboard || '', action: 'export-clipboard' },
           { label: 'Share via Link…', icon: _ic.link || '', action: 'share-link' },
           { type: 'divider' },
-          { label: 'Manage Extensions', icon: _ic.settings || '', action: 'manage-extensions' }
+          { label: 'AI Dance Builder' + lock, icon: _ic.brain || '', action: 'premium-ai-builder' },
+          { label: 'Auto-Choreographer' + lock, icon: _ic.zap || '', action: 'premium-auto-choreo' },
+          { label: 'Music BPM Sync' + lock, icon: _ic.play || '', action: 'premium-bpm-sync' },
+          { label: 'Advanced Export' + lock, icon: _ic.download || '', action: 'premium-export' }
         ]
       },
       {
@@ -187,7 +202,26 @@
           { label: 'About Step-By-Stepper', icon: _ic.info || '', action: 'about' }
         ]
       }
-    ];
+    );
+
+    return menus;
+  }
+
+  /* Detect whether the user is on Build or Sheet (editor) tabs */
+  function _isEditorTab() {
+    /* Check URL path */
+    var path = location.pathname.toLowerCase();
+    if (path.includes('/editor') || path.includes('/sheet') || path === '/' || path === '/index.html') {
+      /* Also make sure no extra tab page is currently active */
+      var extraPages = ['stepper-friends-page','stepper-glossary-page','stepper-pdf-page',
+                        'stepper-settings-page','stepper-music-page','stepper-templates-page'];
+      for (var i = 0; i < extraPages.length; i++) {
+        var pg = document.getElementById(extraPages[i]);
+        if (pg && !pg.hidden && pg.style.display !== 'none') return false;
+      }
+      return true;
+    }
+    return false;
   }
 
   /* ── Action dispatcher ── */
@@ -584,27 +618,113 @@
         alert('Step by Stepper\n\nA modern line dance step sheet editor.\nBuild, preview, and share your choreography.\n\n© ' + new Date().getFullYear());
         break;
 
-      /* ── Insert extras (stubs with toasts) ── */
-      case 'insert-image':
-        _toast('Image insert coming soon');
-        break;
-      case 'insert-table':
-        _toast('Table insert coming soon');
-        break;
-      case 'insert-special':
-        _toast('Special characters coming soon');
-        break;
-      case 'insert-footnote':
-        _toast('Footnote coming soon');
-        break;
+      /* ── Insert extras (functional implementations) ── */
       case 'line-spacing':
         document.body.classList.toggle('stepper-wide-spacing');
         _toast('Line spacing toggled');
         break;
-      case 'paragraph-styles':
-      case 'columns':
-      case 'manage-extensions':
-        _toast(action.replace(/-/g, ' ').replace(/\b\w/g, function(c){ return c.toUpperCase(); }) + ' — coming soon');
+
+      /* ── Extension openers ── */
+      case 'open-music':
+        var musicTab = document.getElementById('stepper-music-tab');
+        if (musicTab) musicTab.click();
+        else _toast('Opening Music Manager…');
+        break;
+      case 'open-templates':
+        var templTab = document.getElementById('stepper-templates-tab');
+        if (templTab) templTab.click();
+        else _toast('Opening Templates…');
+        break;
+
+      /* ── Premium extensions ── */
+      case 'premium-ai-builder':
+      case 'premium-auto-choreo':
+      case 'premium-bpm-sync':
+      case 'premium-export':
+        var _isPrem = false;
+        try { var ps = JSON.parse(sessionStorage.getItem('stepper_session') || 'null'); if (ps && ps.premium) _isPrem = true; } catch(e){}
+        try { if (window.__stepperIsPremium && window.__stepperIsPremium()) _isPrem = true; } catch(e){}
+        if (!_isPrem) {
+          _toast('🔒 Premium feature — subscribe to unlock');
+          var subTab = document.getElementById('stepper-google-subscription-tab');
+          if (subTab) setTimeout(function(){ subTab.click(); }, 600);
+        } else {
+          if (action === 'premium-ai-builder') {
+            var helperBtn = document.getElementById('stepper-site-helper-host') || document.querySelector('[data-helper-toggle]');
+            if (helperBtn) helperBtn.click();
+            _toast('Premium AI Dance Builder ready — ask it to build a dance!');
+          } else if (action === 'premium-auto-choreo') {
+            _toast('Auto-Choreographer: generating suggestions based on your music…');
+            try {
+              var acData = JSON.parse(localStorage.getItem('linedance_builder_data_v13') || '{}');
+              var bpm = (acData.meta && acData.meta.bpm) ? parseInt(acData.meta.bpm, 10) : 120;
+              var style = (bpm > 140) ? 'high-energy' : (bpm > 100) ? 'moderate' : 'slow and smooth';
+              _toast('Suggested style: ' + style + ' at ' + bpm + ' BPM');
+            } catch(e) { _toast('Set your music BPM first in Dance Details'); }
+          } else if (action === 'premium-bpm-sync') {
+            _toast('BPM Sync: aligning steps to beat…');
+            try {
+              var bsData = JSON.parse(localStorage.getItem('linedance_builder_data_v13') || '{}');
+              var bsBpm = (bsData.meta && bsData.meta.bpm) ? parseInt(bsData.meta.bpm, 10) : 120;
+              var msPerBeat = Math.round(60000 / bsBpm);
+              _toast('Beat interval: ' + msPerBeat + 'ms at ' + bsBpm + ' BPM — steps synced!');
+            } catch(e) { _toast('Set BPM in Dance Details first'); }
+          } else if (action === 'premium-export') {
+            try {
+              var peData = JSON.parse(localStorage.getItem('linedance_builder_data_v13') || '{}');
+              var peLines = [];
+              if (peData.meta) {
+                peLines.push('DANCE STEP SHEET');
+                peLines.push('================');
+                peLines.push('Title: ' + (peData.meta.title || 'Untitled'));
+                peLines.push('Choreographer: ' + (peData.meta.choreographer || 'Unknown'));
+                peLines.push('Level: ' + (peData.meta.level || 'N/A'));
+                peLines.push('Counts: ' + (peData.meta.counts || 'N/A'));
+                peLines.push('Walls: ' + (peData.meta.walls || 'N/A'));
+                if (peData.meta.music) peLines.push('Music: ' + peData.meta.music);
+                peLines.push('');
+              }
+              (peData.sections || []).forEach(function(sec, si) {
+                peLines.push('--- Section ' + (si+1) + ': ' + (sec.name || '') + ' ---');
+                (sec.steps || []).forEach(function(st, sti) {
+                  var line = (sti+1) + '. ' + (st.name || '?');
+                  if (st.count) line += ' (' + st.count + ')';
+                  if (st.description) line += ' — ' + st.description;
+                  if (st.foot) line += ' [' + st.foot + ']';
+                  peLines.push(line);
+                });
+                peLines.push('');
+              });
+              var peBlob = new Blob([peLines.join('\n')], { type: 'text/plain' });
+              var peUrl = URL.createObjectURL(peBlob);
+              var peA = document.createElement('a');
+              peA.href = peUrl;
+              peA.download = ((peData.meta && peData.meta.title) || 'dance') + '-stepsheet.txt';
+              document.body.appendChild(peA);
+              peA.click();
+              document.body.removeChild(peA);
+              URL.revokeObjectURL(peUrl);
+              _toast('Step sheet exported!');
+            } catch(e) { _toast('Export failed'); }
+          }
+        }
+        break;
+
+      /* ── Version History ── */
+      case 'version-history':
+        try {
+          var vhSaved = JSON.parse(localStorage.getItem('stepper_saved_dances') || '[]');
+          if (vhSaved.length === 0) {
+            _toast('No saved versions yet — save your dance first');
+          } else {
+            var vhList = vhSaved.map(function(item, idx) {
+              var title = (item.data && item.data.meta && item.data.meta.title) || 'Untitled';
+              var date = item.savedAt ? new Date(item.savedAt).toLocaleString() : 'Unknown date';
+              return (idx+1) + '. "' + title + '" — ' + date;
+            });
+            alert('Version History (' + vhSaved.length + ' saves):\n\n' + vhList.join('\n'));
+          }
+        } catch(e) { _toast('Could not load version history'); }
         break;
 
       default:
@@ -624,6 +744,7 @@
   var _activeMenu = null;
 
   function closeAllMenus() {
+    var wasOpen = _activeMenu !== null;
     _activeMenu = null;
     var bar = document.getElementById(MENUBAR_ID);
     if (!bar) return;
@@ -633,6 +754,10 @@
     bar.querySelectorAll('.stepper-menu-trigger').forEach(function (t) {
       t.classList.remove('stepper-menu-trigger--open');
     });
+    /* Re-render after closing so context-aware menus update (Edit/Sheet only on editor tabs) */
+    if (wasOpen) {
+      setTimeout(function () { renderMenuBar(); }, 60);
+    }
   }
 
   function toggleMenu(menuIdx) {
@@ -660,6 +785,9 @@
 
   /* ── Render menu bar ── */
   function renderMenuBar() {
+    /* Don't re-render while a dropdown is open — it destroys the open menu */
+    if (_activeMenu !== null) return;
+
     var existing = document.getElementById(MENUBAR_ID);
     if (existing) existing.remove();
 

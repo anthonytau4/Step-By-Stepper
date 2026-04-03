@@ -24,6 +24,10 @@
   const PDF_TAB_ID = 'stepper-pdf-tab';
   const SETTINGS_PAGE_ID = 'stepper-settings-page';
   const SETTINGS_TAB_ID = 'stepper-settings-tab';
+  const MUSIC_PAGE_ID = 'stepper-music-page';
+  const MUSIC_TAB_ID = 'stepper-music-tab';
+  const TEMPLATES_PAGE_ID = 'stepper-templates-page';
+  const TEMPLATES_TAB_ID = 'stepper-templates-tab';
   const ADMIN_EMAIL = 'anthonytau4@gmail.com';
   const DEFAULT_RENDER_SERVICE_ID = 'srv-d6ss4295pdvs73e1iifg';
   const DEFAULT_BACKEND_BASE = 'https://step-by-stepper.onrender.com';
@@ -1305,6 +1309,36 @@
   }
 
   /* ── Page action commands the helper can execute ── */
+  /* ── Infer last-mentioned page from chat context ── */
+  function _inferLastMentionedPage(){
+    var msgs = (state.chatMessages || []).slice(-6);
+    var pagePatterns = [
+      { re: /\b(build|editor|worksheet)\b/i, page: null, btn: function(){ return state.ui.buildBtn; } },
+      { re: /\b(sheet|preview)\b/i, page: null, btn: function(){ return state.ui.sheetBtn; } },
+      { re: /\b(friends?|people|contacts|collab)\b/i, page: 'friends' },
+      { re: /\b(glossary|dictionary|step.?list)\b/i, page: 'glossary' },
+      { re: /\b(pdf|import)\b/i, page: 'pdfimport' },
+      { re: /\b(settings?|preferences?)\b/i, page: 'settings' },
+      { re: /\b(music|song|bpm|tempo)\b/i, page: 'music' },
+      { re: /\b(templates?|starter)\b/i, page: 'templates' },
+      { re: /\b(sign.?in|login|account)\b/i, page: 'signin' },
+      { re: /\b(subscription|premium|upgrade)\b/i, page: 'subscription' },
+      { re: /\b(saved|my dances)\b/i, page: null, btn: function(){ return document.getElementById('stepper-saved-dances-tab'); } },
+      { re: /\b(featured|choreo)\b/i, page: null, btn: function(){ return document.getElementById('stepper-featured-choreo-tab'); } },
+      { re: /\b(what'?s new)\b/i, page: null, btn: function(){ var b = Array.from(document.querySelectorAll('button')).find(function(b2){ return (b2.textContent||'').trim()==="What's New"; }); return b; } }
+    ];
+    for (var mi = msgs.length - 1; mi >= 0; mi--) {
+      var text = (msgs[mi].text || '').toLowerCase();
+      for (var pi = 0; pi < pagePatterns.length; pi++) {
+        if (pagePatterns[pi].re.test(text)) {
+          if (pagePatterns[pi].page) return { page: pagePatterns[pi].page };
+          if (pagePatterns[pi].btn) { var el = pagePatterns[pi].btn(); if (el) return { click: el }; }
+        }
+      }
+    }
+    return null;
+  }
+
   function tryHelperPageAction(question){
     var q = String(question || '').toLowerCase().trim();
     /* ── Navigate to tabs ── */
@@ -1352,6 +1386,28 @@
     if (/\b(go to|open|show|switch to|navigate to)\b.*\b(pdf|import|upload)\b/.test(q)) {
       openPage('pdfimport');
       return { handled: true, message: '✅ Opened the **PDF Import** tab. Drop a stepsheet PDF to auto-import!' };
+    }
+    if (/\b(go to|open|show|switch to|navigate to)\b.*\b(settings?|preferences?|config)\b/.test(q)) {
+      openPage('settings');
+      return { handled: true, message: '✅ Opened the **Settings** tab. Customize fonts, theme, and more!' };
+    }
+    if (/\b(go to|open|show|switch to|navigate to)\b.*\b(music|song|bpm|tempo|metronome)\b/.test(q)) {
+      openPage('music');
+      return { handled: true, message: '✅ Opened the **Music** tab. Manage BPM, tap tempo, and music info!' };
+    }
+    if (/\b(go to|open|show|switch to|navigate to)\b.*\b(template|templates|starter|blank)\b/.test(q)) {
+      openPage('templates');
+      return { handled: true, message: '✅ Opened the **Templates** tab. Browse pre-built dance templates by level!' };
+    }
+    /* ── Natural language navigation: "take me there", "yes go there", "please take me" ── */
+    if (/\b(take me|bring me|go)\b.*\b(there|to it|to that)\b/.test(q) || /\b(yes|sure|please)\b.*\b(take me|go there|navigate|open it)\b/.test(q)) {
+      /* Scan recent assistant messages for a page/tab mention */
+      var lastMentioned = _inferLastMentionedPage();
+      if (lastMentioned) {
+        if (lastMentioned.click) { lastMentioned.click(); return { handled: true, message: '✅ Taking you there now!' }; }
+        if (lastMentioned.page) { openPage(lastMentioned.page); return { handled: true, message: '✅ Taking you there now!' }; }
+      }
+      return { handled: true, message: 'I\'m not sure which page you mean — could you tell me where you\'d like to go? For example: "open settings", "go to friends", or "show glossary".' };
     }
     /* ── Toggle dark mode ── */
     if (/\b(dark mode|night mode|toggle dark|toggle theme|switch theme)\b/.test(q) || (/\b(turn on|enable|activate)\b.*\bdark\b/.test(q))) {
@@ -2421,12 +2477,26 @@
       else tabStrip.appendChild(state.ui.settingsBtn);
     }
 
+    var musicIcon = (window.__stepperMusicTab && window.__stepperMusicTab.icon) ? window.__stepperMusicTab.icon() : '🎵';
+    state.ui.musicBtn = makeTabButton('Music', musicIcon, 'music', MUSIC_TAB_ID);
+    if (!state.ui.musicBtn.parentNode) {
+      if (state.ui.settingsBtn && state.ui.settingsBtn.parentNode === tabStrip) state.ui.settingsBtn.insertAdjacentElement('beforebegin', state.ui.musicBtn);
+      else tabStrip.appendChild(state.ui.musicBtn);
+    }
+
+    var templatesIcon = (window.__stepperTemplatesTab && window.__stepperTemplatesTab.icon) ? window.__stepperTemplatesTab.icon() : '📋';
+    state.ui.templatesBtn = makeTabButton('Templates', templatesIcon, 'templates', TEMPLATES_TAB_ID);
+    if (!state.ui.templatesBtn.parentNode) {
+      if (state.ui.musicBtn && state.ui.musicBtn.parentNode === tabStrip) state.ui.musicBtn.insertAdjacentElement('beforebegin', state.ui.templatesBtn);
+      else tabStrip.appendChild(state.ui.templatesBtn);
+    }
+
     if (!tabStrip.__stepperGoogleAdminCloseWired) {
       tabStrip.__stepperGoogleAdminCloseWired = true;
       tabStrip.addEventListener('click', (event) => {
         const button = event.target.closest('button');
         if (!button) return;
-        const own = button.id === SIGNIN_TAB_ID || button.id === SUBSCRIPTION_TAB_ID || button.id === ADMIN_TAB_ID || button.id === FRIENDS_TAB_ID || button.id === GLOSSARY_TAB_ID || button.id === PDF_TAB_ID || button.id === SETTINGS_TAB_ID;
+        const own = button.id === SIGNIN_TAB_ID || button.id === SUBSCRIPTION_TAB_ID || button.id === ADMIN_TAB_ID || button.id === FRIENDS_TAB_ID || button.id === GLOSSARY_TAB_ID || button.id === PDF_TAB_ID || button.id === SETTINGS_TAB_ID || button.id === MUSIC_TAB_ID || button.id === TEMPLATES_TAB_ID;
         if (!own && state.activePage) closePages();
       }, true);
     }
@@ -2448,7 +2518,7 @@
     host.id = HOST_ID;
     host.hidden = true;
     host.className = 'max-w-4xl mx-auto px-3 sm:px-4 py-6 sm:py-8 pb-28 sm:pb-32 print:hidden';
-    host.innerHTML = `<div class="space-y-5"><section id="${SIGNIN_PAGE_ID}" hidden style="display:none"></section><section id="${SUBSCRIPTION_PAGE_ID}" hidden style="display:none"></section><section id="${ADMIN_PAGE_ID}" hidden style="display:none"></section><section id="${FRIENDS_PAGE_ID}" hidden style="display:none"></section><section id="${GLOSSARY_PAGE_ID}" hidden style="display:none"></section><section id="${PDF_PAGE_ID}" hidden style="display:none"></section><section id="${SETTINGS_PAGE_ID}" hidden style="display:none"></section></div>`;
+    host.innerHTML = `<div class="space-y-5"><section id="${SIGNIN_PAGE_ID}" hidden style="display:none"></section><section id="${SUBSCRIPTION_PAGE_ID}" hidden style="display:none"></section><section id="${ADMIN_PAGE_ID}" hidden style="display:none"></section><section id="${FRIENDS_PAGE_ID}" hidden style="display:none"></section><section id="${GLOSSARY_PAGE_ID}" hidden style="display:none"></section><section id="${PDF_PAGE_ID}" hidden style="display:none"></section><section id="${SETTINGS_PAGE_ID}" hidden style="display:none"></section><section id="${MUSIC_PAGE_ID}" hidden style="display:none"></section><section id="${TEMPLATES_PAGE_ID}" hidden style="display:none"></section></div>`;
     if (parent) parent.insertBefore(host, anchor || null);
     else document.body.appendChild(host);
     state.ui.host = host;
@@ -2488,7 +2558,7 @@
   }
 
   function openPage(pageName){
-    var validPages = { admin: 1, subscription: 1, signin: 1, friends: 1, glossary: 1, pdfimport: 1, settings: 1 };
+    var validPages = { admin: 1, subscription: 1, signin: 1, friends: 1, glossary: 1, pdfimport: 1, settings: 1, music: 1, templates: 1 };
     state.activePage = validPages[pageName] ? pageName : 'signin';
     const host = ensureHost();
     host.hidden = false;
@@ -3573,8 +3643,8 @@
     if (text.includes('glossary') || text.includes('step request')) return 'Use the Community Glossary button while building to apply admin-approved custom steps. Signed-in members can request new glossary steps from the Sign In tab, and Admin reviews them under Requested dance steps.';
     if (text.includes('judge') || text.includes('flow')) return 'Open Sign In and use AI Dance Judge. It can score flowability, suggest tidy-ups, propose glossary-style step additions, and generate counts for the current worksheet.';
     if (text.includes('count')) return 'Open Sign In and use Generate counts in the AI dance panel. It fills worksheet step counts and updates the dance count total for you.';
-    if (text.includes('tab') || text.includes('where') || text.includes('go')) return 'Use Build to make or edit a dance, Sheet for the clean sheet view, My Saved Dances for your cloud saves, Featured Choreo for public featured dances, and Sign In for Google saving and moderation actions.';
-    return 'Tell me what you are trying to do and I will point you to the exact tab or button.';
+    if (text.includes('tab') || text.includes('where') || text.includes('go')) return 'Use Build to make or edit a dance, Sheet for the clean sheet view, My Saved Dances for your cloud saves, Featured Choreo for public featured dances, Sign In for Google saving, Friends for collaboration, Glossary for step lookup, PDF Import for stepsheet imports, Music for BPM tools, Templates for starter dances, and Settings for app customization.';
+    return 'I can help you find things on the site and answer questions! Try asking "where do I find…" or "go to [tab name]". 💡 **Upgrade to Premium** for the AI assistant that can build dances, add steps, and take actions for you.';
   }
 
   function sanitizeHelperReply(reply, prompt){
@@ -4908,6 +4978,8 @@
     const glossaryPage = document.getElementById(GLOSSARY_PAGE_ID);
     const pdfPage = document.getElementById(PDF_PAGE_ID);
     const settingsPage = document.getElementById(SETTINGS_PAGE_ID);
+    const musicPage = document.getElementById(MUSIC_PAGE_ID);
+    const templatesPage = document.getElementById(TEMPLATES_PAGE_ID);
     const showSignIn = state.activePage === 'signin';
     const showSubscription = state.activePage === 'subscription';
     const showAdmin = state.activePage === 'admin';
@@ -4915,6 +4987,8 @@
     const showGlossary = state.activePage === 'glossary';
     const showPdf = state.activePage === 'pdfimport';
     const showSettings = state.activePage === 'settings';
+    const showMusic = state.activePage === 'music';
+    const showTemplates = state.activePage === 'templates';
     setVisibility(signInPage, showSignIn);
     setVisibility(subscriptionPage, showSubscription);
     setVisibility(adminPage, showAdmin);
@@ -4922,10 +4996,12 @@
     setVisibility(glossaryPage, showGlossary);
     setVisibility(pdfPage, showPdf);
     setVisibility(settingsPage, showSettings);
+    setVisibility(musicPage, showMusic);
+    setVisibility(templatesPage, showTemplates);
     host.hidden = !state.activePage;
     host.style.display = state.activePage ? '' : 'none';
     /* ── Enforce contain on hidden pages to prevent bleed ── */
-    [signInPage, adminPage, subscriptionPage, friendsPage, glossaryPage, pdfPage, settingsPage].forEach(function(el){
+    [signInPage, adminPage, subscriptionPage, friendsPage, glossaryPage, pdfPage, settingsPage, musicPage, templatesPage].forEach(function(el){
       if (!el) return;
       if (el.hidden) { el.style.overflow = 'hidden'; el.style.height = '0'; el.style.pointerEvents = 'none'; }
       else { el.style.overflow = ''; el.style.height = ''; el.style.pointerEvents = ''; }
@@ -4991,6 +5067,8 @@
     if (state.activePage === 'glossary' && window.__stepperGlossaryTab) window.__stepperGlossaryTab.render();
     if (state.activePage === 'pdfimport' && window.__stepperPdfTab) window.__stepperPdfTab.render();
     if (state.activePage === 'settings' && window.__stepperSettingsTab) window.__stepperSettingsTab.render();
+    if (state.activePage === 'music' && window.__stepperMusicTab) window.__stepperMusicTab.render();
+    if (state.activePage === 'templates' && window.__stepperTemplatesTab) window.__stepperTemplatesTab.render();
     renderPresenceOnly();
     renderSuspensionBanner();
     patchFeaturedPageCopy();
