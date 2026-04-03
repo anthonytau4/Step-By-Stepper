@@ -726,7 +726,7 @@
 
   /* ═══════════════════════ Format Operations ═════════════════════════════ */
 
-  function wrapDescriptions(prefix, suffix) {
+  function toggleDescriptionMarkers(prefix, suffix) {
     if (!selectedSteps.length) { showToast('No steps selected'); return; }
     var data = readData();
     if (!data) return;
@@ -741,7 +741,11 @@
       if (!sec || !sec.steps || !sec.steps[s.stepIndex]) continue;
       var step = sec.steps[s.stepIndex];
       var desc = step.description || '';
-      step.description = prefix + desc + suffix;
+      if (desc.startsWith(prefix) && desc.endsWith(suffix) && desc.length >= prefix.length + suffix.length) {
+        step.description = desc.slice(prefix.length, desc.length - suffix.length);
+      } else {
+        step.description = prefix + desc + suffix;
+      }
     }
 
     setSections(data, secs);
@@ -749,10 +753,10 @@
     scheduleRemap();
   }
 
-  function formatBold()       { wrapDescriptions('**', '**'); }
-  function formatItalic()     { wrapDescriptions('*', '*'); }
-  function formatUnderline()  { wrapDescriptions('__', '__'); }
-  function formatStrikethrough() { wrapDescriptions('~~', '~~'); }
+  function formatBold()       { toggleDescriptionMarkers('**', '**'); }
+  function formatItalic()     { toggleDescriptionMarkers('*', '*'); }
+  function formatUnderline()  { toggleDescriptionMarkers('__', '__'); }
+  function formatStrikethrough() { toggleDescriptionMarkers('~~', '~~'); }
 
   function clearFormatting() {
     if (!selectedSteps.length) { showToast('No steps selected'); return; }
@@ -769,11 +773,15 @@
       if (!sec || !sec.steps || !sec.steps[s.stepIndex]) continue;
       var step = sec.steps[s.stepIndex];
       if (step.description) {
-        step.description = step.description
-          .replace(/\*\*/g, '')
-          .replace(/\*/g, '')
-          .replace(/__/g, '')
-          .replace(/~~/g, '');
+        step.description = String(step.description)
+          .replace(/\*\*([\s\S]*?)\*\*/g, '$1')
+          .replace(/(^|[^*])\*([^*][\s\S]*?)\*(?!\*)/g, '$1$2')
+          .replace(/__([\s\S]*?)__/g, '$1')
+          .replace(/~~([\s\S]*?)~~/g, '$1')
+          .replace(/==([\s\S]*?)==/g, '$1')
+          .replace(/`([^`]+)`/g, '$1')
+          .replace(/\/\*([\s\S]*?)\*\//g, '$1')
+          .replace(/_([^_][\s\S]*?)_/g, '$1');
       }
     }
 

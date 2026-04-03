@@ -1391,6 +1391,8 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   const PHR_TOOLS_KEY = 'stepper_current_phrased_tools_v1';
   const GOOGLE_FRONTEND_KEY = 'stepper_google_frontend_profile_v1';
   const CLOUD_SAVES_KEY = 'stepper_cloud_saves_frontend_v1';
+  const SAVED_GROUPS_KEY = 'stepper_saved_dance_groups_v1';
+  const SAVED_GROUP_CATALOG_KEY = 'stepper_saved_dance_group_catalog_v1';
   const FEATURED_CHOREO_KEY = 'stepper_featured_choreo_v1';
   const WHATSNEW_PAGE_ID = 'stepper-whatsnew-page';
   const SAVED_PAGE_ID = 'stepper-saved-dances-page';
@@ -1781,7 +1783,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       inlineHost.id = INLINE_HOST_ID;
       inlineHost.hidden = true;
       inlineHost.className = 'max-w-4xl mx-auto px-3 sm:px-4 pt-4 sm:pt-6 pb-0 print:hidden';
-      inlineHost.innerHTML = `<div class="space-y-5"><section id="stepper-inline-phrased-tools"></section><section id="${CHOREO_PANEL_ID}"></section><section id="${SETTINGS_PANEL_ID}"></section></div>`;
+      inlineHost.innerHTML = `<div class="space-y-5"><section id="stepper-inline-phrased-tools"></section><section id="${CHOREO_PANEL_ID}"></section></div>`;
       if (mainEl && mainEl.parentNode) {
         mainEl.parentNode.insertBefore(inlineHost, mainEl);
       } else {
@@ -1807,8 +1809,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       return section;
     };
     ensureSection('stepper-inline-phrased-tools', CHOREO_PANEL_ID);
-    ensureSection(CHOREO_PANEL_ID, SETTINGS_PANEL_ID);
-    ensureSection(SETTINGS_PANEL_ID);
+    ensureSection(CHOREO_PANEL_ID);
     return inlineHost;
   }
 
@@ -1992,6 +1993,69 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     writeJson(CLOUD_SAVES_KEY, payload || {});
   }
 
+  function getSavedDanceGroupMap(){
+    const payload = readJson(SAVED_GROUPS_KEY, {});
+    return payload && typeof payload === 'object' ? payload : {};
+  }
+
+  function saveSavedDanceGroupMap(payload){
+    writeJson(SAVED_GROUPS_KEY, payload || {});
+  }
+
+  function getSavedDanceGroupCatalog(){
+    const payload = readJson(SAVED_GROUP_CATALOG_KEY, []);
+    return Array.isArray(payload) ? payload.map(item => String(item || '').trim()).filter(Boolean) : [];
+  }
+
+  function saveSavedDanceGroupCatalog(list){
+    const unique = Array.from(new Set((Array.isArray(list) ? list : []).map(item => String(item || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+    writeJson(SAVED_GROUP_CATALOG_KEY, unique);
+  }
+
+  function ensureSavedDanceGroup(name){
+    const clean = String(name || '').trim();
+    if (!clean) return '';
+    const list = getSavedDanceGroupCatalog();
+    if (!list.includes(clean)) {
+      list.push(clean);
+      saveSavedDanceGroupCatalog(list);
+    }
+    return clean;
+  }
+
+  function buildSavedDanceGroupKey(scope, id, profile){
+    if (scope === 'cloud') {
+      const email = String(profile && profile.email || 'device@stepbystepper.local').trim().toLowerCase();
+      return `cloud:${email}:${String(id || '').trim()}`;
+    }
+    return `local:${String(id || '').trim()}`;
+  }
+
+  function getSavedDanceGroup(scope, id, profile){
+    const map = getSavedDanceGroupMap();
+    return String(map[buildSavedDanceGroupKey(scope, id, profile)] || '').trim();
+  }
+
+  function setSavedDanceGroup(scope, id, profile, groupName){
+    const map = getSavedDanceGroupMap();
+    const key = buildSavedDanceGroupKey(scope, id, profile);
+    const clean = ensureSavedDanceGroup(groupName);
+    if (clean) map[key] = clean;
+    else delete map[key];
+    saveSavedDanceGroupMap(map);
+    return clean;
+  }
+
+  function clearSavedDanceGroup(scope, id, profile){
+    const map = getSavedDanceGroupMap();
+    delete map[buildSavedDanceGroupKey(scope, id, profile)];
+    saveSavedDanceGroupMap(map);
+  }
+
+  function getAvailableSavedDanceGroups(){
+    return getSavedDanceGroupCatalog();
+  }
+
   function currentDanceIdentity(data){
     const meta = data && data.meta ? data.meta : {};
     const title = String(meta.title || '').trim();
@@ -2050,6 +2114,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   function deleteLocalSavedDance(id){
     const featured = getFeaturedDances().filter(item => item && item.id !== id);
     writeJson(FEATURED_KEY, featured);
+    clearSavedDanceGroup('local', id);
   }
 
   function saveCurrentDanceToCloud(){
@@ -2077,6 +2142,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     const list = Array.isArray(map[profile.email]) ? map[profile.email] : [];
     map[profile.email] = list.filter(item => item && item.id !== id);
     saveCloudSaveMap(map);
+    clearSavedDanceGroup('cloud', id, profile);
   }
 
   function renderSavedDancesPage(){
@@ -2086,6 +2152,81 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     const profile = getActiveCloudProfile();
     const localDances = getFeaturedDances();
     const cloudDances = getCloudEntriesForProfile(profile);
+    const groupNames = getAvailableSavedDanceGroups();
+    const activeFilter = String(page.dataset.groupFilter || '').trim();
+
+    const createGroupSelect = (scope, itemId, selectedGroup) => {
+      const options = groupNames.map(name => `<option value="${escapeHtml(name)}"${name === selectedGroup ? ' selected' : ''}>${escapeHtml(name)}</option>`).join('');
+      return `<label class="inline-flex items-center gap-2 text-xs font-black uppercase tracking-widest ${theme.subtle}">Group<select data-action="assign-group" data-scope="${escapeHtml(scope)}" data-id="${escapeHtml(itemId)}" class="rounded-xl border px-3 py-2 ${theme.button}" style="font-size:12px;"><option value="">Ungrouped</option>${options}</select></label>`;
+    };
+
+    const renderDanceCard = (item, scope, badgeHtml) => {
+      const selectedGroup = getSavedDanceGroup(scope, item.id, profile);
+      const updatedLabel = scope === 'cloud' ? 'Saved' : 'Updated';
+      const deleteAction = scope === 'cloud' ? 'delete-cloud' : 'delete-local';
+      const loadAction = scope === 'cloud' ? 'load-cloud' : 'load-local';
+      const extraAction = scope === 'local' ? `<button type="button" data-action="push-local-cloud" class="stepper-mini-btn ${theme.orange}">Push to cloud</button>` : '';
+      const idAttr = scope === 'cloud' ? 'data-cloud-dance-id' : 'data-local-dance-id';
+      return `
+        <article class="rounded-3xl border p-5 sm:p-6 ${theme.soft}" ${idAttr}="${escapeHtml(item.id)}" data-dance-scope="${escapeHtml(scope)}">
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <h3 class="text-xl font-black tracking-tight">${escapeHtml(item.title || 'Untitled Dance')}</h3>
+              <p class="mt-1 text-sm font-semibold ${theme.subtle}">${escapeHtml(item.choreographer || 'Uncredited')}${item.country ? ` (${escapeHtml(item.country)})` : ''}</p>
+            </div>
+            ${badgeHtml}
+          </div>
+          <div class="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+            <div class="rounded-2xl border px-3 py-3 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Counts</div><div class="mt-1 font-bold">${escapeHtml(item.counts || '-')}</div></div>
+            <div class="rounded-2xl border px-3 py-3 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Walls</div><div class="mt-1 font-bold">${escapeHtml(item.walls || '-')}</div></div>
+            <div class="rounded-2xl border px-3 py-3 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Sections</div><div class="mt-1 font-bold">${escapeHtml(String(item.sections || 0))}</div></div>
+            <div class="rounded-2xl border px-3 py-3 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Steps</div><div class="mt-1 font-bold">${escapeHtml(String(item.steps || 0))}</div></div>
+          </div>
+          <div class="mt-4 flex flex-wrap items-center gap-3">
+            <button type="button" data-action="${loadAction}" class="stepper-mini-btn ${theme.button}">Load</button>
+            <button type="button" data-action="${deleteAction}" class="stepper-danger-btn ${theme.dark ? 'bg-red-500/15 text-red-300 border border-red-400/20' : 'bg-red-50 text-red-700 border border-red-200'}">Delete</button>
+            ${extraAction}
+            ${createGroupSelect(scope, item.id, selectedGroup)}
+            <span class="text-xs font-semibold uppercase tracking-widest ${theme.subtle}">${updatedLabel} ${escapeHtml(formatDate(item.updatedAt))}</span>
+          </div>
+        </article>
+      `;
+    };
+
+    const buildGroupedSection = (items, scope, emptyTitle, emptyBody, badgeHtmlFn) => {
+      const grouped = {};
+      items.forEach(item => {
+        const group = getSavedDanceGroup(scope, item.id, profile) || '__ungrouped';
+        if (activeFilter && activeFilter !== '__ungrouped' && group !== activeFilter) return;
+        if (activeFilter === '__ungrouped' && group !== '__ungrouped') return;
+        if (!grouped[group]) grouped[group] = [];
+        grouped[group].push(item);
+      });
+      const orderedGroups = Object.keys(grouped).sort((a, b) => {
+        if (a === '__ungrouped') return 1;
+        if (b === '__ungrouped') return -1;
+        return a.localeCompare(b);
+      });
+      if (!orderedGroups.length) {
+        return `<div class="rounded-3xl border p-6 sm:p-8 text-center ${theme.soft}"><p class="text-lg font-bold">${escapeHtml(emptyTitle)}</p><p class="mt-2 ${theme.subtle}">${escapeHtml(emptyBody)}</p></div>`;
+      }
+      return orderedGroups.map(group => {
+        const label = group === '__ungrouped' ? 'Ungrouped' : group;
+        const cards = grouped[group].map(item => renderDanceCard(item, scope, badgeHtmlFn())).join('');
+        return `
+          <div class="space-y-4">
+            <div class="flex items-center justify-between gap-3 flex-wrap pt-2">
+              <div class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-black uppercase tracking-widest ${theme.dark ? 'bg-neutral-800 text-neutral-100' : 'bg-neutral-200 text-neutral-800'}">
+                <span>${escapeHtml(label)}</span>
+                <span class="opacity-60">${grouped[group].length}</span>
+              </div>
+            </div>
+            ${cards}
+          </div>
+        `;
+      }).join('');
+    };
+
     const cloudShelfCard = `
       <div class="rounded-2xl border p-5 sm:p-6 ${theme.panel}">
         <div class="flex flex-wrap items-start justify-between gap-4">
@@ -2097,7 +2238,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
                 <p class="mt-1 text-sm ${theme.subtle}">Attached to ${escapeHtml(profile.name)}</p>
               </div>
             </div>
-            <p class="mt-4 text-sm leading-relaxed ${theme.subtle}">This shelf keeps cloud-style saves grouped on this device, and on computer you can also kick the current dance over to Gmail in a new tab for an easy backup trail.</p>
+            <p class="mt-4 text-sm leading-relaxed ${theme.subtle}">Keep your dances organised into groups, then push them to the cloud shelf or back them up through Gmail when you want a trail outside the browser.</p>
           </div>
           <div class="flex flex-wrap gap-3">
             <button type="button" data-action="save-current-cloud" class="stepper-mini-btn ${theme.orange}">Save current dance to cloud</button>
@@ -2106,52 +2247,24 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
         </div>
       </div>`;
 
-    const localCards = localDances.length ? localDances.map(item => `
-      <article class="rounded-3xl border p-5 sm:p-6 ${theme.soft}" data-local-dance-id="${escapeHtml(item.id)}">
-        <div class="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <h3 class="text-xl font-black tracking-tight">${escapeHtml(item.title || 'Untitled Dance')}</h3>
-            <p class="mt-1 text-sm font-semibold ${theme.subtle}">${escapeHtml(item.choreographer || 'Uncredited')}${item.country ? ` (${escapeHtml(item.country)})` : ''}</p>
+    const groupFilterHtml = `
+      <div class="rounded-2xl border p-5 ${theme.panel}">
+        <div class="flex flex-wrap items-end gap-3 justify-between">
+          <div class="min-w-0">
+            <div class="text-lg font-black tracking-tight">Dance Groups</div>
+            <p class="mt-1 text-sm ${theme.subtle}">Create your own folders, then assign a group from each dance card below.</p>
           </div>
-          <span class="rounded-full px-3 py-1 text-xs font-black uppercase tracking-widest ${theme.dark ? 'bg-indigo-900/40 text-indigo-200' : 'bg-indigo-100 text-indigo-700'}">On this device</span>
-        </div>
-        <div class="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-          <div class="rounded-2xl border px-3 py-3 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Counts</div><div class="mt-1 font-bold">${escapeHtml(item.counts || '-')}</div></div>
-          <div class="rounded-2xl border px-3 py-3 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Walls</div><div class="mt-1 font-bold">${escapeHtml(item.walls || '-')}</div></div>
-          <div class="rounded-2xl border px-3 py-3 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Sections</div><div class="mt-1 font-bold">${escapeHtml(String(item.sections || 0))}</div></div>
-          <div class="rounded-2xl border px-3 py-3 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Steps</div><div class="mt-1 font-bold">${escapeHtml(String(item.steps || 0))}</div></div>
-        </div>
-        <div class="mt-4 flex flex-wrap items-center gap-3">
-          <button type="button" data-action="load-local" class="stepper-mini-btn ${theme.button}">Load</button>
-          <button type="button" data-action="delete-local" class="stepper-danger-btn ${theme.dark ? 'bg-red-500/15 text-red-300 border border-red-400/20' : 'bg-red-50 text-red-700 border border-red-200'}">Delete</button>
-          <button type="button" data-action="push-local-cloud" class="stepper-mini-btn ${theme.orange}">Push to cloud</button>
-          <span class="text-xs font-semibold uppercase tracking-widest ${theme.subtle}">Updated ${escapeHtml(formatDate(item.updatedAt))}</span>
-        </div>
-      </article>
-    `).join('') : `<div class="rounded-3xl border p-6 sm:p-8 text-center ${theme.soft}"><p class="text-lg font-bold">No saved dances yet.</p><p class="mt-2 ${theme.subtle}">Step by Stepper already remembers what people make on this device. Once a dance has a title or a few steps, it will show up here automatically.</p></div>`;
-
-    const cloudCards = cloudDances.length ? cloudDances.map(item => `
-      <article class="rounded-3xl border p-5 sm:p-6 ${theme.soft}" data-cloud-dance-id="${escapeHtml(item.id)}">
-        <div class="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <h3 class="text-xl font-black tracking-tight">${escapeHtml(item.title || 'Untitled Dance')}</h3>
-            <p class="mt-1 text-sm font-semibold ${theme.subtle}">${escapeHtml(item.choreographer || 'Uncredited')}</p>
+          <div class="flex flex-wrap items-center gap-3">
+            <input type="text" data-action="new-group-name" value="" placeholder="New group name" class="rounded-xl border px-3 py-2 ${theme.button}" style="min-width:220px;" />
+            <button type="button" data-action="create-group" class="stepper-mini-btn ${theme.orange}">Create Group</button>
           </div>
-          <span class="rounded-full px-3 py-1 text-xs font-black uppercase tracking-widest ${theme.dark ? 'bg-emerald-900/40 text-emerald-200' : 'bg-emerald-100 text-emerald-700'}">Cloud front end</span>
         </div>
-        <div class="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-          <div class="rounded-2xl border px-3 py-3 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Counts</div><div class="mt-1 font-bold">${escapeHtml(item.counts || '-')}</div></div>
-          <div class="rounded-2xl border px-3 py-3 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Walls</div><div class="mt-1 font-bold">${escapeHtml(item.walls || '-')}</div></div>
-          <div class="rounded-2xl border px-3 py-3 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Sections</div><div class="mt-1 font-bold">${escapeHtml(String(item.sections || 0))}</div></div>
-          <div class="rounded-2xl border px-3 py-3 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">Steps</div><div class="mt-1 font-bold">${escapeHtml(String(item.steps || 0))}</div></div>
+        <div class="mt-4 flex flex-wrap gap-2">
+          <button type="button" data-group-filter="" class="stepper-mini-btn ${activeFilter === '' ? theme.orange : theme.button}">All</button>
+          <button type="button" data-group-filter="__ungrouped" class="stepper-mini-btn ${activeFilter === '__ungrouped' ? theme.orange : theme.button}">Ungrouped</button>
+          ${groupNames.map(name => `<button type="button" data-group-filter="${escapeHtml(name)}" class="stepper-mini-btn ${activeFilter === name ? theme.orange : theme.button}">${escapeHtml(name)}</button>`).join('')}
         </div>
-        <div class="mt-4 flex flex-wrap items-center gap-3">
-          <button type="button" data-action="load-cloud" class="stepper-mini-btn ${theme.button}">Load</button>
-          <button type="button" data-action="delete-cloud" class="stepper-danger-btn ${theme.dark ? 'bg-red-500/15 text-red-300 border border-red-400/20' : 'bg-red-50 text-red-700 border border-red-200'}">Delete</button>
-          <span class="text-xs font-semibold uppercase tracking-widest ${theme.subtle}">Saved ${escapeHtml(formatDate(item.updatedAt))}</span>
-        </div>
-      </article>
-    `).join('') : `<div class="rounded-3xl border p-6 sm:p-8 text-center ${theme.soft}"><p class="text-lg font-bold">No cloud saves yet.</p><p class="mt-2 ${theme.subtle}">Use the cloud button above or push one of your saved dances up into the cloud shelf.</p></div>`;
+      </div>`;
 
     page.className = `rounded-3xl border shadow-sm overflow-hidden ${theme.shell}`;
     page.innerHTML = `
@@ -2160,6 +2273,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
       </div>
       <div class="p-6 sm:p-8 space-y-5">
         ${cloudShelfCard}
+        ${groupFilterHtml}
         <div class="rounded-2xl border p-5 ${theme.panel}">
           <div class="flex items-center gap-3">
             <span class="stepper-extra-tab-icon">${iconCloud()}</span>
@@ -2175,14 +2289,14 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
             <h3 class="text-lg font-black uppercase tracking-widest">Saved on this device</h3>
             <span class="text-xs font-semibold uppercase tracking-widest ${theme.subtle}">${localDances.length} saved</span>
           </div>
-          ${localCards}
+          ${buildGroupedSection(localDances, 'local', 'No saved dances yet.', 'Once a dance has a title or a few steps, it will show up here automatically.', function(){ return `<span class="rounded-full px-3 py-1 text-xs font-black uppercase tracking-widest ${theme.dark ? 'bg-indigo-900/40 text-indigo-200' : 'bg-indigo-100 text-indigo-700'}">On this device</span>`; })}
         </section>
         <section class="space-y-4">
           <div class="flex items-center justify-between gap-3 flex-wrap">
             <h3 class="text-lg font-black uppercase tracking-widest">Cloud saves</h3>
             <span class="text-xs font-semibold uppercase tracking-widest ${theme.subtle}">${cloudDances.length} saved</span>
           </div>
-          ${cloudCards}
+          ${buildGroupedSection(cloudDances, 'cloud', 'No cloud saves yet.', 'Use the cloud button above or push one of your saved dances up into the cloud shelf.', function(){ return `<span class="rounded-full px-3 py-1 text-xs font-black uppercase tracking-widest ${theme.dark ? 'bg-emerald-900/40 text-emerald-200' : 'bg-emerald-100 text-emerald-700'}">Cloud front end</span>`; })}
         </section>
       </div>
     `;
@@ -2190,6 +2304,40 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     const saveCurrentBtn = page.querySelector('[data-action="save-current-cloud"]');
     if (saveCurrentBtn) saveCurrentBtn.addEventListener('click', () => {
       if (saveCurrentDanceToCloud()) renderSavedDancesPage();
+    });
+
+    const createGroupBtn = page.querySelector('[data-action="create-group"]');
+    const groupNameInput = page.querySelector('[data-action="new-group-name"]');
+    if (createGroupBtn && groupNameInput) {
+      const submitGroup = () => {
+        const name = ensureSavedDanceGroup(groupNameInput.value || '');
+        if (!name) return;
+        groupNameInput.value = '';
+        renderSavedDancesPage();
+      };
+      createGroupBtn.addEventListener('click', submitGroup);
+      groupNameInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          submitGroup();
+        }
+      });
+    }
+
+    page.querySelectorAll('[data-group-filter]').forEach(button => {
+      button.addEventListener('click', () => {
+        page.dataset.groupFilter = button.getAttribute('data-group-filter') || '';
+        renderSavedDancesPage();
+      });
+    });
+
+    page.querySelectorAll('[data-action="assign-group"]').forEach(select => {
+      select.addEventListener('change', () => {
+        const scope = select.getAttribute('data-scope') || 'local';
+        const id = select.getAttribute('data-id') || '';
+        setSavedDanceGroup(scope, id, profile, select.value || '');
+        renderSavedDancesPage();
+      });
     });
 
     page.querySelectorAll('[data-local-dance-id]').forEach(card => {
@@ -2206,7 +2354,6 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
         }
       });
       if (pushBtn) pushBtn.addEventListener('click', () => {
-        const profile = getActiveCloudProfile();
         const map = getCloudSaveMap();
         let list = Array.isArray(map[profile.email]) ? map[profile.email] : [];
         const existingIndex = list.findIndex(item => item && item.id === id);
@@ -2214,6 +2361,8 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
         else list.unshift(Object.assign({}, entry, { updatedAt: new Date().toISOString() }));
         map[profile.email] = list.slice().sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0)).slice(0, 120);
         saveCloudSaveMap(map);
+        const localGroup = getSavedDanceGroup('local', id, profile);
+        if (localGroup) setSavedDanceGroup('cloud', id, profile, localGroup);
         renderSavedDancesPage();
       });
     });
@@ -2318,50 +2467,11 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   function renderSettingsPanel(targetId){
     const page = document.getElementById(targetId);
     if (!page) return;
-    const theme = themeClasses();
-    const settings = getSettings();
-    page.className = `rounded-3xl border shadow-sm overflow-hidden ${theme.shell}`;
-    page.innerHTML = `
-      <div class="px-6 py-5 border-b ${theme.panel}">
-        <h2 class="text-2xl font-black tracking-tight uppercase flex items-center gap-2"><span class="stepper-extra-tab-icon">${iconCog()}</span> Settings</h2>
-      </div>
-      <div class="p-6 sm:p-8 space-y-5">
-        <button type="button" data-stepper-setting="sfx" class="stepper-setting-toggle rounded-3xl border w-full text-left p-5 sm:p-6 flex items-center justify-between gap-4 ${theme.soft}">
-          <div class="min-w-0">
-            <div class="text-lg font-black tracking-tight">SFX Sounds</div>
-            <p class="mt-1 text-sm ${theme.subtle}">Menu clicks, tab changes, dark mode toggles and other little UI noises.</p>
-          </div>
-          <div class="flex items-center gap-3 shrink-0">
-            <span class="stepper-setting-icon ${settings.sfxEnabled ? 'is-on' : 'is-off'}">${iconSpeaker(settings.sfxEnabled)}</span>
-            <span class="text-xs font-black uppercase tracking-widest ${theme.subtle}">${settings.sfxEnabled ? 'On' : 'Off'}</span>
-          </div>
-        </button>
-        <button type="button" data-stepper-setting="thinking" class="stepper-setting-toggle rounded-3xl border w-full text-left p-5 sm:p-6 flex items-center justify-between gap-4 ${theme.soft}">
-          <div class="min-w-0">
-            <div class="text-lg font-black tracking-tight">Thinking Music</div>
-            <p class="mt-1 text-sm ${theme.subtle}">Loops the lobby track while you work. Starts off, because mercy still exists.</p>
-          </div>
-          <div class="flex items-center gap-3 shrink-0">
-            <span class="stepper-setting-icon ${settings.thinkingMusicEnabled ? 'is-on' : 'is-off'}">${iconMusic(settings.thinkingMusicEnabled)}</span>
-            <span class="text-xs font-black uppercase tracking-widest ${theme.subtle}">${settings.thinkingMusicEnabled ? 'On' : 'Off'}</span>
-          </div>
-        </button>
-      </div>
-    `;
-    page.querySelector('[data-stepper-setting="sfx"]').addEventListener('click', () => {
-      const current = getSettings();
-      current.sfxEnabled = !current.sfxEnabled;
-      saveSettings(current);
-      renderSettingsPanel(targetId);
-    });
-    page.querySelector('[data-stepper-setting="thinking"]').addEventListener('click', () => {
-      const current = getSettings();
-      current.thinkingMusicEnabled = !current.thinkingMusicEnabled;
-      saveSettings(current);
-      applyThinkingMusic(current.thinkingMusicEnabled);
-      renderSettingsPanel(targetId);
-    });
+    page.innerHTML = '';
+    page.hidden = true;
+    page.style.display = 'none';
   }
+
 
   function isDedicatedPageOpen(){
     try {
@@ -2386,7 +2496,6 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   function renderInlineEditorPanels(){
     ensureInlineHost();
     renderChoreographyPanel(CHOREO_PANEL_ID);
-    renderSettingsPanel(SETTINGS_PANEL_ID);
     syncInlineHostVisibility();
   }
 
@@ -2824,7 +2933,7 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
 
 <script src="./stepper-runtime-recovery.js?v=20260403-recovery-7"></script>
 <script src="./stepper-static-startup-fix.js?v=20260403-startup-fix-7"></script>
-<script src="./stepper-phrased-tools-fix.js?v=20260403-phrased-fix-2"></script>
+<script src="./stepper-phrased-tools-fix.js?v=20260404-phrased-fix-3"></script>
 <script src="./stepper-route-paths.js?v=20260403-paths-3"></script>
 <script src="./stepper-editor-phrasing-repair.js?v=20260403-phrasing-repair-3"></script>
 
@@ -2846,11 +2955,11 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
 <script src="./stepper-pdf-import-core.js?v=20260403-pdf-import-core-2"></script>
 <script src="./stepper-pdf-import-ui.js?v=20260403-pdf-import-ui-2"></script>
 <script src="./stepper-pdf-import-bootstrap.js?v=20260403-pdf-import-bootstrap-2"></script>
-<script src="./stepper-menubar.js?v=20260403-menubar-3"></script>
+<script src="./stepper-menubar.js?v=20260404-menubar-4"></script>
 <script src="./stepper-settings-tab.js?v=20260403-settings-2"></script>
 <script src="./stepper-music-tab.js?v=20260403-music-1"></script>
 <script src="./stepper-templates-tab.js?v=20260403-templates-1"></script>
-<script src="./stepper-step-select.js?v=20260403-step-select-2"></script>
+<script src="./stepper-step-select.js?v=20260404-step-select-3"></script>
 <script src="./stepper-cool-extras.js?v=20260403-cool-extras-1"></script>
 <script src="./stepper-hamburger-nav.js?v=20260403-hamburger-2"></script>
 

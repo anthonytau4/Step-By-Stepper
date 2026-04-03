@@ -142,8 +142,13 @@
           { label: 'Italic', icon: _ic.italic || '', action: 'format-italic', shortcut: 'Ctrl+I' },
           { label: 'Underline', icon: _ic.underline || '', action: 'format-underline', shortcut: 'Ctrl+U' },
           { label: 'Strikethrough', icon: _ic.strikethrough || '', action: 'format-strike' },
+          { label: 'Highlight', icon: _ic.highlighter || '', action: 'format-highlight' },
+          { label: 'Inline Code', icon: _ic.code || '', action: 'format-code' },
           { type: 'divider' },
-          { label: 'Line Spacing', icon: _ic.list || '', action: 'line-spacing' },
+          { label: 'Bulleted List', icon: _ic.list || '', action: 'format-bullets' },
+          { label: 'Numbered List', icon: _ic.numberedList || _ic.list || '', action: 'format-numbered' },
+          { label: 'Quote', icon: _ic.quote || '', action: 'format-quote' },
+          { type: 'divider' },
           { label: 'Clear Formatting', icon: _ic.close || '', action: 'clear-format' }
         ]
       });
@@ -223,6 +228,61 @@
       return true;
     }
     return false;
+  }
+
+  function applyTextFormatAction(action) {
+    try {
+      if (window.__stepperTextFormatting && typeof window.__stepperTextFormatting.applyAction === 'function') {
+        if (window.__stepperTextFormatting.applyAction(action)) return true;
+      }
+    } catch (e) {}
+    return false;
+  }
+
+  function buildFormatToolbar(dark) {
+    if (!_isEditorTab()) return null;
+    var toolbar = document.createElement('div');
+    toolbar.id = 'stepper-docstyle-toolbar';
+    toolbar.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:6px 8px;position:relative;z-index:49;' +
+      (dark ? 'background:#151522;color:#d4d4e0;border-bottom:1px solid #303045;' : 'background:#fafafa;color:#1f2937;border-bottom:1px solid #e5e7eb;');
+    var chips = [
+      { action:'format-bold', label:'B', title:'Bold' },
+      { action:'format-italic', label:'I', title:'Italic' },
+      { action:'format-underline', label:'U', title:'Underline' },
+      { action:'format-strike', label:'S', title:'Strikethrough' },
+      { action:'format-highlight', label:'H', title:'Highlight' },
+      { action:'format-code', label:'</>', title:'Inline code' },
+      { action:'format-bullets', label:'•', title:'Bulleted list' },
+      { action:'format-numbered', label:'1.', title:'Numbered list' },
+      { action:'format-quote', label:'❝', title:'Quote' },
+      { action:'clear-format', label:'Tx', title:'Clear formatting' }
+    ];
+    var prefix = document.createElement('span');
+    prefix.textContent = 'Format';
+    prefix.style.cssText = 'font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;opacity:.65;padding:0 6px 0 2px;';
+    toolbar.appendChild(prefix);
+    chips.forEach(function (chip) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'stepper-docstyle-tool-btn';
+      btn.setAttribute('data-stepper-format-action', chip.action);
+      btn.title = chip.title;
+      btn.setAttribute('aria-label', chip.title);
+      btn.textContent = chip.label;
+      btn.style.cssText = 'min-width:32px;height:30px;padding:0 10px;border-radius:8px;border:1px solid;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;line-height:1;transition:background .12s,border-color .12s,color .12s;' +
+        (dark ? 'background:#1e1e2e;border-color:#3a3a52;color:#e5e7eb;' : 'background:#fff;border-color:#d1d5db;color:#111827;');
+      btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!applyTextFormatAction(chip.action)) dispatchMenuAction(chip.action);
+      });
+      toolbar.appendChild(btn);
+    });
+    var hint = document.createElement('span');
+    hint.textContent = 'Select text in a field, then format it';
+    hint.style.cssText = 'font-size:11px;font-weight:600;opacity:.5;margin-left:8px;';
+    toolbar.appendChild(hint);
+    return toolbar;
   }
 
   /* ── Action dispatcher ── */
@@ -397,19 +457,26 @@
 
       /* ── Format operations ── */
       case 'format-bold':
-        if (window.__stepperStepSelect) window.__stepperStepSelect.formatBold();
+        if (!applyTextFormatAction(action) && window.__stepperStepSelect) window.__stepperStepSelect.formatBold();
         break;
       case 'format-italic':
-        if (window.__stepperStepSelect) window.__stepperStepSelect.formatItalic();
+        if (!applyTextFormatAction(action) && window.__stepperStepSelect) window.__stepperStepSelect.formatItalic();
         break;
       case 'format-underline':
-        if (window.__stepperStepSelect) window.__stepperStepSelect.formatUnderline();
+        if (!applyTextFormatAction(action) && window.__stepperStepSelect) window.__stepperStepSelect.formatUnderline();
         break;
       case 'format-strike':
-        if (window.__stepperStepSelect) window.__stepperStepSelect.formatStrikethrough();
+        if (!applyTextFormatAction(action) && window.__stepperStepSelect) window.__stepperStepSelect.formatStrikethrough();
+        break;
+      case 'format-highlight':
+      case 'format-code':
+      case 'format-bullets':
+      case 'format-numbered':
+      case 'format-quote':
+        applyTextFormatAction(action);
         break;
       case 'clear-format':
-        if (window.__stepperStepSelect) window.__stepperStepSelect.clearFormatting();
+        if (!applyTextFormatAction(action) && window.__stepperStepSelect) window.__stepperStepSelect.clearFormatting();
         break;
       case 'align-left':
       case 'align-center':
@@ -898,7 +965,12 @@
 
     var host = getMenuHost();
     host.innerHTML = '';
-    host.appendChild(bar);
+    var stack = document.createElement('div');
+    stack.style.cssText = 'display:flex;flex-direction:column;width:100%;';
+    stack.appendChild(bar);
+    var toolbar = buildFormatToolbar(dark);
+    if (toolbar) stack.appendChild(toolbar);
+    host.appendChild(stack);
 
     _injected = true;
   }
@@ -913,6 +985,7 @@
       '.stepper-menu-trigger--open { font-weight: 600 !important; }',
       '#' + MENUBAR_ID + ' { border-bottom-color: color-mix(in srgb, var(--stepper-accent-color, #4f46e5) 18%, rgba(0,0,0,.16)) !important; }',
       '.stepper-menu-dropdown { animation: stepper-menu-drop .12s ease; }',
+      '.stepper-docstyle-tool-btn:hover { background: color-mix(in srgb, var(--stepper-accent-color, #4f46e5) 12%, transparent) !important; border-color: color-mix(in srgb, var(--stepper-accent-color, #4f46e5) 38%, #d1d5db) !important; color: var(--stepper-accent-color, #4f46e5) !important; }',
       '@keyframes stepper-menu-drop { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }',
       '#' + MENUBAR_ID + ' svg { width: 14px !important; height: 14px !important; }'
     ].join('\n');

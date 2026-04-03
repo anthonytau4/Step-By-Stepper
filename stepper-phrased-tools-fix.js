@@ -6,6 +6,7 @@
   const FEATURED_KEY = 'stepper_featured_dances_v2';
   const PHR_TOOLS_KEY = 'stepper_current_phrased_tools_v1';
   const SETTINGS_KEY = 'stepper_sound_settings_v1';
+  const VISUAL_SETTINGS_KEY = 'stepper_settings_v1';
   const SAVE_LATER_KEY = 'stepper_save_for_later_v1';
   const SAVE_LATER_SESSION_KEY = 'stepper_save_for_later_session_v1';
   const PHR_PANEL_ID = 'stepper-inline-phrased-tools';
@@ -99,8 +100,7 @@
     const saved = readJson(SETTINGS_KEY, {});
     return {
       sfxEnabled: saved.sfxEnabled !== false,
-      thinkingMusicEnabled: saved.thinkingMusicEnabled === true,
-      fontFamily: ['system','rounded','elegant'].includes(saved.fontFamily) ? saved.fontFamily : 'system'
+      thinkingMusicEnabled: saved.thinkingMusicEnabled === true
     };
   }
 
@@ -493,8 +493,11 @@
   }
 
   function applyFontSettings(){
-    const settings = getSettings();
-    document.documentElement.style.setProperty('--stepper-font-family', FONT_FAMILIES[settings.fontFamily] || FONT_FAMILIES.system);
+    // The upgraded Settings tab owns visual typography now.
+    const visual = readJson(VISUAL_SETTINGS_KEY, {});
+    if (visual && visual.fontSize) {
+      document.documentElement.style.setProperty('--stepper-font-size', String(visual.fontSize) + 'px');
+    }
   }
 
   function ensureInlineHost(){
@@ -507,13 +510,13 @@
       while (host.firstChild) stack.appendChild(host.firstChild);
       host.appendChild(stack);
     }
+    const legacySettingsPanel = document.getElementById('stepper-inline-settings');
+    if (legacySettingsPanel) legacySettingsPanel.remove();
     let panel = document.getElementById(PHR_PANEL_ID);
     if (!panel) {
       panel = document.createElement('section');
       panel.id = PHR_PANEL_ID;
-      const settingsPanel = document.getElementById('stepper-inline-settings');
-      if (settingsPanel && settingsPanel.parentNode === stack) stack.insertBefore(panel, settingsPanel);
-      else stack.appendChild(panel);
+      stack.appendChild(panel);
     }
     return host;
   }
@@ -583,40 +586,132 @@
     return null;
   }
 
-  function wrapSelectionWithMarkers(field, openMarker, closeMarker, forcedStart, forcedEnd){
-    if (!field || typeof field.value !== 'string') return;
-    const start = typeof forcedStart === 'number'
-      ? forcedStart
-      : (typeof field.selectionStart === 'number' ? field.selectionStart : (typeof field.__stepperSelStart === 'number' ? field.__stepperSelStart : field.value.length));
-    const end = typeof forcedEnd === 'number'
-      ? forcedEnd
-      : (typeof field.selectionEnd === 'number' ? field.selectionEnd : (typeof field.__stepperSelEnd === 'number' ? field.__stepperSelEnd : field.value.length));
-    const safeStart = Math.max(0, Math.min(start, field.value.length));
-    const safeEnd = Math.max(safeStart, Math.min(end, field.value.length));
-    const value = field.value || '';
-    const selected = value.slice(safeStart, safeEnd);
-    const replacement = openMarker + selected + closeMarker;
-    field.value = value.slice(0, safeStart) + replacement + value.slice(safeEnd);
-    const caretStart = safeStart + openMarker.length;
-    const caretEnd = selected ? caretStart + selected.length : caretStart;
-    field.__stepperSelStart = caretStart;
-    field.__stepperSelEnd = caretEnd;
+  function getSelectionBounds(field){
+    const value = typeof field.value === 'string' ? field.value : '';
+    const start = typeof field.selectionStart === 'number' ? field.selectionStart : (typeof field.__stepperSelStart === 'number' ? field.__stepperSelStart : value.length);
+    const end = typeof field.selectionEnd === 'number' ? field.selectionEnd : (typeof field.__stepperSelEnd === 'number' ? field.__stepperSelEnd : value.length);
+    const safeStart = Math.max(0, Math.min(start, value.length));
+    const safeEnd = Math.max(safeStart, Math.min(end, value.length));
+    return { value, start: safeStart, end: safeEnd };
+  }
+
+  function replaceFieldRange(field, replaceStart, replaceEnd, replacement, nextStart, nextEnd){
+    const value = typeof field.value === 'string' ? field.value : '';
+    field.value = value.slice(0, replaceStart) + replacement + value.slice(replaceEnd);
+    field.__stepperSelStart = nextStart;
+    field.__stepperSelEnd = nextEnd;
     field.dispatchEvent(new Event('input', { bubbles:true }));
     field.dispatchEvent(new Event('change', { bubbles:true }));
     requestAnimationFrame(() => {
       try {
         field.focus();
-        field.setSelectionRange(caretStart, caretEnd);
+        field.setSelectionRange(nextStart, nextEnd);
         rememberFormattingTarget(field);
       } catch {}
     });
   }
 
-  function applyFormattingMarker(openMarker, closeMarker){
+  function toggleInlineMarker(field, openMarker, closeMarker){
+    if (!field || typeof field.value !== 'string') return false;
+    const sel = getSelectionBounds(field);
+    const selected = sel.value.slice(sel.start, sel.end);
+    const before = sel.value.slice(Math.max(0, sel.start - openMarker.length), sel.start);
+    const after = sel.value.slice(sel.end, sel.end + closeMarker.length);
+
+    if (selected && before === openMarker && after === closeMarker) {
+      replaceFieldRange(field, sel.start - openMarker.length, sel.end + closeMarker.length, selected, sel.start - openMarker.length, sel.start - openMarker.length + selected.length);
+      return true;
+    }
+
+    const targetText = selected || 'text';
+    const replacement = openMarker + targetText + closeMarker;
+    const nextStart = sel.start + openMarker.length;
+    const nextEnd = nextStart + targetText.length;
+    replaceFieldRange(field, sel.start, sel.end, replacement, nextStart, nextEnd);
+    return true;
+  }
+
+  function toggleLinePrefix(field, mode){
+    if (!field || typeof field.value !== 'string') return false;
+    const sel = getSelectionBounds(field);
+    const lineStart = sel.value.lastIndexOf('\n', Math.max(0, sel.start - 1)) + 1;
+    const lineEndIndex = sel.value.indexOf('\n', sel.end);
+    const lineEnd = lineEndIndex === -1 ? sel.value.length : lineEndIndex;
+    const block = sel.value.slice(lineStart, lineEnd);
+    const lines = block.split('\n');
+    const cleaners = [/^\s*[-*]\s+/, /^\s*\d+\.\s+/, /^\s*>\s+/];
+    const allHavePrefix = lines.every((line) => {
+      if (!line.trim()) return true;
+      if (mode === 'bullet') return /^\s*[-*]\s+/.test(line);
+      if (mode === 'number') return /^\s*\d+\.\s+/.test(line);
+      if (mode === 'quote') return /^\s*>\s+/.test(line);
+      return false;
+    });
+    const nextLines = lines.map((line, index) => {
+      if (!line.trim()) return line;
+      const base = cleaners.reduce((out, rx) => out.replace(rx, ''), line);
+      if (allHavePrefix) return base;
+      if (mode === 'bullet') return '- ' + base;
+      if (mode === 'number') return (index + 1) + '. ' + base;
+      if (mode === 'quote') return '> ' + base;
+      return line;
+    });
+    const replacement = nextLines.join('\n');
+    replaceFieldRange(field, lineStart, lineEnd, replacement, lineStart, lineStart + replacement.length);
+    return true;
+  }
+
+  function toggleCodeFormat(field){
+    if (!field || typeof field.value !== 'string') return false;
+    const sel = getSelectionBounds(field);
+    const selected = sel.value.slice(sel.start, sel.end);
+    if (selected.includes('\n')) return toggleInlineMarker(field, '```\n', '\n```');
+    return toggleInlineMarker(field, '`', '`');
+  }
+
+  function clearFormattingText(text){
+    return String(text || '')
+      .replace(/\*\*([\s\S]*?)\*\*/g, '$1')
+      .replace(/(^|[^*])\*([^*][\s\S]*?)\*(?!\*)/g, '$1$2')
+      .replace(/__([\s\S]*?)__/g, '$1')
+      .replace(/~~([\s\S]*?)~~/g, '$1')
+      .replace(/==([\s\S]*?)==/g, '$1')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/\/\*([\s\S]*?)\*\//g, '$1')
+      .replace(/_([^_][\s\S]*?)_/g, '$1')
+      .replace(/^\s*>\s+/gm, '')
+      .replace(/^\s*[-*]\s+/gm, '')
+      .replace(/^\s*\d+\.\s+/gm, '')
+      .replace(/^```\\n?|\\n?```$/gm, '');
+  }
+
+  function clearFormattingSelection(field){
+    if (!field || typeof field.value !== 'string') return false;
+    const sel = getSelectionBounds(field);
+    const hasSelection = sel.end > sel.start;
+    const replaceStart = hasSelection ? sel.start : 0;
+    const replaceEnd = hasSelection ? sel.end : sel.value.length;
+    const cleaned = clearFormattingText(sel.value.slice(replaceStart, replaceEnd));
+    replaceFieldRange(field, replaceStart, replaceEnd, cleaned, replaceStart, replaceStart + cleaned.length);
+    return true;
+  }
+
+  function applyFormattingAction(action){
     const field = getFormattingTarget();
     if (!field) return false;
-    wrapSelectionWithMarkers(field, openMarker, closeMarker, field.__stepperSelStart, field.__stepperSelEnd);
-    return true;
+    switch (action) {
+      case 'format-bold': return toggleInlineMarker(field, '**', '**');
+      case 'format-italic': return toggleInlineMarker(field, '*', '*');
+      case 'format-underline': return toggleInlineMarker(field, '__', '__');
+      case 'format-strike': return toggleInlineMarker(field, '~~', '~~');
+      case 'format-highlight': return toggleInlineMarker(field, '==', '==');
+      case 'format-code': return toggleCodeFormat(field);
+      case 'format-bullets': return toggleLinePrefix(field, 'bullet');
+      case 'format-numbered': return toggleLinePrefix(field, 'number');
+      case 'format-quote': return toggleLinePrefix(field, 'quote');
+      case 'clear-format': return clearFormattingSelection(field);
+      default: return false;
+    }
   }
 
   function ensureEditorFormattingShortcuts(){
@@ -635,20 +730,36 @@
       };
     })();
 
+    const labelActionMap = [
+      [/^(?:b|bold|format bold)$/,'format-bold'],
+      [/^(?:i|italic|italics|format italic|format italics)$/,'format-italic'],
+      [/^(?:u|underline|format underline)$/,'format-underline'],
+      [/^(?:s|strike|strikethrough|format strike)$/,'format-strike'],
+      [/^(?:•|bullet|bulleted list|format bullets)$/,'format-bullets'],
+      [/^(?:1\.|numbered list|format numbering)$/,'format-numbered'],
+      [/^(?:quote|blockquote)$/,'format-quote'],
+      [/^(?:code|inline code)$/,'format-code'],
+      [/^(?:clear|clear formatting|tx)$/,'clear-format']
+    ];
+
     const handleFormattingButton = (event) => {
       const button = event.target && event.target.closest ? event.target.closest('button,[role="button"]') : null;
       if (!button) return;
-      const label = [button.getAttribute('aria-label'), button.getAttribute('title'), button.textContent]
-        .filter(Boolean)
-        .join(' ')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .toLowerCase();
-      if (!label) return;
+      const directAction = button.getAttribute('data-stepper-format-action');
       let handled = false;
-      if (/^(?:b|bold|format bold)$/.test(label)) handled = applyFormattingMarker('**', '**');
-      else if (/^(?:i|italic|italics|format italic|format italics)$/.test(label)) handled = applyFormattingMarker('/*', '*/');
-      else if (/^(?:u|underline|format underline)$/.test(label)) handled = applyFormattingMarker('_', '_');
+      if (directAction) {
+        handled = applyFormattingAction(directAction);
+      } else {
+        const label = [button.getAttribute('aria-label'), button.getAttribute('title'), button.textContent]
+          .filter(Boolean)
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .toLowerCase();
+        for (const pair of labelActionMap) {
+          if (pair[0].test(label)) { handled = applyFormattingAction(pair[1]); break; }
+        }
+      }
       if (handled) {
         event.preventDefault();
         event.stopPropagation();
@@ -671,14 +782,24 @@
       if (!isShortcut) return;
       const key = (event.key || '').toLowerCase();
       let handled = false;
-      if (key === 'b') handled = applyFormattingMarker('**', '**');
-      else if (key === 'i') handled = applyFormattingMarker('/*', '*/');
-      else if (key === 'u') handled = applyFormattingMarker('_', '_');
+      if (key === 'b') handled = applyFormattingAction('format-bold');
+      else if (key === 'i') handled = applyFormattingAction('format-italic');
+      else if (key === 'u') handled = applyFormattingAction('format-underline');
       if (handled) {
         event.preventDefault();
         schedulePreviewRefresh();
       }
     });
+
+    window.__stepperTextFormatting = {
+      getTarget: getFormattingTarget,
+      applyAction: function(action){
+        const handled = applyFormattingAction(action);
+        if (handled) schedulePreviewRefresh();
+        return handled;
+      },
+      clear: function(){ return applyFormattingAction('clear-format'); }
+    };
   }
 
   function ensureHelpMenu(){
@@ -705,9 +826,10 @@
     panel.innerHTML = `
       <h3>Help</h3>
       <p><strong>Why the page can jump:</strong> Step by Stepper re-syncs counts, parts, preview notes and saved-dance panels after big edits. This build calms that down, but a large update can still make it twitch for a moment.</p>
-      <p><strong>Bolding</strong><span class="stepper-help-code ${theme.panel}">**Sample Text**</span></p>
-      <p><strong>Italics</strong><span class="stepper-help-code ${theme.panel}">/*Sample Text*/</span></p>
-      <p><strong>Underline</strong><span class="stepper-help-code ${theme.panel}">_Sample Text_</span></p>
+      <p><strong>Bold</strong><span class="stepper-help-code ${theme.panel}">**Sample Text**</span></p>
+      <p><strong>Italics</strong><span class="stepper-help-code ${theme.panel}">*Sample Text*</span></p>
+      <p><strong>Underline</strong><span class="stepper-help-code ${theme.panel}">__Sample Text__</span></p>
+      <p><strong>Quote / Lists</strong><span class="stepper-help-code ${theme.panel}">&gt; Quote line · - Bullet line · 1. Numbered line</span></p>
       <p><strong>Computer shortcuts</strong><span class="stepper-help-code ${theme.panel}">Ctrl+B bold · Ctrl+I italics · Ctrl+U underline</span></p>
     `;
     if (!fab.__stepperHelpWired) {
@@ -723,50 +845,7 @@
 
   function renderSettingsPanel(){
     const panel = document.getElementById('stepper-inline-settings');
-    if (!panel) return;
-    const theme = themeClasses();
-    const settings = getSettings();
-    const fontChoices = [
-      { key:'system', title:'Classic', sample:'Clean editor finish', family: FONT_FAMILIES.system },
-      { key:'rounded', title:'Rounded', sample:'Soft and friendly', family: FONT_FAMILIES.rounded },
-      { key:'elegant', title:'Elegant', sample:'Formal sheet look', family: FONT_FAMILIES.elegant }
-    ];
-    panel.className = `rounded-3xl border shadow-sm overflow-hidden ${theme.shell}`;
-    panel.innerHTML = `
-      <div class="px-6 py-5 border-b ${theme.panel}">
-        <h2 class="text-2xl font-black tracking-tight uppercase flex items-center gap-2"><span class="stepper-panel-icon">${iconCog()}</span> Settings</h2>
-      </div>
-      <div class="p-6 sm:p-8 space-y-5">
-        <div class="rounded-3xl border p-5 sm:p-6 ${theme.soft}">
-          <div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle} mb-3">Font Style</div>
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            ${fontChoices.map(choice => `
-              <button type="button" class="stepper-font-choice ${theme.button}" data-font-choice="${choice.key}" data-active="${settings.fontFamily === choice.key ? 'true' : 'false'}" style="font-family:${choice.family}">
-                <strong>${escapeHtml(choice.title)}</strong>
-                <span>${escapeHtml(choice.sample)}</span>
-              </button>
-            `).join('')}
-          </div>
-        </div>
-        <button type="button" data-stepper-setting="sfx" class="rounded-3xl border w-full text-left p-5 sm:p-6 flex items-center justify-between gap-4 ${theme.soft}">
-          <div><div class="text-lg font-black tracking-tight">SFX Sounds</div><p class="mt-1 text-sm ${theme.subtle}">Menu clicks, tab changes and all the little app noises.</p></div>
-          <div class="flex items-center gap-3 shrink-0"><span class="stepper-setting-icon">${iconSpeaker(settings.sfxEnabled)}</span><span class="text-xs font-black uppercase tracking-widest ${theme.subtle}">${settings.sfxEnabled ? 'On' : 'Off'}</span></div>
-        </button>
-        <button type="button" data-stepper-setting="thinking" class="rounded-3xl border w-full text-left p-5 sm:p-6 flex items-center justify-between gap-4 ${theme.soft}">
-          <div><div class="text-lg font-black tracking-tight">Thinking Music</div><p class="mt-1 text-sm ${theme.subtle}">Loops the lobby track while you work without resetting every few seconds.</p></div>
-          <div class="flex items-center gap-3 shrink-0"><span class="stepper-setting-icon">${iconMusic(settings.thinkingMusicEnabled)}</span><span class="text-xs font-black uppercase tracking-widest ${theme.subtle}">${settings.thinkingMusicEnabled ? 'On' : 'Off'}</span></div>
-        </button>
-      </div>
-    `;
-    panel.querySelector('[data-stepper-setting="sfx"]').addEventListener('click', () => { const current = getSettings(); current.sfxEnabled = !current.sfxEnabled; saveSettings(current); renderSettingsPanel(); });
-    panel.querySelector('[data-stepper-setting="thinking"]').addEventListener('click', () => { const current = getSettings(); current.thinkingMusicEnabled = !current.thinkingMusicEnabled; saveSettings(current); renderSettingsPanel(); });
-    panel.querySelectorAll('[data-font-choice]').forEach(button => {
-      button.addEventListener('click', () => {
-        saveSettings({ fontFamily: button.getAttribute('data-font-choice') || 'system' });
-        applyFontSettings();
-        renderSettingsPanel();
-      });
-    });
+    if (panel) panel.remove();
   }
 
   function renderChoreoPanel(){
@@ -1043,7 +1122,6 @@
     ensureInlineHost();
     renderPhrasedPanel();
     renderChoreoPanel();
-    renderSettingsPanel();
     wireManualCountsAndWallsOverrides();
     const syncedStats = syncAutoCountsAndWalls(false);
     if (syncedStats) {
@@ -1197,12 +1275,18 @@
     leafs.forEach((node) => {
       if (node.closest('#' + PREVIEW_NOTE_ID)) return;
       const rawText = node.textContent || '';
-      if (!/(\*\*[^*]+\*\*|\/\*[^*]+\*\/|\*\/[^*]+\/\*|_[^_]+_)/.test(rawText)) return;
+      if (!/(\*\*|\*[^*]|__|~~|==|`|\/\*|^\s*>\s+)/m.test(rawText)) return;
       let html = escapeHtml(rawText);
+      html = html.replace(/^\s*>\s+(.+)$/gm, '<span class="stepper-inline-quote">$1</span>');
       html = html.replace(/\*\*([^*][\s\S]*?)\*\*/g, '<strong>$1</strong>');
+      html = html.replace(/(^|[^*])\*([^*][\s\S]*?)\*(?!\*)/g, '$1<em>$2</em>');
       html = html.replace(/\/\*([\s\S]*?)\*\//g, '<em>$1</em>');
       html = html.replace(/\*\/([\s\S]*?)\/\*/g, '<em>$1</em>');
+      html = html.replace(/__([\s\S]*?)__/g, '<u>$1</u>');
       html = html.replace(/_([^_][\s\S]*?)_/g, '<u>$1</u>');
+      html = html.replace(/~~([\s\S]*?)~~/g, '<s>$1</s>');
+      html = html.replace(/==([\s\S]*?)==/g, '<mark style="background:rgba(250,204,21,.35);padding:0 .15em;border-radius:.25em;">$1</mark>');
+      html = html.replace(/`([^`]+)`/g, '<code style="padding:.08em .35em;border-radius:.4em;background:rgba(99,102,241,.12);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">$1</code>');
       if (node.innerHTML !== html) node.innerHTML = html;
     });
   }
