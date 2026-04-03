@@ -12,7 +12,10 @@
     featured: '/featured-choreo/',
     friends: '/friends/',
     glossary: '/glossary/',
-    pdfimport: '/pdf-import/'
+    pdfimport: '/pdf-import/',
+    settings: '/settings/',
+    music: '/music/',
+    templates: '/templates/'
   };
 
   const PATH_TO_ROUTE = {
@@ -34,6 +37,12 @@
     '/glossary/': 'glossary',
     '/pdf-import': 'pdfimport',
     '/pdf-import/': 'pdfimport',
+    '/settings': 'settings',
+    '/settings/': 'settings',
+    '/music': 'music',
+    '/music/': 'music',
+    '/templates': 'templates',
+    '/templates/': 'templates',
     '/editor/index.html': 'editor',
     '/sheet/index.html': 'preview',
     '/whats-new/index.html': 'whatsnew',
@@ -89,6 +98,9 @@
     if (path.includes('/friends/')) return 'friends';
     if (path.includes('/glossary/')) return 'glossary';
     if (path.includes('/pdf-import/')) return 'pdfimport';
+    if (path.includes('/settings/')) return 'settings';
+    if (path.includes('/music/')) return 'music';
+    if (path.includes('/templates/')) return 'templates';
     if (path.includes('/editor/') || path.endsWith('/editor/index.html/')) return 'editor';
     return null;
   }
@@ -145,6 +157,9 @@
     if (routeName === 'friends') return document.getElementById('stepper-friends-tab');
     if (routeName === 'glossary') return document.getElementById('stepper-glossary-tab');
     if (routeName === 'pdfimport') return document.getElementById('stepper-pdf-tab');
+    if (routeName === 'settings') return document.getElementById('stepper-settings-tab');
+    if (routeName === 'music') return document.getElementById('stepper-music-tab');
+    if (routeName === 'templates') return document.getElementById('stepper-templates-tab');
     return null;
   }
 
@@ -166,6 +181,9 @@
     attachPathBinding(getRouteButton('friends'), 'friends');
     attachPathBinding(getRouteButton('glossary'), 'glossary');
     attachPathBinding(getRouteButton('pdfimport'), 'pdfimport');
+    attachPathBinding(getRouteButton('settings'), 'settings');
+    attachPathBinding(getRouteButton('music'), 'music');
+    attachPathBinding(getRouteButton('templates'), 'templates');
     bindingsReady = !!(getRouteButton('editor') && getRouteButton('preview') && getRouteButton('whatsnew'));
     return bindingsReady;
   }

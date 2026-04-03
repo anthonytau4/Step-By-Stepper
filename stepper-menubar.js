@@ -45,11 +45,15 @@
   /* ── Menu definitions ── */
   function getMenus() {
     var dark = isDarkMode();
-    var _premium = !!(window.__stepperSettingsTab && window.__stepperSettingsTab.getSetting && window.__stepperSettingsTab.getSetting('_premiumUnlocked'));
+    var _premium = false;
     try { var sess = JSON.parse(sessionStorage.getItem('stepper_session') || 'null'); if (sess && sess.premium) _premium = true; } catch(e){}
     try { if (window.__stepperIsPremium && window.__stepperIsPremium()) _premium = true; } catch(e){}
     var lock = _premium ? '' : ' 🔒';
-    return [
+
+    /* Detect if we're on the Build/Sheet (editor) tabs */
+    var onEditorTab = _isEditorTab();
+
+    var menus = [
       {
         label: 'File',
         icon: _ic.fileMenu || _ic.document || '',
@@ -69,23 +73,53 @@
           { type: 'divider' },
           { label: 'Print', icon: _ic.print || '', action: 'print', shortcut: 'Ctrl+P' }
         ]
-      },
-      {
-        label: 'View',
-        icon: _ic.viewMenu || '',
+      }
+    ];
+
+    /* Edit menu — only present on Build / Sheet tabs */
+    if (onEditorTab) {
+      menus.push({
+        label: 'Edit',
+        icon: _ic.editMenu || _ic.edit || '',
         items: [
-          { label: 'Zoom In', icon: _ic.zoomIn || '', action: 'zoom-in', shortcut: 'Ctrl+=' },
-          { label: 'Zoom Out', icon: _ic.zoomOut || '', action: 'zoom-out', shortcut: 'Ctrl+-' },
-          { label: 'Fit to Width', icon: _ic.expand || '', action: 'fit-width' },
+          { label: 'Undo', icon: _ic.undo || '', action: 'undo', shortcut: 'Ctrl+Z' },
+          { label: 'Redo', icon: _ic.redo || '', action: 'redo', shortcut: 'Ctrl+Y' },
           { type: 'divider' },
-          { label: 'Full Screen', icon: _ic.fullscreen || _ic.expand || '', action: 'fullscreen', shortcut: 'F11' },
+          { label: 'Cut', icon: _ic.cut || '', action: 'cut', shortcut: 'Ctrl+X' },
+          { label: 'Copy', icon: _ic.copy || '', action: 'copy', shortcut: 'Ctrl+C' },
+          { label: 'Paste', icon: _ic.paste || '', action: 'paste', shortcut: 'Ctrl+V' },
           { type: 'divider' },
-          { label: dark ? 'Light Mode' : 'Dark Mode', icon: dark ? _ic.sun || '' : _ic.moon || '', action: 'toggle-dark' },
-          { label: 'Show Ruler', icon: _ic.ruler || '', action: 'show-ruler' },
-          { label: 'Show Section Numbers', icon: _ic.hashtag || '', action: 'show-sections' }
+          { label: 'Select All Steps', icon: _ic.check || '', action: 'select-all', shortcut: 'Ctrl+A' },
+          { label: 'Delete Selected', icon: _ic.trash || '', action: 'delete-selected', shortcut: 'Del' },
+          { type: 'divider' },
+          { label: 'Find & Replace…', icon: _ic.search || '', action: 'find-replace', shortcut: 'Ctrl+H' }
         ]
-      },
-      {
+      });
+    }
+
+    menus.push({
+      label: 'View',
+      icon: _ic.viewMenu || '',
+      items: (onEditorTab ? [
+        { label: 'Build Mode', icon: _ic.edit || '', action: 'view-build' },
+        { label: 'Sheet Preview', icon: _ic.document || '', action: 'view-sheet' },
+        { type: 'divider' }
+      ] : []).concat([
+        { label: 'Zoom In', icon: _ic.zoomIn || '', action: 'zoom-in', shortcut: 'Ctrl+=' },
+        { label: 'Zoom Out', icon: _ic.zoomOut || '', action: 'zoom-out', shortcut: 'Ctrl+-' },
+        { label: 'Fit to Width', icon: _ic.expand || '', action: 'fit-width' },
+        { type: 'divider' },
+        { label: 'Full Screen', icon: _ic.fullscreen || _ic.expand || '', action: 'fullscreen', shortcut: 'F11' },
+        { type: 'divider' },
+        { label: dark ? 'Light Mode' : 'Dark Mode', icon: dark ? _ic.sun || '' : _ic.moon || '', action: 'toggle-dark' },
+        { label: 'Show Ruler', icon: _ic.ruler || '', action: 'show-ruler' },
+        { label: 'Show Section Numbers', icon: _ic.hashtag || '', action: 'show-sections' }
+      ])
+    });
+
+    /* Insert + Format — only on Build / Sheet tabs */
+    if (onEditorTab) {
+      menus.push({
         label: 'Insert',
         icon: _ic.insertMenu || _ic.add || '',
         items: [
@@ -97,8 +131,9 @@
           { type: 'divider' },
           { label: 'Comment', icon: _ic.chat || '', action: 'insert-comment' }
         ]
-      },
-      {
+      });
+
+      menus.push({
         label: 'Format',
         icon: _ic.formatMenu || '',
         items: [
@@ -110,7 +145,10 @@
           { label: 'Line Spacing', icon: _ic.list || '', action: 'line-spacing' },
           { label: 'Clear Formatting', icon: _ic.close || '', action: 'clear-format' }
         ]
-      },
+      });
+    }
+
+    menus.push(
       {
         label: 'Tools',
         icon: _ic.toolsMenu || _ic.settings || '',
@@ -164,7 +202,26 @@
           { label: 'About Step-By-Stepper', icon: _ic.info || '', action: 'about' }
         ]
       }
-    ];
+    );
+
+    return menus;
+  }
+
+  /* Detect whether the user is on Build or Sheet (editor) tabs */
+  function _isEditorTab() {
+    /* Check URL path */
+    var path = location.pathname.toLowerCase();
+    if (path.includes('/editor') || path.includes('/sheet') || path === '/' || path === '/index.html') {
+      /* Also make sure no extra tab page is currently active */
+      var extraPages = ['stepper-friends-page','stepper-glossary-page','stepper-pdf-page',
+                        'stepper-settings-page','stepper-music-page','stepper-templates-page'];
+      for (var i = 0; i < extraPages.length; i++) {
+        var pg = document.getElementById(extraPages[i]);
+        if (pg && !pg.hidden && pg.style.display !== 'none') return false;
+      }
+      return true;
+    }
+    return false;
   }
 
   /* ── Action dispatcher ── */
@@ -687,6 +744,7 @@
   var _activeMenu = null;
 
   function closeAllMenus() {
+    var wasOpen = _activeMenu !== null;
     _activeMenu = null;
     var bar = document.getElementById(MENUBAR_ID);
     if (!bar) return;
@@ -696,6 +754,10 @@
     bar.querySelectorAll('.stepper-menu-trigger').forEach(function (t) {
       t.classList.remove('stepper-menu-trigger--open');
     });
+    /* Re-render after closing so context-aware menus update (Edit/Sheet only on editor tabs) */
+    if (wasOpen) {
+      setTimeout(function () { renderMenuBar(); }, 60);
+    }
   }
 
   function toggleMenu(menuIdx) {
@@ -723,6 +785,9 @@
 
   /* ── Render menu bar ── */
   function renderMenuBar() {
+    /* Don't re-render while a dropdown is open — it destroys the open menu */
+    if (_activeMenu !== null) return;
+
     var existing = document.getElementById(MENUBAR_ID);
     if (existing) existing.remove();
 

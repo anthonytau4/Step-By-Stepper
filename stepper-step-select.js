@@ -1107,6 +1107,34 @@
       return;
     }
 
+    // Ctrl+B – Bold
+    if (ctrl && e.key === 'b' && !e.shiftKey && selectedSteps.length && !isTypingInField(e)) {
+      e.preventDefault();
+      formatBold();
+      return;
+    }
+
+    // Ctrl+I – Italic
+    if (ctrl && e.key === 'i' && !e.shiftKey && selectedSteps.length && !isTypingInField(e)) {
+      e.preventDefault();
+      formatItalic();
+      return;
+    }
+
+    // Ctrl+U – Underline
+    if (ctrl && e.key === 'u' && !e.shiftKey && selectedSteps.length && !isTypingInField(e)) {
+      e.preventDefault();
+      formatUnderline();
+      return;
+    }
+
+    // Ctrl+Shift+X – Strikethrough
+    if (ctrl && (e.key === 'X' || (e.key === 'x' && e.shiftKey)) && selectedSteps.length && !isTypingInField(e)) {
+      e.preventDefault();
+      formatStrikethrough();
+      return;
+    }
+
     // Escape – close find/replace or clear selection
     if (e.key === 'Escape') {
       if (frState.open) {
