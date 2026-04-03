@@ -2140,6 +2140,7 @@
     else localStorage.removeItem(SESSION_KEY);
     state.suspension = state.session && state.session.suspension ? state.session.suspension : null;
     updateAdminTabVisibility();
+    try { window.dispatchEvent(new Event('stepper:access-changed')); } catch (e) {}
   }
 
   function clearSession(){
@@ -2234,6 +2235,23 @@
   function isPremiumSession(){
     return isAdminSession() || !!(state.subscription && state.subscription.isPremium);
   }
+
+  function hasPremiumExtensionAccess(){
+    return isAdminSession() || isModeratorSession() || isPremiumSession();
+  }
+
+  window.__stepperIsPremium = function(){
+    return hasPremiumExtensionAccess();
+  };
+  window.__stepperGetPremiumAccessStatus = function(){
+    return {
+      hasAccess: hasPremiumExtensionAccess(),
+      isPremium: isPremiumSession(),
+      isModerator: isModeratorSession(),
+      isAdmin: isAdminSession(),
+      role: String(state.session && state.session.role || '').trim().toLowerCase() || (isAdminSession() ? 'admin' : (isModeratorSession() ? 'moderator' : (isPremiumSession() ? 'premium' : 'member')))
+    };
+  };
 
   function paymentStatusLabel(){
     if (isAdminSession()) return 'Admin access';
@@ -5676,6 +5694,8 @@
       if (state.activePage === 'admin' || state.activePage === 'moderator') state.activePage = 'signin';
       renderPages();
     }
+    try { window.dispatchEvent(new Event('stepper:subscription-changed')); } catch (e) {}
+    try { window.dispatchEvent(new Event('stepper:access-changed')); } catch (e) {}
     return state.subscription;
   };
 

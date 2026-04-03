@@ -29,6 +29,37 @@
     } catch (e) { return false; }
   }
 
+
+  function hasPremiumExtensionAccess() {
+    try {
+      if (window.__stepperGetPremiumAccessStatus && typeof window.__stepperGetPremiumAccessStatus === 'function') {
+        var live = window.__stepperGetPremiumAccessStatus() || {};
+        if (live.hasAccess) return true;
+      }
+    } catch (e) {}
+
+    var sess = null;
+    try { sess = JSON.parse(sessionStorage.getItem('stepper_session') || 'null'); } catch (e) {}
+    if (!sess) {
+      try { sess = JSON.parse(localStorage.getItem('stepper_google_auth_session_v2') || 'null'); } catch (e) {}
+    }
+
+    var role = '';
+    try { role = String((sess && (sess.role || (sess.profile && sess.profile.role))) || '').trim().toLowerCase(); } catch (e) {}
+    if (role === 'admin' || role === 'moderator') return true;
+    try {
+      if (sess && (sess.isAdmin || sess.isModerator || sess.premium || sess.isPremium)) return true;
+    } catch (e) {}
+
+    try {
+      var sub = JSON.parse(localStorage.getItem('stepper_google_subscription_v1') || 'null');
+      var subRole = String((sub && sub.role) || '').trim().toLowerCase();
+      if (sub && (sub.isPremium || sub.isModerator || subRole === 'admin' || subRole === 'moderator')) return true;
+    } catch (e) {}
+
+    return false;
+  }
+
   /* ── Lightweight toast (used by dispatchMenuAction) ── */
   function _toast(msg) {
     if (window.__stepperStepSelect && window.__stepperStepSelect.showToast) {
@@ -46,9 +77,7 @@
   /* ── Menu definitions ── */
   function getMenus() {
     var dark = isDarkMode();
-    var _premium = false;
-    try { var sess = JSON.parse(sessionStorage.getItem('stepper_session') || 'null'); if (sess && sess.premium) _premium = true; } catch(e){}
-    try { if (window.__stepperIsPremium && window.__stepperIsPremium()) _premium = true; } catch(e){}
+    var _premium = hasPremiumExtensionAccess();
     var lock = _premium ? '' : ' 🔒';
 
     /* Detect if we're on the Build/Sheet (editor) tabs */
@@ -709,9 +738,7 @@
       case 'premium-auto-choreo':
       case 'premium-bpm-sync':
       case 'premium-export':
-        var _isPrem = false;
-        try { var ps = JSON.parse(sessionStorage.getItem('stepper_session') || 'null'); if (ps && ps.premium) _isPrem = true; } catch(e){}
-        try { if (window.__stepperIsPremium && window.__stepperIsPremium()) _isPrem = true; } catch(e){}
+        var _isPrem = hasPremiumExtensionAccess();
         if (!_isPrem) {
           _toast('🔒 Premium feature — subscribe to unlock');
           var subTab = document.getElementById('stepper-google-subscription-tab');
@@ -1015,8 +1042,18 @@
     });
     observer.observe(document.body, { childList: true, subtree: true });
 
-    /* Re-render on theme change */
+    /* Re-render on theme/auth/subscription changes */
     window.addEventListener('storage', function () {
+      if (document.getElementById(MENUBAR_ID)) {
+        renderMenuBar();
+      }
+    });
+    window.addEventListener('stepper:access-changed', function () {
+      if (document.getElementById(MENUBAR_ID)) {
+        renderMenuBar();
+      }
+    });
+    window.addEventListener('stepper:subscription-changed', function () {
       if (document.getElementById(MENUBAR_ID)) {
         renderMenuBar();
       }
