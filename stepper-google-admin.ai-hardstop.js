@@ -119,10 +119,28 @@
     return '';
   }
 
+  function getActivePageElement(){
+    const pageMap = {
+      signin: SIGNIN_PAGE_ID,
+      subscription: SUBSCRIPTION_PAGE_ID,
+      admin: ADMIN_PAGE_ID,
+      friends: FRIENDS_PAGE_ID,
+      glossary: GLOSSARY_PAGE_ID,
+      pdfimport: PDF_PAGE_ID,
+      settings: SETTINGS_PAGE_ID,
+      music: MUSIC_PAGE_ID,
+      templates: TEMPLATES_PAGE_ID
+    };
+    const pageId = pageMap[state.activePage || ''];
+    return pageId ? document.getElementById(pageId) : null;
+  }
+
   function adminDraftExists(){
     const host = document.getElementById(HOST_ID);
-    if (!host) return false;
-    const fields = host.querySelectorAll('input, textarea, [contenteditable="true"], [contenteditable="plaintext-only"]');
+    if (!host || !state.activePage) return false;
+    const activePage = getActivePageElement();
+    if (!activePage || activePage.hidden || activePage.style.display === 'none') return false;
+    const fields = activePage.querySelectorAll('input, textarea, [contenteditable="true"], [contenteditable="plaintext-only"]');
     for (const field of fields) {
       if (getTextEntryValue(field)) return true;
     }
@@ -5064,6 +5082,40 @@
     observer.observe(page, { childList: true, subtree: true, characterData: true });
   }
 
+  function renderActiveDedicatedPage(){
+    switch (state.activePage) {
+      case 'signin':
+        renderSignInPage();
+        return true;
+      case 'subscription':
+        renderSubscriptionPage();
+        return true;
+      case 'admin':
+        renderAdminPage();
+        return true;
+      case 'friends':
+        if (window.__stepperFriendsTab) window.__stepperFriendsTab.render();
+        return true;
+      case 'glossary':
+        if (window.__stepperGlossaryTab) window.__stepperGlossaryTab.render();
+        return true;
+      case 'pdfimport':
+        if (window.__stepperPdfTab) window.__stepperPdfTab.render();
+        return true;
+      case 'settings':
+        if (window.__stepperSettingsTab) window.__stepperSettingsTab.render();
+        return true;
+      case 'music':
+        if (window.__stepperMusicTab) window.__stepperMusicTab.render();
+        return true;
+      case 'templates':
+        if (window.__stepperTemplatesTab) window.__stepperTemplatesTab.render();
+        return true;
+      default:
+        return false;
+    }
+  }
+
   function renderPages(force){
     if (!force && shouldDeferAdminAutoRender()) {
       scheduleRenderPages(2000);
@@ -5071,17 +5123,9 @@
     }
     locateUi();
     ensureHost();
-    renderSignInPage();
-    renderSubscriptionPage();
-    renderAdminPage();
+    updateAdminTabVisibility();
     syncPageVisibility();
-    /* ── New tab rendering (after syncPageVisibility so sections are visible) ── */
-    if (state.activePage === 'friends' && window.__stepperFriendsTab) window.__stepperFriendsTab.render();
-    if (state.activePage === 'glossary' && window.__stepperGlossaryTab) window.__stepperGlossaryTab.render();
-    if (state.activePage === 'pdfimport' && window.__stepperPdfTab) window.__stepperPdfTab.render();
-    if (state.activePage === 'settings' && window.__stepperSettingsTab) window.__stepperSettingsTab.render();
-    if (state.activePage === 'music' && window.__stepperMusicTab) window.__stepperMusicTab.render();
-    if (state.activePage === 'templates' && window.__stepperTemplatesTab) window.__stepperTemplatesTab.render();
+    renderActiveDedicatedPage();
     renderPresenceOnly();
     renderSuspensionBanner();
     patchFeaturedPageCopy();
