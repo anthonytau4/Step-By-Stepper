@@ -18,8 +18,25 @@
 
   var MENUBAR_ID = 'stepper-docstyle-menubar';
   var MENUBAR_HOST_ID = 'stepper-docstyle-menubar-host';
+  var QUICK_FORMAT_ID = 'stepper-menubar-quick-format';
+  var NON_EDITOR_PAGES = [
+    'stepper-whatsnew-page',
+    'stepper-saved-dances-page',
+    'stepper-featured-choreo-page',
+    'stepper-google-signin-page',
+    'stepper-google-subscription-page',
+    'stepper-google-admin-page',
+    'stepper-google-moderator-page',
+    'stepper-friends-page',
+    'stepper-glossary-page',
+    'stepper-pdf-page',
+    'stepper-settings-page',
+    'stepper-music-page',
+    'stepper-templates-page'
+  ];
   var _ic = window.__stepperIcons || {};
   var _injected = false;
+  var _rerenderTimer = 0;
 
   /* ── Theme detection ── */
   function isDarkMode() {
@@ -213,11 +230,8 @@
     /* Check URL path */
     var path = location.pathname.toLowerCase();
     if (path.includes('/editor') || path.includes('/sheet') || path === '/' || path === '/index.html') {
-      /* Also make sure no extra tab page is currently active */
-      var extraPages = ['stepper-friends-page','stepper-glossary-page','stepper-pdf-page',
-                        'stepper-settings-page','stepper-music-page','stepper-templates-page'];
-      for (var i = 0; i < extraPages.length; i++) {
-        var pg = document.getElementById(extraPages[i]);
+      for (var i = 0; i < NON_EDITOR_PAGES.length; i++) {
+        var pg = document.getElementById(NON_EDITOR_PAGES[i]);
         if (pg && !pg.hidden && pg.style.display !== 'none') return false;
       }
       return true;
@@ -804,6 +818,21 @@
     } catch (e) { return '#4f46e5'; }
   }
 
+  function buildQuickFormatButton(action, label, title) {
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'stepper-quick-format-btn';
+    btn.dataset.menuAction = action;
+    btn.setAttribute('title', title);
+    btn.setAttribute('aria-label', title);
+    btn.textContent = label;
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      dispatchMenuAction(action);
+    });
+    return btn;
+  }
+
   function renderMenuBar() {
     /* Don't re-render while a dropdown is open — it destroys the open menu */
     if (_activeMenu !== null) return;
@@ -896,6 +925,22 @@
       bar.appendChild(wrapper);
     }
 
+    if (_isEditorTab()) {
+      var spacer = document.createElement('div');
+      spacer.style.cssText = 'flex:1 1 auto;';
+      bar.appendChild(spacer);
+
+      var quickFormat = document.createElement('div');
+      quickFormat.id = QUICK_FORMAT_ID;
+      quickFormat.className = 'stepper-quick-format-strip';
+      quickFormat.appendChild(buildQuickFormatButton('format-bold', 'B', 'Bold (Ctrl+B)'));
+      quickFormat.appendChild(buildQuickFormatButton('format-italic', 'I', 'Italic (Ctrl+I)'));
+      quickFormat.appendChild(buildQuickFormatButton('format-underline', 'U', 'Underline (Ctrl+U)'));
+      quickFormat.appendChild(buildQuickFormatButton('format-strike', 'S', 'Strikethrough'));
+      quickFormat.appendChild(buildQuickFormatButton('clear-format', 'Tx', 'Clear formatting'));
+      bar.appendChild(quickFormat);
+    }
+
     var host = getMenuHost();
     host.innerHTML = '';
     host.appendChild(bar);
@@ -913,6 +958,10 @@
       '.stepper-menu-trigger--open { font-weight: 600 !important; }',
       '#' + MENUBAR_ID + ' { border-bottom-color: color-mix(in srgb, var(--stepper-accent-color, #4f46e5) 18%, rgba(0,0,0,.16)) !important; }',
       '.stepper-menu-dropdown { animation: stepper-menu-drop .12s ease; }',
+      '.stepper-quick-format-strip { display:inline-flex; align-items:center; gap:4px; margin-left:12px; padding-left:10px; border-left:1px solid color-mix(in srgb, var(--stepper-accent-color, #4f46e5) 18%, rgba(0,0,0,.14)); }',
+      '.stepper-quick-format-btn { min-width:28px; height:22px; padding:0 8px; border-radius:7px; border:1px solid color-mix(in srgb, var(--stepper-accent-color, #4f46e5) 22%, rgba(0,0,0,.14)); background:color-mix(in srgb, var(--stepper-accent-color, #4f46e5) 6%, transparent); color:inherit; cursor:pointer; font-size:11px; font-weight:800; line-height:1; transition:background .12s ease, color .12s ease, transform .12s ease; }',
+      '.stepper-quick-format-btn:hover { background: color-mix(in srgb, var(--stepper-accent-color, #4f46e5) 16%, transparent); color: var(--stepper-accent-color, #4f46e5); transform: translateY(-1px); }',
+      '.stepper-quick-format-btn:active { transform: translateY(0); }',
       '@keyframes stepper-menu-drop { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }',
       '#' + MENUBAR_ID + ' svg { width: 14px !important; height: 14px !important; }'
     ].join('\n');
@@ -942,12 +991,23 @@
     });
     observer.observe(document.body, { childList: true, subtree: true });
 
-    /* Re-render on theme change */
-    window.addEventListener('storage', function () {
-      if (document.getElementById(MENUBAR_ID)) {
-        renderMenuBar();
-      }
+    /* Re-render on theme/layout changes */
+    function rerenderMenuBar() {
+      if (_rerenderTimer) return;
+      _rerenderTimer = window.requestAnimationFrame(function () {
+        _rerenderTimer = 0;
+        if (document.getElementById(MENUBAR_ID)) {
+          renderMenuBar();
+        }
+      });
+    }
+    window.addEventListener('storage', rerenderMenuBar);
+    window.addEventListener('stepper-settings-changed', function (event) {
+      var detail = event && event.detail ? event.detail : {};
+      var key = String(detail.key || '');
+      if (!key || key === '_all' || key === 'theme' || key === 'fontFamily') rerenderMenuBar();
     });
+    window.addEventListener('stepper-theme-updated', rerenderMenuBar);
   }
 
   if (document.readyState === 'loading') {

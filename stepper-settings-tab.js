@@ -28,6 +28,8 @@
   var TAB_ID  = 'stepper-settings-tab';
   var LS_KEY  = 'stepper_settings_v1';
   var BUILDER_DATA_KEY = 'linedance_builder_data_v13';
+  var _queuedSettingsRender = 0;
+  var _queuedAccentNotify = 0;
 
   /* ════════════════════════════════════════════════════════════
      DEFAULT SETTINGS
@@ -309,6 +311,14 @@
     return settingsState.settings.hasOwnProperty(key) ? settingsState.settings[key] : DEFAULTS[key];
   }
 
+  function queueSettingsRender() {
+    if (_queuedSettingsRender) return;
+    _queuedSettingsRender = window.requestAnimationFrame(function () {
+      _queuedSettingsRender = 0;
+      renderSettingsPage();
+    });
+  }
+
   function escapeHtml(text) {
     var div = document.createElement('div');
     div.appendChild(document.createTextNode(String(text)));
@@ -429,7 +439,11 @@
       var meta = document.getElementById('stepper-theme-color');
       if (meta) meta.setAttribute('content', accent.hex);
     } catch (e) { /* noop */ }
-    try { window.dispatchEvent(new Event('stepper-theme-updated')); } catch (e2) { /* noop */ }
+    if (_queuedAccentNotify) return;
+    _queuedAccentNotify = window.requestAnimationFrame(function () {
+      _queuedAccentNotify = 0;
+      try { window.dispatchEvent(new Event('stepper-theme-updated')); } catch (e2) { /* noop */ }
+    });
   }
 
   function hexToRgbString(hex) {
@@ -463,6 +477,15 @@
       if (settings.hasOwnProperty(key)) applyLiveSetting(key, settings[key]);
     }
     try { window.dispatchEvent(new Event('stepper-theme-updated')); } catch (e) { /* noop */ }
+  }
+
+  function applyAppearanceLiveSettings(settings) {
+    settings = settings || settingsState.settings || loadSettings();
+    var keys = ['theme', 'accentColor', 'fontFamily', 'fontSize', 'highContrastMode', 'reduceMotion', 'dyslexiaFriendlyFont', 'textSpacing', 'tabSize'];
+    for (var i = 0; i < keys.length; i++) {
+      var key = keys[i];
+      applyLiveSetting(key, settings.hasOwnProperty(key) ? settings[key] : DEFAULTS[key]);
+    }
   }
 
   /* ════════════════════════════════════════════════════════════
@@ -1389,8 +1412,9 @@
       btn.addEventListener('click', function () {
         var key = btn.getAttribute('data-settings-color');
         var val = btn.getAttribute('data-value');
+        if (String(getSetting(key)) === String(val)) return;
         setSetting(key, val);
-        renderSettingsPage();
+        queueSettingsRender();
       });
     });
 
@@ -1563,7 +1587,7 @@
   });
   window.addEventListener('stepper-theme-updated', function () {
     settingsState.settings = loadSettings();
-    applyAllLiveSettings(settingsState.settings);
+    applyAppearanceLiveSettings(settingsState.settings);
   });
 
   /* ════════════════════════════════════════════════════════════
