@@ -1,6 +1,18 @@
 (function(){
   if (window.__stepperStaticStartupInstalled) return;
   window.__stepperStaticStartupInstalled = true;
+
+  /* ── Skip startup on reload within the same session ──
+     First visit shows the splash. Subsequent reloads go straight to the editor. */
+  var SESSION_SEEN_KEY = '__stepper_startup_seen';
+  try {
+    if (sessionStorage.getItem(SESSION_SEEN_KEY) === '1') {
+      var splashEl = document.getElementById('stepper-static-startup');
+      if (splashEl) { splashEl.hidden = true; splashEl.remove(); }
+      return;
+    }
+  } catch(e){}
+
   const STARTUP_MIN_MS = 8400;
   const STARTUP_FALLBACK_MS = 9800;
   const STARTUP_FADE_MS = 340;
@@ -101,6 +113,8 @@
     function leave(){
       if (leaving) return;
       leaving = true;
+      /* Mark session so reloads skip straight to editor */
+      try { sessionStorage.setItem(SESSION_SEEN_KEY, '1'); } catch(e){}
       splash.classList.add('is-leaving');
       window.setTimeout(() => {
         try { audio.pause(); audio.currentTime = 0; } catch {}

@@ -2143,6 +2143,42 @@ app.get("/api/friends/chat", requireGoogleUser, async (req, res) => {
   const friendship = db.friends.find(f => f && f.id === friendId && f.status === "accepted" && (f.fromKey === key || f.toEmail === email));
   if (!friendship) return res.status(403).json({ ok: false, error: "You are not friends with this person." });
   if (!db.friendChat) db.friendChat = [];
+  /* Mark messages from the OTHER person as delivered when fetched */
+  let didUpdate = false;
+  db.friendChat.forEach(m => {
+    if (m && m.friendshipId === friendId && (m.senderEmail || '').toLowerCase() !== email && (!m.status || m.status === 'sent')) {
+      m.status = 'delivered';
+      m.deliveredAt = new Date().toISOString();
+      didUpdate = true;
+    }
+  });
+  if (didUpdate) await writeDb(db);
+  const messages = db.friendChat
+    .filter(m => m && m.friendshipId === friendId)
+    .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+  res.json({ ok: true, messages });
+});
+
+/* ── Mark messages as read ── */
+app.post("/api/friends/chat/read", requireGoogleUser, async (req, res) => {
+  const db = await readDb();
+  const key = userKeyFromClaims(req.stepperClaims);
+  const email = normalizeEmail(req.stepperUser?.email);
+  const friendId = String(req.body?.friendId || "").trim();
+  if (!friendId) return res.status(400).json({ ok: false, error: "Missing friendId." });
+  if (!db.friends) db.friends = [];
+  const friendship = db.friends.find(f => f && f.id === friendId && f.status === "accepted" && (f.fromKey === key || f.toEmail === email));
+  if (!friendship) return res.status(403).json({ ok: false, error: "Not friends." });
+  if (!db.friendChat) db.friendChat = [];
+  let didUpdate = false;
+  db.friendChat.forEach(m => {
+    if (m && m.friendshipId === friendId && (m.senderEmail || '').toLowerCase() !== email && m.status !== 'read') {
+      m.status = 'read';
+      m.readAt = new Date().toISOString();
+      didUpdate = true;
+    }
+  });
+  if (didUpdate) await writeDb(db);
   const messages = db.friendChat
     .filter(m => m && m.friendshipId === friendId)
     .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
@@ -2168,8 +2204,10 @@ app.post("/api/friends/chat", requireGoogleUser, async (req, res) => {
     senderKey: key,
     senderEmail: email,
     senderName: String(db.users[key]?.displayName || req.stepperUser?.name || "").trim(),
+    senderRole: getRoleForBucket(db.users[key] || {}, req.stepperUser),
     text: text.slice(0, 4000),
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    status: 'sent'
   };
   db.friendChat.push(item);
   db.friendChat = db.friendChat.slice(-10000);
