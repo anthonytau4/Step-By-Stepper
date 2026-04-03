@@ -268,16 +268,80 @@
     if (document.body && document.body.__stepperHistoryKeyWired) return;
     if (document.body) document.body.__stepperHistoryKeyWired = true;
     document.addEventListener('keydown', (event) => {
-      if (!isEditorSurfaceVisible()) return;
+      if (!isEditorSurfaceVisible()) {
+        /* Global shortcuts that work on any page */
+        if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+        const key = String(event.key || '').toLowerCase();
+        /* Ctrl+1 = Build tab, Ctrl+2 = Sheet tab, Ctrl+3 = What's New */
+        if (key === '1') { event.preventDefault(); const btn = document.querySelector('button'); const b = Array.from(document.querySelectorAll('button')).find(b => (b.textContent||'').trim() === 'Build'); if (b) b.click(); return; }
+        if (key === '2') { event.preventDefault(); const b = Array.from(document.querySelectorAll('button')).find(b => (b.textContent||'').trim() === 'Sheet'); if (b) b.click(); return; }
+        if (key === '3') { event.preventDefault(); const b = Array.from(document.querySelectorAll('button')).find(b => (b.textContent||'').trim() === "What's New"); if (b) b.click(); return; }
+        return;
+      }
       if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
       const key = String(event.key || '').toLowerCase();
-      if (isTextEntryElement(event.target)) return;
+      if (isTextEntryElement(event.target)) {
+        /* Allow Ctrl+Z/Y even in text fields for undo/redo of the whole dance */
+        if (key === 'z' && !event.shiftKey && (event.ctrlKey && event.altKey === false)) return;
+        if (key === 'y') return;
+        return;
+      }
       if (key === 'z' && !event.shiftKey) {
         event.preventDefault();
         undo();
       } else if (key === 'y' || (key === 'z' && event.shiftKey)) {
         event.preventDefault();
         redo();
+      } else if (key === 'd' && !event.shiftKey) {
+        /* Ctrl+D = Toggle dark mode */
+        event.preventDefault();
+        try {
+          const dataKey = 'linedance_builder_data_v13';
+          const raw = localStorage.getItem(dataKey);
+          const data = raw ? JSON.parse(raw) : {};
+          data.isDarkMode = !data.isDarkMode;
+          localStorage.setItem(dataKey, JSON.stringify(data));
+          window.dispatchEvent(new Event('storage'));
+        } catch {}
+      } else if (key === '1') {
+        /* Ctrl+1 = Build tab */
+        event.preventDefault();
+        const b = Array.from(document.querySelectorAll('button')).find(b => (b.textContent||'').trim() === 'Build');
+        if (b) b.click();
+      } else if (key === '2') {
+        /* Ctrl+2 = Sheet tab */
+        event.preventDefault();
+        const b = Array.from(document.querySelectorAll('button')).find(b => (b.textContent||'').trim() === 'Sheet');
+        if (b) b.click();
+      } else if (key === '3') {
+        /* Ctrl+3 = What's New tab */
+        event.preventDefault();
+        const b = Array.from(document.querySelectorAll('button')).find(b => (b.textContent||'').trim() === "What's New");
+        if (b) b.click();
+      } else if (key === '4') {
+        /* Ctrl+4 = My Saved Dances tab */
+        event.preventDefault();
+        const b = document.getElementById('stepper-saved-dances-tab') || Array.from(document.querySelectorAll('button')).find(b => (b.textContent||'').trim() === 'My Saved Dances');
+        if (b) b.click();
+      } else if (key === '5') {
+        /* Ctrl+5 = Friends tab */
+        event.preventDefault();
+        const b = document.getElementById('stepper-friends-tab');
+        if (b) b.click();
+      } else if (key === '6') {
+        /* Ctrl+6 = Glossary tab */
+        event.preventDefault();
+        const b = document.getElementById('stepper-glossary-tab');
+        if (b) b.click();
+      } else if (key === '/') {
+        /* Ctrl+/ = Toggle help panel */
+        event.preventDefault();
+        const helpPanel = document.getElementById('stepper-help-panel');
+        if (helpPanel) helpPanel.hidden = !helpPanel.hidden;
+      } else if (key === 'escape') {
+        /* Escape = Close open panels */
+        const helpPanel = document.getElementById('stepper-help-panel');
+        if (helpPanel && !helpPanel.hidden) { helpPanel.hidden = true; event.preventDefault(); }
       }
     }, true);
   }

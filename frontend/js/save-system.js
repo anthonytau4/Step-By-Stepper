@@ -2,11 +2,8 @@
 let timeout = null;
 
 export function scheduleSave(dance) {
+  /* Autosave disabled — saves must be triggered manually */
   clearTimeout(timeout);
-
-  timeout = setTimeout(() => {
-    saveDance(dance);
-  }, 800);
 }
 
 async function saveDance(dance) {

@@ -16,17 +16,228 @@
   const FONT_FAMILIES = {
     system: 'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
     rounded: '"Trebuchet MS", "Avenir Next", "Segoe UI", sans-serif',
-    elegant: 'Georgia, "Times New Roman", serif'
+    elegant: 'Georgia, "Times New Roman", serif',
+    /* ── Google Fonts (200+) ── */
+    'ABeeZee': '"ABeeZee", sans-serif',
+    'Abel': '"Abel", sans-serif',
+    'Abril Fatface': '"Abril Fatface", serif',
+    'Acme': '"Acme", sans-serif',
+    'Alegreya': '"Alegreya", serif',
+    'Alegreya Sans': '"Alegreya Sans", sans-serif',
+    'Alfa Slab One': '"Alfa Slab One", serif',
+    'Alice': '"Alice", serif',
+    'Almarai': '"Almarai", sans-serif',
+    'Amatic SC': '"Amatic SC", cursive',
+    'Amiri': '"Amiri", serif',
+    'Antic Slab': '"Antic Slab", serif',
+    'Anton': '"Anton", sans-serif',
+    'Architects Daughter': '"Architects Daughter", cursive',
+    'Archivo': '"Archivo", sans-serif',
+    'Archivo Black': '"Archivo Black", sans-serif',
+    'Archivo Narrow': '"Archivo Narrow", sans-serif',
+    'Arimo': '"Arimo", sans-serif',
+    'Arsenal': '"Arsenal", sans-serif',
+    'Arvo': '"Arvo", serif',
+    'Asap': '"Asap", sans-serif',
+    'Asap Condensed': '"Asap Condensed", sans-serif',
+    'Assistant': '"Assistant", sans-serif',
+    'Balsamiq Sans': '"Balsamiq Sans", cursive',
+    'Bangers': '"Bangers", cursive',
+    'Barlow': '"Barlow", sans-serif',
+    'Barlow Condensed': '"Barlow Condensed", sans-serif',
+    'Barlow Semi Condensed': '"Barlow Semi Condensed", sans-serif',
+    'Be Vietnam Pro': '"Be Vietnam Pro", sans-serif',
+    'Bebas Neue': '"Bebas Neue", sans-serif',
+    'Bitter': '"Bitter", serif',
+    'Black Ops One': '"Black Ops One", cursive',
+    'Bree Serif': '"Bree Serif", serif',
+    'Cabin': '"Cabin", sans-serif',
+    'Cairo': '"Cairo", sans-serif',
+    'Cantarell': '"Cantarell", sans-serif',
+    'Catamaran': '"Catamaran", sans-serif',
+    'Caveat': '"Caveat", cursive',
+    'Chakra Petch': '"Chakra Petch", sans-serif',
+    'Changa': '"Changa", sans-serif',
+    'Chivo': '"Chivo", sans-serif',
+    'Cinzel': '"Cinzel", serif',
+    'Comfortaa': '"Comfortaa", cursive',
+    'Commissioner': '"Commissioner", sans-serif',
+    'Concert One': '"Concert One", cursive',
+    'Cookie': '"Cookie", cursive',
+    'Cormorant': '"Cormorant", serif',
+    'Cormorant Garamond': '"Cormorant Garamond", serif',
+    'Courgette': '"Courgette", cursive',
+    'Crete Round': '"Crete Round", serif',
+    'Crimson Pro': '"Crimson Pro", serif',
+    'Crimson Text': '"Crimson Text", serif',
+    'Cuprum': '"Cuprum", sans-serif',
+    'DM Sans': '"DM Sans", sans-serif',
+    'DM Serif Display': '"DM Serif Display", serif',
+    'DM Serif Text': '"DM Serif Text", serif',
+    'Dancing Script': '"Dancing Script", cursive',
+    'Didact Gothic': '"Didact Gothic", sans-serif',
+    'Domine': '"Domine", serif',
+    'Dosis': '"Dosis", sans-serif',
+    'EB Garamond': '"EB Garamond", serif',
+    'El Messiri': '"El Messiri", sans-serif',
+    'Electrolize': '"Electrolize", sans-serif',
+    'Encode Sans': '"Encode Sans", sans-serif',
+    'Exo': '"Exo", sans-serif',
+    'Exo 2': '"Exo 2", sans-serif',
+    'Fira Code': '"Fira Code", monospace',
+    'Fira Sans': '"Fira Sans", sans-serif',
+    'Fira Sans Condensed': '"Fira Sans Condensed", sans-serif',
+    'Fjalla One': '"Fjalla One", sans-serif',
+    'Francois One': '"Francois One", sans-serif',
+    'Frank Ruhl Libre': '"Frank Ruhl Libre", serif',
+    'Fredoka One': '"Fredoka One", sans-serif',
+    'Gloria Hallelujah': '"Gloria Hallelujah", cursive',
+    'Gothic A1': '"Gothic A1", sans-serif',
+    'Great Vibes': '"Great Vibes", cursive',
+    'Heebo': '"Heebo", sans-serif',
+    'Hind': '"Hind", sans-serif',
+    'Hind Madurai': '"Hind Madurai", sans-serif',
+    'Hind Siliguri': '"Hind Siliguri", sans-serif',
+    'IBM Plex Mono': '"IBM Plex Mono", monospace',
+    'IBM Plex Sans': '"IBM Plex Sans", sans-serif',
+    'IBM Plex Serif': '"IBM Plex Serif", serif',
+    'Inconsolata': '"Inconsolata", monospace',
+    'Indie Flower': '"Indie Flower", cursive',
+    'Inter': '"Inter", sans-serif',
+    'Josefin Sans': '"Josefin Sans", sans-serif',
+    'Josefin Slab': '"Josefin Slab", serif',
+    'Jost': '"Jost", sans-serif',
+    'Kalam': '"Kalam", cursive',
+    'Kanit': '"Kanit", sans-serif',
+    'Karla': '"Karla", sans-serif',
+    'Kaushan Script': '"Kaushan Script", cursive',
+    'Lato': '"Lato", sans-serif',
+    'League Spartan': '"League Spartan", sans-serif',
+    'Lexend': '"Lexend", sans-serif',
+    'Libre Baskerville': '"Libre Baskerville", serif',
+    'Libre Caslon Text': '"Libre Caslon Text", serif',
+    'Libre Franklin': '"Libre Franklin", sans-serif',
+    'Lilita One': '"Lilita One", sans-serif',
+    'Lobster': '"Lobster", cursive',
+    'Lobster Two': '"Lobster Two", cursive',
+    'Lora': '"Lora", serif',
+    'Luckiest Guy': '"Luckiest Guy", cursive',
+    'M PLUS Rounded 1c': '"M PLUS Rounded 1c", sans-serif',
+    'Macondo': '"Macondo", cursive',
+    'Manrope': '"Manrope", sans-serif',
+    'Marcellus': '"Marcellus", serif',
+    'Martel': '"Martel", serif',
+    'Maven Pro': '"Maven Pro", sans-serif',
+    'Merriweather': '"Merriweather", serif',
+    'Merriweather Sans': '"Merriweather Sans", sans-serif',
+    'Montserrat': '"Montserrat", sans-serif',
+    'Montserrat Alternates': '"Montserrat Alternates", sans-serif',
+    'Mukta': '"Mukta", sans-serif',
+    'Mulish': '"Mulish", sans-serif',
+    'Nanum Gothic': '"Nanum Gothic", sans-serif',
+    'Nanum Myeongjo': '"Nanum Myeongjo", serif',
+    'Neuton': '"Neuton", serif',
+    'Noticia Text': '"Noticia Text", serif',
+    'Noto Sans': '"Noto Sans", sans-serif',
+    'Noto Sans JP': '"Noto Sans JP", sans-serif',
+    'Noto Sans KR': '"Noto Sans KR", sans-serif',
+    'Noto Sans TC': '"Noto Sans TC", sans-serif',
+    'Noto Serif': '"Noto Serif", serif',
+    'Nunito': '"Nunito", sans-serif',
+    'Nunito Sans': '"Nunito Sans", sans-serif',
+    'Old Standard TT': '"Old Standard TT", serif',
+    'Oleo Script': '"Oleo Script", cursive',
+    'Open Sans': '"Open Sans", sans-serif',
+    'Orbitron': '"Orbitron", sans-serif',
+    'Oswald': '"Oswald", sans-serif',
+    'Outfit': '"Outfit", sans-serif',
+    'Overpass': '"Overpass", sans-serif',
+    'Oxygen': '"Oxygen", sans-serif',
+    'PT Sans': '"PT Sans", sans-serif',
+    'PT Sans Narrow': '"PT Sans Narrow", sans-serif',
+    'PT Serif': '"PT Serif", serif',
+    'Pacifico': '"Pacifico", cursive',
+    'Passion One': '"Passion One", sans-serif',
+    'Pathway Gothic One': '"Pathway Gothic One", sans-serif',
+    'Patrick Hand': '"Patrick Hand", cursive',
+    'Patua One': '"Patua One", serif',
+    'Permanent Marker': '"Permanent Marker", cursive',
+    'Philosopher': '"Philosopher", sans-serif',
+    'Play': '"Play", sans-serif',
+    'Playfair Display': '"Playfair Display", serif',
+    'Playfair Display SC': '"Playfair Display SC", serif',
+    'Plus Jakarta Sans': '"Plus Jakarta Sans", sans-serif',
+    'Poppins': '"Poppins", sans-serif',
+    'Pragati Narrow': '"Pragati Narrow", sans-serif',
+    'Press Start 2P': '"Press Start 2P", cursive',
+    'Prompt': '"Prompt", sans-serif',
+    'Public Sans': '"Public Sans", sans-serif',
+    'Quattrocento': '"Quattrocento", serif',
+    'Quattrocento Sans': '"Quattrocento Sans", sans-serif',
+    'Questrial': '"Questrial", sans-serif',
+    'Quicksand': '"Quicksand", sans-serif',
+    'Rajdhani': '"Rajdhani", sans-serif',
+    'Raleway': '"Raleway", sans-serif',
+    'Red Hat Display': '"Red Hat Display", sans-serif',
+    'Righteous': '"Righteous", sans-serif',
+    'Roboto': '"Roboto", sans-serif',
+    'Roboto Condensed': '"Roboto Condensed", sans-serif',
+    'Roboto Mono': '"Roboto Mono", monospace',
+    'Roboto Slab': '"Roboto Slab", serif',
+    'Rokkitt': '"Rokkitt", serif',
+    'Rowdies': '"Rowdies", cursive',
+    'Rubik': '"Rubik", sans-serif',
+    'Russo One': '"Russo One", sans-serif',
+    'Sacramento': '"Sacramento", cursive',
+    'Saira': '"Saira", sans-serif',
+    'Saira Condensed': '"Saira Condensed", sans-serif',
+    'Satisfy': '"Satisfy", cursive',
+    'Sawarabi Gothic': '"Sawarabi Gothic", sans-serif',
+    'Sen': '"Sen", sans-serif',
+    'Shadows Into Light': '"Shadows Into Light", cursive',
+    'Signika': '"Signika", sans-serif',
+    'Signika Negative': '"Signika Negative", sans-serif',
+    'Slabo 27px': '"Slabo 27px", serif',
+    'Source Code Pro': '"Source Code Pro", monospace',
+    'Source Sans 3': '"Source Sans 3", sans-serif',
+    'Source Serif 4': '"Source Serif 4", serif',
+    'Space Grotesk': '"Space Grotesk", sans-serif',
+    'Space Mono': '"Space Mono", monospace',
+    'Spectral': '"Spectral", serif',
+    'Tajawal': '"Tajawal", sans-serif',
+    'Tangerine': '"Tangerine", cursive',
+    'Teko': '"Teko", sans-serif',
+    'Titillium Web': '"Titillium Web", sans-serif',
+    'Ubuntu': '"Ubuntu", sans-serif',
+    'Ubuntu Condensed': '"Ubuntu Condensed", sans-serif',
+    'Urbanist': '"Urbanist", sans-serif',
+    'Varela Round': '"Varela Round", sans-serif',
+    'Vollkorn': '"Vollkorn", serif',
+    'Work Sans': '"Work Sans", sans-serif',
+    'Yanone Kaffeesatz': '"Yanone Kaffeesatz", sans-serif',
+    'Yellowtail': '"Yellowtail", cursive',
+    'Zilla Slab': '"Zilla Slab", serif'
   };
+
+  /* Track loaded Google Fonts to avoid duplicate link tags */
+  const _loadedGoogleFonts = new Set(['system', 'rounded', 'elegant']);
+  function loadGoogleFont(fontKey){
+    if (_loadedGoogleFonts.has(fontKey)) return;
+    _loadedGoogleFonts.add(fontKey);
+    var link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = 'https://fonts.googleapis.com/css2?family=' + encodeURIComponent(fontKey).replace(/%20/g, '+') + ':wght@400;700;900&display=swap';
+    document.head.appendChild(link);
+  }
   const EXTRA_NOTES = [
     "New: My Saved Dances now has its own tab, plus Google sign-in and cloud-save front ends so this device remembers what people build more cleanly.",
     "New: Counts and Walls can stay on Auto now, and the Sheet view shows the real detected numbers instead of printing AUTO.",
-    "Just in case: changing font can't be applied. Sorry Bruce Tau but you just got pranked 😛",
+    "Just in case: there are now 200+ fonts to choose from in Settings. Pick your favorite!",
     'New: counts now auto-sync from the built step content, and tags are left out of that total on purpose.',
     'New: phrased dance tools now support editable Parts, a Sequence tab, and tag-aware phrased building inspired by CopperKnob-style A/B/C + Tag sheets.',
     'New: Featured Dances now let you load a saved dance back into the editor, delete saved dances with a prompt, and open a Gmail submission that tells you to attach the PDF.',
     'New: right-click a section header to add that section straight into a new Part, and the labels start at A, B, C but stay editable.',
-    'New: Settings now gives you three quick font style buttons, and each one previews its look before you press it.'
+    'New: Settings now gives you a searchable font dropdown with 200+ Google Fonts.'
   ];
   let lastFeaturedSignature = '';
   let contextMenuState = null;
@@ -71,7 +282,7 @@
     return {
       sfxEnabled: saved.sfxEnabled !== false,
       thinkingMusicEnabled: saved.thinkingMusicEnabled === true,
-      fontFamily: ['system','rounded','elegant'].includes(saved.fontFamily) ? saved.fontFamily : 'system'
+      fontFamily: (saved.fontFamily && FONT_FAMILIES[saved.fontFamily]) ? saved.fontFamily : 'system'
     };
   }
 
@@ -354,25 +565,7 @@
   }
 
   function maybeRestoreSavedForLaterOnBoot(){
-    let payload = null;
-    try { payload = getSavedForLater(); } catch {}
-    if (!payload || !payload.snapshot) return false;
-    try {
-      if (sessionStorage.getItem(SAVE_LATER_SESSION_KEY) === 'restored') return false;
-    } catch {}
-    const targetData = payload.snapshot.data || payload.snapshot;
-    const targetTools = payload.snapshot.phrasedTools || {};
-    const currentData = readAppData();
-    const currentTools = readStoredPhrasedTools();
-    const same = JSON.stringify(currentData || {}) === JSON.stringify(targetData || {}) && JSON.stringify(currentTools || {}) === JSON.stringify(targetTools || {});
-    if (!same) {
-      writeAppData(targetData);
-      writeStoredPhrasedTools(targetTools);
-      try { sessionStorage.setItem(SAVE_LATER_SESSION_KEY, 'restored'); } catch {}
-      location.reload();
-      return true;
-    }
-    try { sessionStorage.setItem(SAVE_LATER_SESSION_KEY, 'restored'); } catch {}
+    /* Disabled: reload should not restore any previous state */
     return false;
   }
 
@@ -442,6 +635,7 @@
 
   function applyFontSettings(){
     const settings = getSettings();
+    loadGoogleFont(settings.fontFamily);
     document.documentElement.style.setProperty('--stepper-font-family', FONT_FAMILIES[settings.fontFamily] || FONT_FAMILIES.system);
   }
 
@@ -648,6 +842,8 @@
       <p><strong>Italics</strong><span class="stepper-help-code ${theme.panel}">/*Sample Text*/</span></p>
       <p><strong>Underline</strong><span class="stepper-help-code ${theme.panel}">_Sample Text_</span></p>
       <p><strong>Computer shortcuts</strong><span class="stepper-help-code ${theme.panel}">Ctrl+B bold · Ctrl+I italics · Ctrl+U underline</span></p>
+      <p><strong>Navigation shortcuts</strong><span class="stepper-help-code ${theme.panel}">Ctrl+1 Build · Ctrl+2 Sheet · Ctrl+3 What's New · Ctrl+4 Saved Dances · Ctrl+5 Friends · Ctrl+6 Glossary</span></p>
+      <p><strong>Editor shortcuts</strong><span class="stepper-help-code ${theme.panel}">Ctrl+Z Undo · Ctrl+Y Redo · Ctrl+D Dark Mode · Ctrl+/ Help · Esc Close</span></p>
     `;
     if (!fab.__stepperHelpWired) {
       fab.__stepperHelpWired = true;
@@ -665,11 +861,8 @@
     if (!panel) return;
     const theme = themeClasses();
     const settings = getSettings();
-    const fontChoices = [
-      { key:'system', title:'Classic', sample:'Clean editor finish', family: FONT_FAMILIES.system },
-      { key:'rounded', title:'Rounded', sample:'Soft and friendly', family: FONT_FAMILIES.rounded },
-      { key:'elegant', title:'Elegant', sample:'Formal sheet look', family: FONT_FAMILIES.elegant }
-    ];
+    const allFontKeys = Object.keys(FONT_FAMILIES);
+    const currentLabel = settings.fontFamily === 'system' ? 'Classic (System)' : settings.fontFamily === 'rounded' ? 'Rounded' : settings.fontFamily === 'elegant' ? 'Elegant' : settings.fontFamily;
     panel.className = `rounded-3xl border shadow-sm overflow-hidden ${theme.shell}`;
     panel.innerHTML = `
       <div class="px-6 py-5 border-b ${theme.panel}">
@@ -678,13 +871,15 @@
       <div class="p-6 sm:p-8 space-y-5">
         <div class="rounded-3xl border p-5 sm:p-6 ${theme.soft}">
           <div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle} mb-3">Font Style</div>
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            ${fontChoices.map(choice => `
-              <button type="button" class="stepper-font-choice ${theme.button}" data-font-choice="${choice.key}" data-active="${settings.fontFamily === choice.key ? 'true' : 'false'}" style="font-family:${choice.family}">
-                <strong>${escapeHtml(choice.title)}</strong>
-                <span>${escapeHtml(choice.sample)}</span>
-              </button>
-            `).join('')}
+          <p class="text-sm mb-3 ${theme.subtle}">Current: <strong>${escapeHtml(currentLabel)}</strong></p>
+          <input type="text" id="stepper-font-search" placeholder="Search fonts…" class="w-full rounded-2xl border px-4 py-3 mb-3 text-sm" style="${theme.dark ? 'background:#111827;border-color:#374151;color:#f5f5f5;' : 'background:#fff;border-color:#d1d5db;color:#111827;'}">
+          <div id="stepper-font-list" style="max-height:320px;overflow-y:auto;display:grid;gap:6px;">
+            ${allFontKeys.map(key => {
+              const label = key === 'system' ? 'Classic (System)' : key === 'rounded' ? 'Rounded' : key === 'elegant' ? 'Elegant' : key;
+              return `<button type="button" class="stepper-font-choice ${theme.button}" data-font-choice="${escapeHtml(key)}" data-active="${settings.fontFamily === key ? 'true' : 'false'}" style="font-family:${FONT_FAMILIES[key]}">
+                <strong>${escapeHtml(label)}</strong>
+              </button>`;
+            }).join('')}
           </div>
         </div>
         <button type="button" data-stepper-setting="sfx" class="rounded-3xl border w-full text-left p-5 sm:p-6 flex items-center justify-between gap-4 ${theme.soft}">
@@ -699,9 +894,25 @@
     `;
     panel.querySelector('[data-stepper-setting="sfx"]').addEventListener('click', () => { const current = getSettings(); current.sfxEnabled = !current.sfxEnabled; saveSettings(current); renderSettingsPanel(); });
     panel.querySelector('[data-stepper-setting="thinking"]').addEventListener('click', () => { const current = getSettings(); current.thinkingMusicEnabled = !current.thinkingMusicEnabled; saveSettings(current); renderSettingsPanel(); });
+    const fontSearch = panel.querySelector('#stepper-font-search');
+    const fontList = panel.querySelector('#stepper-font-list');
+    if (fontSearch && fontList) {
+      fontSearch.addEventListener('input', () => {
+        const query = fontSearch.value.toLowerCase().trim();
+        fontList.querySelectorAll('[data-font-choice]').forEach(btn => {
+          const key = (btn.getAttribute('data-font-choice') || '').toLowerCase();
+          btn.style.display = (!query || key.includes(query)) ? '' : 'none';
+        });
+      });
+    }
     panel.querySelectorAll('[data-font-choice]').forEach(button => {
+      button.addEventListener('mouseenter', () => {
+        const key = button.getAttribute('data-font-choice') || 'system';
+        loadGoogleFont(key);
+      });
       button.addEventListener('click', () => {
-        saveSettings({ fontFamily: button.getAttribute('data-font-choice') || 'system' });
+        const key = button.getAttribute('data-font-choice') || 'system';
+        saveSettings({ fontFamily: key });
         applyFontSettings();
         renderSettingsPanel();
       });

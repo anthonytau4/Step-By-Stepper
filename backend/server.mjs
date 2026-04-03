@@ -2009,6 +2009,7 @@ app.post("/api/collaborators/invite", requireGoogleUser, async (req, res) => {
     email,
     name: "",
     status: "invited",
+    danceData: req.body?.danceData || null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
