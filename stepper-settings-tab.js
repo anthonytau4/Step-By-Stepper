@@ -116,6 +116,13 @@
     { id: 'pink',    hex: '#db2777', label: 'Pink' }
   ];
 
+  function getAccentById(id) {
+    for (var i = 0; i < ACCENT_COLORS.length; i++) {
+      if (ACCENT_COLORS[i].id === id) return ACCENT_COLORS[i];
+    }
+    return ACCENT_COLORS[0];
+  }
+
   /* ── Comprehensive Font List (60+) ── */
   var FONT_LIST = [
     /* System Fonts */
@@ -306,17 +313,19 @@
 
   function themeClasses() {
     var dark = isDarkMode();
+    var accent = getAccentById(getSetting('accentColor'));
+    var accentRgb = hexToRgbString(accent.hex);
     return {
       dark: dark,
       shell:    dark ? 'bg-neutral-900 border-neutral-800 text-neutral-100' : 'bg-neutral-50 border-neutral-200 text-neutral-900',
       panel:    dark ? 'bg-neutral-950 border-neutral-800 text-neutral-100' : 'bg-white border-neutral-200 text-neutral-900',
       soft:     dark ? 'bg-neutral-900/80 border-neutral-800 text-neutral-300' : 'bg-white border-neutral-200 text-neutral-700',
       subtle:   dark ? 'text-neutral-400' : 'text-neutral-500',
-      accent:   dark ? 'bg-indigo-500/15 border-indigo-400/30 text-indigo-200' : 'bg-indigo-50 border-indigo-200 text-indigo-700',
+      accent:   dark ? ('background:rgba(' + accentRgb + ',.15);border-color:rgba(' + accentRgb + ',.30);color:' + accent.hex + ';') : ('background:rgba(' + accentRgb + ',.08);border-color:rgba(' + accentRgb + ',.24);color:' + accent.hex + ';'),
       cardBg:   dark ? 'background:#1a1a2e;border-color:#2d2d44;' : 'background:#ffffff;border-color:#e5e7eb;',
       inputBg:  dark ? 'background:#111827;border-color:#374151;color:#f3f4f6;' : 'background:#ffffff;border-color:#d1d5db;color:#111827;',
       chipBg:   dark ? 'background:#1f2937;border-color:#374151;color:#d1d5db;' : 'background:#f9fafb;border-color:#e5e7eb;color:#374151;',
-      chipActive: 'background:#4f46e5;border-color:#4f46e5;color:#ffffff;',
+      chipActive: 'background:' + accent.hex + ';border-color:' + accent.hex + ';color:#ffffff;',
       border:   dark ? '#374151' : '#e5e7eb',
       hoverBg:  dark ? '#1f2937' : '#f3f4f6',
       dangerBg: dark ? 'background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.3);color:#fca5a5;' : 'background:#fef2f2;border-color:#fecaca;color:#dc2626;',
@@ -381,7 +390,36 @@
       case 'theme':
         applyTheme(value);
         break;
+      case 'accentColor':
+        applyAccentColor(value);
+        break;
+      case 'textSpacing':
+        root.setAttribute('data-stepper-text-spacing', String(value || 'normal'));
+        break;
+      case 'tabSize':
+        root.setAttribute('data-stepper-tab-size', String(value || 'normal'));
+        break;
     }
+  }
+
+  function applyAccentColor(value) {
+    var root = document.documentElement;
+    var accent = getAccentById(value);
+    root.style.setProperty('--stepper-accent-color', accent.hex);
+    root.style.setProperty('--stepper-accent-rgb', hexToRgbString(accent.hex));
+    root.setAttribute('data-stepper-accent', accent.id);
+    try {
+      var meta = document.getElementById('stepper-theme-color');
+      if (meta && !isDarkMode()) meta.setAttribute('content', accent.hex);
+    } catch (e) { /* noop */ }
+  }
+
+  function hexToRgbString(hex) {
+    var safe = String(hex || '').replace('#', '');
+    if (safe.length === 3) safe = safe.replace(/(.)/g, '$1$1');
+    var num = parseInt(safe, 16);
+    if (!isFinite(num)) return '79 70 229';
+    return ((num >> 16) & 255) + ' ' + ((num >> 8) & 255) + ' ' + (num & 255);
   }
 
   function applyTheme(value) {
@@ -394,8 +432,19 @@
         data.isDarkMode = prefersDark;
       }
       localStorage.setItem(BUILDER_DATA_KEY, JSON.stringify(data));
+      document.documentElement.classList.toggle('dark', !!data.isDarkMode);
+      document.body.classList.toggle('dark', !!data.isDarkMode);
+      try { window.dispatchEvent(new Event('stepper-theme-updated')); } catch (err) { /* noop */ }
       window.dispatchEvent(new StorageEvent('storage', { key: BUILDER_DATA_KEY }));
     } catch (e) { /* noop */ }
+  }
+
+  function applyAllLiveSettings(settings) {
+    settings = settings || settingsState.settings || loadSettings();
+    for (var key in settings) {
+      if (settings.hasOwnProperty(key)) applyLiveSetting(key, settings[key]);
+    }
+    try { window.dispatchEvent(new Event('stepper-theme-updated')); } catch (e) { /* noop */ }
   }
 
   /* ════════════════════════════════════════════════════════════
@@ -1461,13 +1510,32 @@
       '#' + PAGE_ID + ' [data-settings-color]:hover { transform:scale(1.2)!important; }',
       '#' + PAGE_ID + ' [data-setting-row] { transition:background .15s ease; }',
       '#' + PAGE_ID + ' [data-setting-row]:hover { background:rgba(99,102,241,.03); }',
+      'body, #root, #root main, #root main *, #stepper-google-admin-host, #stepper-google-admin-host *, #stepper-extra-page-host, #stepper-extra-page-host *, #stepper-editor-inline-host, #stepper-editor-inline-host *, #stepper-docstyle-menubar, #stepper-docstyle-menubar * { font-family: var(--stepper-font-family, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif) !important; }',
+      'body, #root, #stepper-google-admin-host, #stepper-extra-page-host { font-size: var(--stepper-font-size, 14px); }',
+      '.stepper-settings-accent, [data-stepper-theme-accent="true"] { color: var(--stepper-accent-color, #4f46e5) !important; }',
+      '.stepper-menu-trigger:hover, .stepper-menu-trigger--open { background: color-mix(in srgb, var(--stepper-accent-color, #4f46e5) 14%, transparent) !important; color: var(--stepper-accent-color, #4f46e5) !important; }',
+      '#stepper-docstyle-menubar .stepper-menu-dropdown button:hover { background: color-mix(in srgb, var(--stepper-accent-color, #4f46e5) 14%, transparent) !important; }',
       '.stepper-reduce-motion * { animation-duration:0s!important;transition-duration:0s!important; }',
       '.stepper-high-contrast { filter:contrast(1.25); }',
-      '.stepper-dyslexia-font { font-family:OpenDyslexic,sans-serif!important; }',
+      '.stepper-dyslexia-font, .stepper-dyslexia-font * { font-family:OpenDyslexic,sans-serif!important; }',
+      '[data-stepper-text-spacing="relaxed"] body, [data-stepper-text-spacing="relaxed"] #root { letter-spacing:.015em; line-height:1.7; }',
+      '[data-stepper-text-spacing="wide"] body, [data-stepper-text-spacing="wide"] #root { letter-spacing:.04em; line-height:1.9; }',
+      '[data-stepper-tab-size="large"] #root, [data-stepper-tab-size="large"] #stepper-google-admin-host { tab-size:8; }',
       '@media print { #' + PAGE_ID + ' { display:none!important; } }'
     ].join('\n');
     document.head.appendChild(style);
   }
+
+  applyAllLiveSettings(settingsState.settings);
+  window.addEventListener('storage', function (event) {
+    if (!event || (event.key !== LS_KEY && event.key !== BUILDER_DATA_KEY)) return;
+    settingsState.settings = loadSettings();
+    applyAllLiveSettings(settingsState.settings);
+  });
+  window.addEventListener('stepper-theme-updated', function () {
+    settingsState.settings = loadSettings();
+    applyAllLiveSettings(settingsState.settings);
+  });
 
   /* ════════════════════════════════════════════════════════════
      PUBLIC API

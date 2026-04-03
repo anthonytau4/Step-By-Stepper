@@ -2301,12 +2301,14 @@
   function applyTabStyles(button, isActive, accentColor){
     if (!button) return;
     const dark = isDarkMode();
-    const activeBg = accentColor || '#4f46e5';
+    const rootAccent = getComputedStyle(document.documentElement).getPropertyValue('--stepper-accent-color').trim() || '#4f46e5';
+    const activeBg = (accentColor && accentColor !== '#4f46e5') ? accentColor : rootAccent;
+    const rgb = (getComputedStyle(document.documentElement).getPropertyValue('--stepper-accent-rgb').trim() || '79 70 229').replace(/\s+/g, ',');
     const idleBg = dark ? '#262626' : '#4b5563';
     button.style.color = '#ffffff';
     button.style.opacity = '1';
     button.style.transform = isActive ? 'translateY(-1px)' : '';
-    button.style.boxShadow = isActive ? '0 8px 24px rgba(79,70,229,.22)' : '0 6px 18px rgba(0,0,0,.08)';
+    button.style.boxShadow = isActive ? ('0 8px 24px rgba(' + rgb + ',.22)') : '0 6px 18px rgba(0,0,0,.08)';
     button.style.background = isActive ? activeBg : idleBg;
     button.style.borderColor = isActive ? activeBg : idleBg;
   }
@@ -2532,6 +2534,12 @@
     el.setAttribute('aria-hidden', visible ? 'false' : 'true');
   }
 
+  try {
+    window.__stepperIsDedicatedPageOpen = function () {
+      return !!state.activePage;
+    };
+  } catch (e) { /* noop */ }
+
   function hideNativeExtraHost(){
     const nativeHost = document.getElementById('stepper-extra-page-host');
     if (!nativeHost) return;
@@ -2564,8 +2572,8 @@
     host.hidden = false;
     host.style.display = '';
     hideNativeExtraHost();
-    if (state.ui.mainEl) state.ui.mainEl.style.display = '';
-    if (state.ui.footerWrap) state.ui.footerWrap.style.display = ''; // keep native layout stable; extra pages render inline without blanking the app
+    if (state.ui.mainEl) state.ui.mainEl.style.display = 'none';
+    if (state.ui.footerWrap) state.ui.footerWrap.style.display = 'none';
     renderPages(true);
     updateTabButtons();
     refreshLiveQueues().then(() => {
@@ -5012,9 +5020,14 @@
       if (state.ui.footerWrap) state.ui.footerWrap.style.display = '';
     } else {
       hideNativeExtraHost();
-      if (state.ui.mainEl) state.ui.mainEl.style.display = '';
-      if (state.ui.footerWrap) state.ui.footerWrap.style.display = '';
+      if (state.ui.mainEl) state.ui.mainEl.style.display = 'none';
+      if (state.ui.footerWrap) state.ui.footerWrap.style.display = 'none';
     }
+    try {
+      window.__stepperIsDedicatedPageOpen = function () {
+        return !!state.activePage;
+      };
+    } catch (e) { /* noop */ }
   }
 
   function patchFeaturedPageCopy(){

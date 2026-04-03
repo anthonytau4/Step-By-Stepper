@@ -715,6 +715,17 @@
     var core = getImportCore();
     var runtime = getImportRuntime();
 
+    if (runtime && typeof runtime.applyToEditor === 'function') {
+      Promise.resolve(runtime.applyToEditor(pdfState.parsedData)).then(function () {
+        var buildBtn = Array.from(document.querySelectorAll('button')).find(function (b) { return (b.textContent || '').trim() === 'Build'; });
+        if (buildBtn) buildBtn.click();
+      }).catch(function (err) {
+        pdfState.error = (err && err.message) || 'Could not apply the parsed data to the editor.';
+        renderPdfPage();
+      });
+      return;
+    }
+
     try {
       var snapshot;
       if (core && typeof core.buildEditorSnapshot === 'function') {
