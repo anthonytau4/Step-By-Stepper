@@ -531,15 +531,26 @@
     return 96;
   }
 
+  /* ── Drag state for the site helper ── */
+  var _helperDragPos = { x: null, y: null, dragged: false };
+
   function placeFloatingHost(host, side){
     if (!host) return;
     host.style.position = 'fixed';
+    host.style.maxWidth = 'calc(100vw - 24px)';
+    host.style.zIndex = side === 'right' ? '8700' : '8600';
+    /* If user has dragged the helper, honour that position */
+    if (_helperDragPos.dragged && _helperDragPos.x !== null && _helperDragPos.y !== null) {
+      host.style.left = _helperDragPos.x + 'px';
+      host.style.top  = _helperDragPos.y + 'px';
+      host.style.right  = 'auto';
+      host.style.bottom = 'auto';
+      return;
+    }
     host.style.top = `${getHelperDockTopPx()}px`;
     host.style.bottom = 'auto';
     host.style.left = side === 'left' ? '12px' : 'auto';
     host.style.right = side === 'right' ? '12px' : 'auto';
-    host.style.zIndex = side === 'right' ? '8700' : '8600';
-    host.style.maxWidth = 'calc(100vw - 24px)';
   }
 
   function stabilizeTabStrip(){
@@ -3785,7 +3796,7 @@
 
     /* ── Full panel ── */
     host.innerHTML = `<div class="stepper-helper-panel" style="width:min(400px, calc(100vw - 24px));max-width:calc(100vw - 24px);background:#f8fafc;border:1px solid rgba(99,102,241,.16);border-radius:24px;box-shadow:0 18px 48px rgba(0,0,0,.2);overflow:hidden;">
-      <div class="stepper-helper-header" style="padding:.85rem 1rem;background:#4f46e5;color:#fff;display:flex;align-items:center;gap:.5rem;">
+      <div class="stepper-helper-header" data-helper-drag-handle="1" style="padding:.85rem 1rem;background:#4f46e5;color:#fff;display:flex;align-items:center;gap:.5rem;cursor:move;user-select:none;-webkit-user-select:none;">
         ${HELPER_SQUIRCLE_ICON}
         <div style="font-weight:900;flex:1;">Site Helper${isPremiumSession() ? ' <span style="font-size:11px;background:rgba(255,255,255,.22);padding:2px 8px;border-radius:999px;margin-left:4px;">PRO</span>' : ''}</div>
         ${clearBtn}
@@ -3892,6 +3903,82 @@
         state.chatDraft = e.target.value;
       }
     });
+
+    /* ── Drag-to-move logic (mouse + touch) ── */
+    (function initDrag() {
+      var dragging = false;
+      var startX = 0, startY = 0, origX = 0, origY = 0;
+      var moved = false;
+
+      function pointerDown(clientX, clientY, target) {
+        /* Allow drag from the header handle (open panel) or the FAB button (closed state) */
+        if (!target || !target.closest) return false;
+        var isHandle = target.closest('[data-helper-drag-handle="1"]');
+        var isFab = !isHandle && target.closest('[data-chat-open="1"]');
+        if (!isHandle && !isFab) return false;
+        /* Don't drag when clicking non-FAB buttons inside the header */
+        if (isHandle && target.closest('button')) return false;
+        var rect = host.getBoundingClientRect();
+        startX = clientX;
+        startY = clientY;
+        origX = rect.left;
+        origY = rect.top;
+        dragging = true;
+        moved = false;
+        return true;
+      }
+
+      function pointerMove(clientX, clientY) {
+        if (!dragging) return;
+        var dx = clientX - startX;
+        var dy = clientY - startY;
+        if (!moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return; /* ignore micro-movements */
+        moved = true;
+        var newX = Math.max(0, Math.min(window.innerWidth - 60, origX + dx));
+        var newY = Math.max(0, Math.min(window.innerHeight - 40, origY + dy));
+        host.style.left = newX + 'px';
+        host.style.top  = newY + 'px';
+        host.style.right  = 'auto';
+        host.style.bottom = 'auto';
+        _helperDragPos.x = newX;
+        _helperDragPos.y = newY;
+        _helperDragPos.dragged = true;
+      }
+
+      function pointerUp() {
+        dragging = false;
+      }
+
+      /* Mouse events */
+      host.addEventListener('mousedown', function (e) {
+        if (pointerDown(e.clientX, e.clientY, e.target)) {
+          e.preventDefault();
+        }
+      });
+      document.addEventListener('mousemove', function (e) {
+        if (dragging) { e.preventDefault(); pointerMove(e.clientX, e.clientY); }
+      });
+      document.addEventListener('mouseup', pointerUp);
+
+      /* Touch events */
+      host.addEventListener('touchstart', function (e) {
+        if (e.touches.length !== 1) return;
+        var t = e.touches[0];
+        pointerDown(t.clientX, t.clientY, e.target);
+      }, { passive: true });
+      document.addEventListener('touchmove', function (e) {
+        if (!dragging) return;
+        var t = e.touches[0];
+        if (moved) { e.preventDefault(); }
+        pointerMove(t.clientX, t.clientY);
+      }, { passive: false });
+      document.addEventListener('touchend', pointerUp);
+
+      /* Suppress click after drag to prevent toggling buttons */
+      host.addEventListener('click', function (e) {
+        if (moved) { e.stopPropagation(); e.preventDefault(); moved = false; }
+      }, true);
+    })();
   }
 
   function renderQuickActions(){
