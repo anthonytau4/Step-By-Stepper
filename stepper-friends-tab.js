@@ -1035,11 +1035,10 @@
         var checkBg = checked
           ? 'background:#4f46e5;color:#fff;border-color:#4f46e5;'
           : (theme.dark ? 'background:#1f2937;border-color:#374151;color:#d1d5db;' : 'background:#f9fafb;border-color:#e5e7eb;color:#374151;');
-        html += '<label data-friends-group-member="' + escapeHtml(f.id) + '" style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:10px;border:1px solid;cursor:pointer;font-size:13px;transition:all .2s ease;' + checkBg + '">';
-        html += '<input type="checkbox" ' + (checked ? 'checked' : '') + ' style="display:none;" />';
+        html += '<div data-friends-group-member="' + escapeHtml(f.id) + '" style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:10px;border:1px solid;cursor:pointer;font-size:13px;transition:all .2s ease;user-select:none;' + checkBg + '">';
         html += '<span style="font-weight:700;">' + (checked ? '&#9745;' : '&#9744;') + '</span>';
         html += '<span>' + escapeHtml(f.name || f.email || 'Friend') + '</span>';
-        html += '</label>';
+        html += '</div>';
       }
       html += '</div>';
     } else {
