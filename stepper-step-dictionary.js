@@ -63,18 +63,18 @@
     { name: 'Rock Left Side',          aliases: ['rock side left','rock l','side rock left'], counts: 2, feet: 'L', description: 'Rock left to side, recover weight to right', category: 'rock' },
 
     /* ── Coaster / Sailor ──────────────────────────────── */
-    { name: 'Coaster Step Right',      aliases: ['coaster right','coaster r','coaster step r'], counts: 3, feet: 'R', description: 'Step right back, step left together, step right forward (&3&)', category: 'triple' },
-    { name: 'Coaster Step Left',       aliases: ['coaster left','coaster l','coaster step l'], counts: 3, feet: 'L', description: 'Step left back, step right together, step left forward (&3&)', category: 'triple' },
-    { name: 'Sailor Step Right',       aliases: ['sailor right','sailor r','sailor step r'], counts: 3, feet: 'R', description: 'Cross right behind left, step left to side, step right to side (&3&)', category: 'triple' },
-    { name: 'Sailor Step Left',        aliases: ['sailor left','sailor l','sailor step l'], counts: 3, feet: 'L', description: 'Cross left behind right, step right to side, step left to side (&3&)', category: 'triple' },
+    { name: 'Coaster Step Right',      aliases: ['coaster right','coaster r','coaster step r'], counts: 3, feet: 'R', description: 'Step right back, step left together, step right forward (&3&)', category: 'syncopated' },
+    { name: 'Coaster Step Left',       aliases: ['coaster left','coaster l','coaster step l'], counts: 3, feet: 'L', description: 'Step left back, step right together, step left forward (&3&)', category: 'syncopated' },
+    { name: 'Sailor Step Right',       aliases: ['sailor right','sailor r','sailor step r'], counts: 3, feet: 'R', description: 'Cross right behind left, step left to side, step right to side (&3&)', category: 'syncopated' },
+    { name: 'Sailor Step Left',        aliases: ['sailor left','sailor l','sailor step l'], counts: 3, feet: 'L', description: 'Cross left behind right, step right to side, step left to side (&3&)', category: 'syncopated' },
 
     /* ── Shuffles / Chasses / Triple Steps ─────────────── */
-    { name: 'Shuffle Forward Right',   aliases: ['shuffle forward r','shuffle fwd right','right shuffle forward','triple step forward right','cha cha forward right'], counts: 2, feet: 'R', description: 'Step right forward, close left to right, step right forward (1&2)', category: 'triple' },
-    { name: 'Shuffle Forward Left',    aliases: ['shuffle forward l','shuffle fwd left','left shuffle forward','triple step forward left','cha cha forward left'], counts: 2, feet: 'L', description: 'Step left forward, close right to left, step left forward (1&2)', category: 'triple' },
-    { name: 'Shuffle Back Right',      aliases: ['shuffle back r','shuffle backward right','right shuffle back','triple step back right'], counts: 2, feet: 'R', description: 'Step right back, close left to right, step right back (1&2)', category: 'triple' },
-    { name: 'Shuffle Back Left',       aliases: ['shuffle back l','shuffle backward left','left shuffle back','triple step back left'], counts: 2, feet: 'L', description: 'Step left back, close right to left, step left back (1&2)', category: 'triple' },
-    { name: 'Shuffle Right',           aliases: ['shuffle r','side shuffle right','chasse right','right chasse'], counts: 2, feet: 'R', description: 'Step right to side, close left to right, step right to side (1&2)', category: 'triple' },
-    { name: 'Shuffle Left',            aliases: ['shuffle l','side shuffle left','chasse left','left chasse'], counts: 2, feet: 'L', description: 'Step left to side, close right to left, step left to side (1&2)', category: 'triple' },
+    { name: 'Shuffle Forward Right',   aliases: ['shuffle forward r','shuffle fwd right','right shuffle forward','triple step forward right','cha cha forward right'], counts: 2, feet: 'R', description: 'Step right forward, close left to right, step right forward (1&2)', category: 'syncopated' },
+    { name: 'Shuffle Forward Left',    aliases: ['shuffle forward l','shuffle fwd left','left shuffle forward','triple step forward left','cha cha forward left'], counts: 2, feet: 'L', description: 'Step left forward, close right to left, step left forward (1&2)', category: 'syncopated' },
+    { name: 'Shuffle Back Right',      aliases: ['shuffle back r','shuffle backward right','right shuffle back','triple step back right'], counts: 2, feet: 'R', description: 'Step right back, close left to right, step right back (1&2)', category: 'syncopated' },
+    { name: 'Shuffle Back Left',       aliases: ['shuffle back l','shuffle backward left','left shuffle back','triple step back left'], counts: 2, feet: 'L', description: 'Step left back, close right to left, step left back (1&2)', category: 'syncopated' },
+    { name: 'Shuffle Right',           aliases: ['shuffle r','side shuffle right','chasse right','right chasse'], counts: 2, feet: 'R', description: 'Step right to side, close left to right, step right to side (1&2)', category: 'syncopated' },
+    { name: 'Shuffle Left',            aliases: ['shuffle l','side shuffle left','chasse left','left chasse'], counts: 2, feet: 'L', description: 'Step left to side, close right to left, step left to side (1&2)', category: 'syncopated' },
 
     /* ── Turns ─────────────────────────────────────────── */
     { name: 'Pivot Half Turn Right',   aliases: ['pivot turn right','pivot 1/2 right','pivot half right','half pivot right','pivot turn'], counts: 2, feet: 'R', description: 'Step right forward, pivot 1/2 turn right (weight ends on left)', category: 'turn' },
@@ -97,14 +97,14 @@
     { name: 'Cross Left Over Right',   aliases: ['cross left','cross l over r','cross over left','left cross'], counts: 1, feet: 'L', description: 'Cross left foot over right', category: 'cross' },
     { name: 'Cross Behind Right',      aliases: ['cross right behind','cross r behind','behind right'], counts: 1, feet: 'R', description: 'Cross right foot behind left', category: 'cross' },
     { name: 'Cross Behind Left',       aliases: ['cross left behind','cross l behind','behind left'], counts: 1, feet: 'L', description: 'Cross left foot behind right', category: 'cross' },
-    { name: 'Cross Shuffle Right',     aliases: ['cross shuffle r','crossing shuffle right'], counts: 2, feet: 'R', description: 'Cross right over left, step left to side, cross right over left (1&2)', category: 'cross' },
-    { name: 'Cross Shuffle Left',      aliases: ['cross shuffle l','crossing shuffle left'], counts: 2, feet: 'L', description: 'Cross left over right, step right to side, cross left over right (1&2)', category: 'cross' },
+    { name: 'Cross Shuffle Right',     aliases: ['cross shuffle r','crossing shuffle right'], counts: 2, feet: 'R', description: 'Cross right over left, step left to side, cross right over left (1&2)', category: 'syncopated' },
+    { name: 'Cross Shuffle Left',      aliases: ['cross shuffle l','crossing shuffle left'], counts: 2, feet: 'L', description: 'Cross left over right, step right to side, cross left over right (1&2)', category: 'syncopated' },
 
     /* ── Kicks ─────────────────────────────────────────── */
     { name: 'Kick Right Forward',      aliases: ['kick right','kick r','right kick','kick forward right'], counts: 1, feet: 'R', description: 'Kick right foot forward (no weight change)', category: 'kick' },
     { name: 'Kick Left Forward',       aliases: ['kick left','kick l','left kick','kick forward left'], counts: 1, feet: 'L', description: 'Kick left foot forward (no weight change)', category: 'kick' },
-    { name: 'Kick Ball Change Right',  aliases: ['kick ball change right','kick ball change r','kbc right','kbc r'], counts: 2, feet: 'R', description: 'Kick right forward, step on ball of right, change weight to left (1&2)', category: 'kick' },
-    { name: 'Kick Ball Change Left',   aliases: ['kick ball change left','kick ball change l','kbc left','kbc l'], counts: 2, feet: 'L', description: 'Kick left forward, step on ball of left, change weight to right (1&2)', category: 'kick' },
+    { name: 'Kick Ball Change Right',  aliases: ['kick ball change right','kick ball change r','kbc right','kbc r'], counts: 2, feet: 'R', description: 'Kick right forward, step on ball of right, change weight to left (1&2)', category: 'syncopated' },
+    { name: 'Kick Ball Change Left',   aliases: ['kick ball change left','kick ball change l','kbc left','kbc l'], counts: 2, feet: 'L', description: 'Kick left forward, step on ball of left, change weight to right (1&2)', category: 'syncopated' },
 
     /* ── Stomps / Stamps ───────────────────────────────── */
     { name: 'Stomp Right',             aliases: ['stomp r','right stomp','stomp right foot'], counts: 1, feet: 'R', description: 'Stomp right foot (with weight change)', category: 'stomp' },
@@ -149,8 +149,8 @@
     { name: 'Rumba Box Back',          aliases: ['rumba box back','back box'], counts: 6, feet: 'L', description: 'Side-together-back, side-together-back (6 counts)', category: 'specialty' },
 
     /* ── Step Lock Step ────────────────────────────────── */
-    { name: 'Step Lock Step Forward Right', aliases: ['lock step forward right','step lock step right','step lock step r','lock step r'], counts: 2, feet: 'R', description: 'Step right forward, lock left behind right, step right forward (1&2)', category: 'triple' },
-    { name: 'Step Lock Step Forward Left',  aliases: ['lock step forward left','step lock step left','step lock step l','lock step l'], counts: 2, feet: 'L', description: 'Step left forward, lock right behind left, step left forward (1&2)', category: 'triple' },
+    { name: 'Step Lock Step Forward Right', aliases: ['lock step forward right','step lock step right','step lock step r','lock step r'], counts: 2, feet: 'R', description: 'Step right forward, lock left behind right, step right forward (1&2)', category: 'syncopated' },
+    { name: 'Step Lock Step Forward Left',  aliases: ['lock step forward left','step lock step left','step lock step l','lock step l'], counts: 2, feet: 'L', description: 'Step left forward, lock right behind left, step left forward (1&2)', category: 'syncopated' },
 
     /* ── Rocking Chair ─────────────────────────────────── */
     { name: 'Rocking Chair Right',     aliases: ['rocking chair r','rocking chair'], counts: 4, feet: 'R', description: 'Rock forward right, recover, rock back right, recover', category: 'rock' },
@@ -188,8 +188,8 @@
     { name: 'Ball Change Left',        aliases: ['ball change l','ball change left foot'], counts: 1, feet: 'L', description: 'Quick weight change: ball of left then right (&1)', category: 'syncopated' },
 
     /* ── Applejack / Scissor ───────────────────────────── */
-    { name: 'Scissor Step Right',      aliases: ['scissor right','scissor r','scissor step r'], counts: 2, feet: 'R', description: 'Step right to side, close left beside right, cross right over left (1&2)', category: 'cross' },
-    { name: 'Scissor Step Left',       aliases: ['scissor left','scissor l','scissor step l'], counts: 2, feet: 'L', description: 'Step left to side, close right beside left, cross left over right (1&2)', category: 'cross' },
+    { name: 'Scissor Step Right',      aliases: ['scissor right','scissor r','scissor step r'], counts: 2, feet: 'R', description: 'Step right to side, close left beside right, cross right over left (1&2)', category: 'syncopated' },
+    { name: 'Scissor Step Left',       aliases: ['scissor left','scissor l','scissor step l'], counts: 2, feet: 'L', description: 'Step left to side, close right beside left, cross left over right (1&2)', category: 'syncopated' },
     { name: 'Applejack',               aliases: ['applejacks','apple jack'], counts: 2, feet: 'Both', description: 'Heels apart then together (or toes apart then together)', category: 'embellish' }
   ];
 
@@ -215,6 +215,7 @@
     specialty:  { label: 'Specialty Steps',      icon: _ic.specialty  || '⭐' },
     hold:       { label: 'Holds & Claps',        icon: _ic.hold       || '👏' },
     together:   { label: 'Together / Close',     icon: _ic.together   || '🤝' },
+    straight:   { label: 'Straight Count',       icon: _ic.straight   || '🔢' },
     syncopated: { label: 'Syncopated',           icon: _ic.syncopated || '🎵' }
   };
 
