@@ -123,6 +123,17 @@
     return ACCENT_COLORS[0];
   }
 
+  function getAccentTone(percent, against) {
+    var accent = getAccentById(getSetting('accentColor'));
+    var bg = against || 'transparent';
+    return 'color-mix(in srgb, ' + accent.hex + ' ' + percent + '%, ' + bg + ')';
+  }
+
+  function getAccentRing(alpha) {
+    var rgb = hexToRgbString(getAccentById(getSetting('accentColor')).hex).replace(/\s+/g, ',');
+    return 'rgba(' + rgb + ',' + String(alpha == null ? 0.22 : alpha) + ')';
+  }
+
   /* ── Comprehensive Font List (60+) ── */
   var FONT_LIST = [
     /* System Fonts */
@@ -405,13 +416,20 @@
   function applyAccentColor(value) {
     var root = document.documentElement;
     var accent = getAccentById(value);
+    var accentRgb = hexToRgbString(accent.hex);
     root.style.setProperty('--stepper-accent-color', accent.hex);
-    root.style.setProperty('--stepper-accent-rgb', hexToRgbString(accent.hex));
+    root.style.setProperty('--stepper-accent-rgb', accentRgb);
+    root.style.setProperty('--stepper-accent-soft', 'color-mix(in srgb, ' + accent.hex + ' 12%, white)');
+    root.style.setProperty('--stepper-accent-soft-strong', 'color-mix(in srgb, ' + accent.hex + ' 18%, white)');
+    root.style.setProperty('--stepper-accent-dark-soft', 'color-mix(in srgb, ' + accent.hex + ' 22%, transparent)');
+    root.style.setProperty('--stepper-accent-hover', 'color-mix(in srgb, ' + accent.hex + ' 88%, black)');
+    root.style.setProperty('--stepper-accent-ring', 'rgba(' + accentRgb.replace(/\s+/g, ',') + ',0.24)');
     root.setAttribute('data-stepper-accent', accent.id);
     try {
       var meta = document.getElementById('stepper-theme-color');
-      if (meta && !isDarkMode()) meta.setAttribute('content', accent.hex);
+      if (meta) meta.setAttribute('content', accent.hex);
     } catch (e) { /* noop */ }
+    try { window.dispatchEvent(new Event('stepper-theme-updated')); } catch (e2) { /* noop */ }
   }
 
   function hexToRgbString(hex) {
@@ -735,7 +753,7 @@
     html += '<span data-settings-slider-val="' + key + '" style="font-size:12px;font-weight:700;min-width:40px;text-align:right;">' + val + (unit || '') + '</span>';
     html += '</div>';
     html += '<input data-settings-slider="' + key + '" type="range" min="' + min + '" max="' + max + '" value="' + val + '" style="';
-    html += 'width:100%;margin-top:8px;accent-color:#4f46e5;height:6px;cursor:pointer;';
+    html += 'width:100%;margin-top:8px;accent-color:' + getAccentById(getSetting('accentColor')).hex + ';height:6px;cursor:pointer;';
     html += '">';
     html += '</div>';
     return html;
@@ -755,7 +773,7 @@
       html += '<button data-settings-color="' + key + '" data-value="' + c.id + '" title="' + escapeHtml(c.label) + '" style="';
       html += 'width:32px;height:32px;border-radius:50%;border:3px solid;cursor:pointer;transition:all .15s ease;';
       html += 'background:' + c.hex + ';';
-      html += active ? 'border-color:#4f46e5;box-shadow:0 0 0 2px #4f46e5;transform:scale(1.15);' : 'border-color:' + (theme.dark ? '#374151' : '#e5e7eb') + ';';
+      html += active ? 'border-color:' + c.hex + ';box-shadow:0 0 0 2px ' + c.hex + ';transform:scale(1.15);' : 'border-color:' + (theme.dark ? '#374151' : '#e5e7eb') + ';';
       html += '"></button>';
     }
     html += '</div></div>';
@@ -769,7 +787,8 @@
         ? 'background:rgba(239,68,68,.15);border-color:rgba(239,68,68,.3);color:#fca5a5;'
         : 'background:#fef2f2;border-color:#fecaca;color:#dc2626;';
     } else if (style === 'primary') {
-      btnStyle += 'background:#4f46e5;border-color:#4f46e5;color:#fff;';
+      var accent = getAccentById(getSetting('accentColor')).hex;
+      btnStyle += 'background:' + accent + ';border-color:' + accent + ';color:#fff;';
     } else {
       btnStyle += theme.chipBg;
     }
@@ -825,7 +844,7 @@
       html += '<button data-font-pick="' + f.id + '" title="' + escapeHtml(f.label) + '" style="';
       html += 'padding:10px 12px;border-radius:12px;border:2px solid;cursor:pointer;text-align:left;transition:all .15s ease;';
       html += isActive
-        ? 'border-color:#4f46e5;background:' + (theme.dark ? 'rgba(79,70,229,.15)' : 'rgba(79,70,229,.08)') + ';box-shadow:0 0 0 2px rgba(79,70,229,.25);'
+        ? 'border-color:' + getAccentById(getSetting('accentColor')).hex + ';background:' + (theme.dark ? getAccentTone(15, '#0f172a') : getAccentTone(8, '#ffffff')) + ';box-shadow:0 0 0 2px ' + getAccentRing(0.25) + ';'
         : 'border-color:' + theme.border + ';background:' + (theme.dark ? '#1a1a2e' : '#fafafa') + ';';
       html += '">';
       html += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;opacity:.5;">' + escapeHtml(f.category) + '</div>';
@@ -1501,20 +1520,30 @@
     var style = document.createElement('style');
     style.id = 'stepper-settings-tab-style';
     style.textContent = [
-      '#' + PAGE_ID + ' input:focus { border-color:rgba(99,102,241,.5)!important;box-shadow:0 0 0 3px rgba(99,102,241,.12)!important; }',
-      '#' + PAGE_ID + ' select:focus { border-color:rgba(99,102,241,.5)!important;box-shadow:0 0 0 3px rgba(99,102,241,.12)!important;outline:none; }',
-      '#' + PAGE_ID + ' [data-settings-section]:hover { background:rgba(99,102,241,.04)!important; }',
+      '#' + PAGE_ID + ' input:focus { border-color: color-mix(in srgb, var(--stepper-accent-color, #4f46e5) 50%, transparent) !important; box-shadow: 0 0 0 3px var(--stepper-accent-ring, rgba(79,70,229,.12)) !important; }',
+      '#' + PAGE_ID + ' select:focus { border-color: color-mix(in srgb, var(--stepper-accent-color, #4f46e5) 50%, transparent) !important; box-shadow: 0 0 0 3px var(--stepper-accent-ring, rgba(79,70,229,.12)) !important; outline:none; }',
+      '#' + PAGE_ID + ' [data-settings-section]:hover { background: color-mix(in srgb, var(--stepper-accent-color, #4f46e5) 4%, transparent) !important; }',
       '#' + PAGE_ID + ' [data-settings-toggle]:hover { opacity:.9;transform:scale(1.04); }',
       '#' + PAGE_ID + ' [data-settings-action]:hover { opacity:.85;transform:scale(1.02); }',
       '#' + PAGE_ID + ' [data-settings-radio]:hover { opacity:.85;transform:scale(1.04); }',
       '#' + PAGE_ID + ' [data-settings-color]:hover { transform:scale(1.2)!important; }',
       '#' + PAGE_ID + ' [data-setting-row] { transition:background .15s ease; }',
-      '#' + PAGE_ID + ' [data-setting-row]:hover { background:rgba(99,102,241,.03); }',
+      '#' + PAGE_ID + ' [data-setting-row]:hover { background: color-mix(in srgb, var(--stepper-accent-color, #4f46e5) 3%, transparent); }',
       'body, #root, #root main, #root main *, #stepper-google-admin-host, #stepper-google-admin-host *, #stepper-extra-page-host, #stepper-extra-page-host *, #stepper-editor-inline-host, #stepper-editor-inline-host *, #stepper-docstyle-menubar, #stepper-docstyle-menubar * { font-family: var(--stepper-font-family, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif) !important; }',
       'body, #root, #stepper-google-admin-host, #stepper-extra-page-host { font-size: var(--stepper-font-size, 14px); }',
+      ':root { --shn-accent: var(--stepper-accent-color, #4f46e5); --shn-accent-glow: color-mix(in srgb, var(--stepper-accent-color, #4f46e5) 35%, transparent); }',
       '.stepper-settings-accent, [data-stepper-theme-accent="true"] { color: var(--stepper-accent-color, #4f46e5) !important; }',
       '.stepper-menu-trigger:hover, .stepper-menu-trigger--open { background: color-mix(in srgb, var(--stepper-accent-color, #4f46e5) 14%, transparent) !important; color: var(--stepper-accent-color, #4f46e5) !important; }',
       '#stepper-docstyle-menubar .stepper-menu-dropdown button:hover { background: color-mix(in srgb, var(--stepper-accent-color, #4f46e5) 14%, transparent) !important; }',
+      '.bg-indigo-600, .bg-indigo-500 { background-color: var(--stepper-accent-color, #4f46e5) !important; }',
+      '.hover\\:bg-indigo-700:hover, .hover\\:bg-indigo-500:hover { background-color: var(--stepper-accent-hover, color-mix(in srgb, var(--stepper-accent-color, #4f46e5) 88%, black)) !important; }',
+      '.text-indigo-600, .text-indigo-500, .text-indigo-700, .text-indigo-800, .dark\\:text-indigo-400, .dark\\:text-indigo-300, .text-indigo-300 { color: var(--stepper-accent-color, #4f46e5) !important; }',
+      '.border-indigo-600, .border-indigo-500, .border-indigo-200, .border-indigo-100, .hover\\:border-indigo-500:hover { border-color: var(--stepper-accent-color, #4f46e5) !important; }',
+      '.bg-indigo-100, .hover\\:bg-indigo-100:hover, .hover\\:bg-indigo-50:hover, .bg-indigo-50\\/50 { background-color: var(--stepper-accent-soft, color-mix(in srgb, var(--stepper-accent-color, #4f46e5) 12%, white)) !important; }',
+      '.bg-indigo-200 { background-color: var(--stepper-accent-soft-strong, color-mix(in srgb, var(--stepper-accent-color, #4f46e5) 18%, white)) !important; }',
+      '.bg-indigo-500\\/10, .bg-indigo-500\\/15, .border-indigo-500\\/30, .bg-indigo-900\\/10, .dark\\:hover\\:bg-indigo-900\\/30:hover, .dark\\:hover\\:bg-indigo-900\\/50:hover, .bg-indigo-900\\/40, .dark\\:bg-indigo-900\\/40 { background-color: var(--stepper-accent-dark-soft, color-mix(in srgb, var(--stepper-accent-color, #4f46e5) 22%, transparent)) !important; border-color: var(--stepper-accent-color, #4f46e5) !important; }',
+      '.focus\\:ring-indigo-500:focus { --tw-ring-color: var(--stepper-accent-color, #4f46e5) !important; }',
+      '.accent-indigo-600 { accent-color: var(--stepper-accent-color, #4f46e5) !important; }',
       '.stepper-reduce-motion * { animation-duration:0s!important;transition-duration:0s!important; }',
       '.stepper-high-contrast { filter:contrast(1.25); }',
       '.stepper-dyslexia-font, .stepper-dyslexia-font * { font-family:OpenDyslexic,sans-serif!important; }',
