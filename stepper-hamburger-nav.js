@@ -779,7 +779,9 @@
         action: function () {
           window.dispatchEvent(new CustomEvent('stepper-toggle-dark-mode'));
           try {
-            var data = JSON.parse(localStorage.getItem(BUILDER_KEY) || '{}');
+            var raw = localStorage.getItem(BUILDER_KEY);
+            var data = raw ? JSON.parse(raw) : {};
+            if (!data || typeof data !== 'object') data = {};
             data.isDarkMode = !data.isDarkMode;
             localStorage.setItem(BUILDER_KEY, JSON.stringify(data));
             document.documentElement.classList.toggle('dark', data.isDarkMode);
