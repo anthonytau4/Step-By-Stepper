@@ -215,14 +215,12 @@
     const timer = window.setInterval(() => {
       tries += 1;
       bindButtons();
-      reflectRouteState('editor');
       const build = getRouteButton('editor');
       if (build && !build.__stepperBootClicked) {
         build.__stepperBootClicked = true;
         applyingRoute = true;
         try { build.click(); } finally { window.setTimeout(() => { applyingRoute = false; }, 50); }
       }
-      setCanonicalPath('editor', true);
       if ((build && tries > 2) || tries > 40) window.clearInterval(timer);
     }, 250);
   }
