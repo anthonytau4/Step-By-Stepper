@@ -1481,13 +1481,7 @@
       renderSettingsPage();
     },
     open: function () {
-      var page = ensurePage();
-      if (page) {
-        page.hidden = false;
-        page.style.display = '';
-      }
-      ensureSettingsStyles();
-      renderSettingsPage();
+      window.dispatchEvent(new CustomEvent('stepper-open-settings'));
     },
     getState: function () { return settingsState; },
     getSetting: getSetting,
