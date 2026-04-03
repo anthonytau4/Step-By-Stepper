@@ -262,11 +262,20 @@
   }
 
   function boot(){
-  kickBootstrapRoute();
-  ensureTransitionFunction();
-  ensurePhrasedMountVisible();
-}
+    kickBootstrapRoute();
+    ensureTransitionFunction();
+    ensurePhrasedMountVisible();
+    let tries = 0;
+    const timer = window.setInterval(() => {
+      tries += 1;
+      ensureTransitionFunction();
+      ensurePhrasedMountVisible();
+      const phrased = document.getElementById('stepper-inline-phrased-tools');
+      const ready = phrased && /Phrased Dance Tools/i.test(phrased.textContent || '');
+      if (ready || tries > 40) window.clearInterval(timer);
+    }, 350);
+  }
 
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once:true });
-else boot();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once:true });
+  else boot();
 })();

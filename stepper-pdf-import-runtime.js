@@ -459,29 +459,15 @@
   const PAGE_IDS = [
     'stepper-whatsnew-page',
     'stepper-saved-dances-page',
-    'stepper-featured-choreo-page',
-    'stepper-google-signin-page',
-    'stepper-google-subscription-page',
-    'stepper-google-admin-page',
-    'stepper-google-moderator-page',
-    'stepper-friends-page',
-    'stepper-glossary-page',
-    'stepper-pdf-page',
-    'stepper-settings-page',
-    'stepper-music-page',
-    'stepper-templates-page'
+    'stepper-featured-choreo-page'
   ];
 
   function isEditorVisible() {
-    try {
-      if (typeof window.__stepperIsDedicatedPageOpen === 'function' && window.__stepperIsDedicatedPageOpen()) return false;
-    } catch (_) {}
+    // If any overlay page is visible, editor is NOT the active page
     for (const id of PAGE_IDS) {
       const el = document.getElementById(id);
       if (el && !el.hidden && el.style.display !== 'none') return false;
     }
-    const mainEl = document.querySelector('main');
-    if (!mainEl || mainEl.style.display === 'none') return false;
     return true;
   }
 
@@ -924,14 +910,6 @@
   }
 
 
-
-  window.StepperPdfImportRuntime = {
-    requestPdfParse,
-    buildEditorSnapshot,
-    writeEditorSnapshot,
-    applyToEditor,
-    isEditorVisible
-  };
 
   // Only inject on pages that have the editor
   const path = window.location.pathname.replace(/\/+$/, '');

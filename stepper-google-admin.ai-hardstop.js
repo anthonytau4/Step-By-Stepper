@@ -33,10 +33,10 @@
   const DEFAULT_BACKEND_BASE = 'https://step-by-stepper.onrender.com';
   const ALT_BACKEND_BASE = 'https://api.step-by-stepper.com';
   const FALLBACK_GOOGLE_CLIENT_ID = '1038282546217-a7qv2i1puevmtjf38f6sv761vt7he26s.apps.googleusercontent.com';
-  const SYNC_INTERVAL_MS = 30000;
-  const PRESENCE_INTERVAL_MS = 90000;
-  const FEATURED_SYNC_INTERVAL_MS = 120000;
-  const LIVE_QUEUE_SYNC_INTERVAL_MS = 45000;
+  const SYNC_INTERVAL_MS = 6000;
+  const PRESENCE_INTERVAL_MS = 30000;
+  const FEATURED_SYNC_INTERVAL_MS = 18000;
+  const LIVE_QUEUE_SYNC_INTERVAL_MS = 4000;
 
   const state = {
     activePage: null,
@@ -119,28 +119,10 @@
     return '';
   }
 
-  function getActivePageElement(){
-    const pageMap = {
-      signin: SIGNIN_PAGE_ID,
-      subscription: SUBSCRIPTION_PAGE_ID,
-      admin: ADMIN_PAGE_ID,
-      friends: FRIENDS_PAGE_ID,
-      glossary: GLOSSARY_PAGE_ID,
-      pdfimport: PDF_PAGE_ID,
-      settings: SETTINGS_PAGE_ID,
-      music: MUSIC_PAGE_ID,
-      templates: TEMPLATES_PAGE_ID
-    };
-    const pageId = pageMap[state.activePage || ''];
-    return pageId ? document.getElementById(pageId) : null;
-  }
-
   function adminDraftExists(){
     const host = document.getElementById(HOST_ID);
-    if (!host || !state.activePage) return false;
-    const activePage = getActivePageElement();
-    if (!activePage || activePage.hidden || activePage.style.display === 'none') return false;
-    const fields = activePage.querySelectorAll('input, textarea, [contenteditable="true"], [contenteditable="plaintext-only"]');
+    if (!host) return false;
+    const fields = host.querySelectorAll('input, textarea, [contenteditable="true"], [contenteditable="plaintext-only"]');
     for (const field of fields) {
       if (getTextEntryValue(field)) return true;
     }
@@ -151,31 +133,6 @@
     const active = document.activeElement;
     if (isTextEntryElement(active) && getTextEntryValue(active)) return true;
     return adminDraftExists();
-  }
-
-  function canRunForegroundTask(){
-    return !document.hidden;
-  }
-
-  function shouldRunAdminUiPulse(){
-    if (!canRunForegroundTask()) return false;
-    if (state.activePage) return true;
-    const savedPage = document.getElementById('stepper-saved-dances-page');
-    if (!savedPage) return false;
-    return !!((savedPage.offsetParent || savedPage.getClientRects().length) && getComputedStyle(savedPage).display !== 'none' && getComputedStyle(savedPage).visibility !== 'hidden');
-  }
-
-  function shouldRunCloudSyncTask(){
-    return canRunForegroundTask() && !!(state.session && state.session.credential) && !shouldDeferAdminAutoRender();
-  }
-
-  function shouldRunFeatureSyncTask(){
-    return canRunForegroundTask();
-  }
-
-  function shouldRunLiveQueueTask(){
-    if (!canRunForegroundTask() || !(state.session && state.session.credential)) return false;
-    return ['admin','moderator','signin','subscription','friends','glossary','pdfimport'].includes(String(state.activePage || ''));
   }
 
   function scheduleRenderPages(delay){
@@ -2344,14 +2301,12 @@
   function applyTabStyles(button, isActive, accentColor){
     if (!button) return;
     const dark = isDarkMode();
-    const rootAccent = getComputedStyle(document.documentElement).getPropertyValue('--stepper-accent-color').trim() || '#4f46e5';
-    const activeBg = (accentColor && accentColor !== '#4f46e5') ? accentColor : rootAccent;
-    const rgb = (getComputedStyle(document.documentElement).getPropertyValue('--stepper-accent-rgb').trim() || '79 70 229').replace(/\s+/g, ',');
+    const activeBg = accentColor || '#4f46e5';
     const idleBg = dark ? '#262626' : '#4b5563';
     button.style.color = '#ffffff';
     button.style.opacity = '1';
     button.style.transform = isActive ? 'translateY(-1px)' : '';
-    button.style.boxShadow = isActive ? ('0 8px 24px rgba(' + rgb + ',.22)') : '0 6px 18px rgba(0,0,0,.08)';
+    button.style.boxShadow = isActive ? '0 8px 24px rgba(79,70,229,.22)' : '0 6px 18px rgba(0,0,0,.08)';
     button.style.background = isActive ? activeBg : idleBg;
     button.style.borderColor = isActive ? activeBg : idleBg;
   }
@@ -2577,12 +2532,6 @@
     el.setAttribute('aria-hidden', visible ? 'false' : 'true');
   }
 
-  try {
-    window.__stepperIsDedicatedPageOpen = function () {
-      return !!state.activePage;
-    };
-  } catch (e) { /* noop */ }
-
   function hideNativeExtraHost(){
     const nativeHost = document.getElementById('stepper-extra-page-host');
     if (!nativeHost) return;
@@ -2615,8 +2564,8 @@
     host.hidden = false;
     host.style.display = '';
     hideNativeExtraHost();
-    if (state.ui.mainEl) state.ui.mainEl.style.display = 'none';
-    if (state.ui.footerWrap) state.ui.footerWrap.style.display = 'none';
+    if (state.ui.mainEl) state.ui.mainEl.style.display = '';
+    if (state.ui.footerWrap) state.ui.footerWrap.style.display = ''; // keep native layout stable; extra pages render inline without blanking the app
     renderPages(true);
     updateTabButtons();
     refreshLiveQueues().then(() => {
@@ -5063,14 +5012,9 @@
       if (state.ui.footerWrap) state.ui.footerWrap.style.display = '';
     } else {
       hideNativeExtraHost();
-      if (state.ui.mainEl) state.ui.mainEl.style.display = 'none';
-      if (state.ui.footerWrap) state.ui.footerWrap.style.display = 'none';
+      if (state.ui.mainEl) state.ui.mainEl.style.display = '';
+      if (state.ui.footerWrap) state.ui.footerWrap.style.display = '';
     }
-    try {
-      window.__stepperIsDedicatedPageOpen = function () {
-        return !!state.activePage;
-      };
-    } catch (e) { /* noop */ }
   }
 
   function patchFeaturedPageCopy(){
@@ -5107,40 +5051,6 @@
     observer.observe(page, { childList: true, subtree: true, characterData: true });
   }
 
-  function renderActiveDedicatedPage(){
-    switch (state.activePage) {
-      case 'signin':
-        renderSignInPage();
-        return true;
-      case 'subscription':
-        renderSubscriptionPage();
-        return true;
-      case 'admin':
-        renderAdminPage();
-        return true;
-      case 'friends':
-        if (window.__stepperFriendsTab) window.__stepperFriendsTab.render();
-        return true;
-      case 'glossary':
-        if (window.__stepperGlossaryTab) window.__stepperGlossaryTab.render();
-        return true;
-      case 'pdfimport':
-        if (window.__stepperPdfTab) window.__stepperPdfTab.render();
-        return true;
-      case 'settings':
-        if (window.__stepperSettingsTab) window.__stepperSettingsTab.render();
-        return true;
-      case 'music':
-        if (window.__stepperMusicTab) window.__stepperMusicTab.render();
-        return true;
-      case 'templates':
-        if (window.__stepperTemplatesTab) window.__stepperTemplatesTab.render();
-        return true;
-      default:
-        return false;
-    }
-  }
-
   function renderPages(force){
     if (!force && shouldDeferAdminAutoRender()) {
       scheduleRenderPages(2000);
@@ -5148,9 +5058,17 @@
     }
     locateUi();
     ensureHost();
-    updateAdminTabVisibility();
+    renderSignInPage();
+    renderSubscriptionPage();
+    renderAdminPage();
     syncPageVisibility();
-    renderActiveDedicatedPage();
+    /* ── New tab rendering (after syncPageVisibility so sections are visible) ── */
+    if (state.activePage === 'friends' && window.__stepperFriendsTab) window.__stepperFriendsTab.render();
+    if (state.activePage === 'glossary' && window.__stepperGlossaryTab) window.__stepperGlossaryTab.render();
+    if (state.activePage === 'pdfimport' && window.__stepperPdfTab) window.__stepperPdfTab.render();
+    if (state.activePage === 'settings' && window.__stepperSettingsTab) window.__stepperSettingsTab.render();
+    if (state.activePage === 'music' && window.__stepperMusicTab) window.__stepperMusicTab.render();
+    if (state.activePage === 'templates' && window.__stepperTemplatesTab) window.__stepperTemplatesTab.render();
     renderPresenceOnly();
     renderSuspensionBanner();
     patchFeaturedPageCopy();
@@ -5167,52 +5085,34 @@
 
   async function prime(){
     ensureStyles();
+    if (location.protocol === 'http:' || location.protocol === 'https:') {
+      const savedBase = normalizeApiBase(localStorage.getItem(API_BASE_KEY) || '');
+      const preferredBase = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') ? 'http://localhost:3000' : DEFAULT_BACKEND_BASE;
+      if (!savedBase || savedBase === 'http://localhost:3000' || savedBase === 'https://localhost:3000' || savedBase === normalizeApiBase(location.origin)) saveApiBase(preferredBase);
+      await chooseWorkingApiBase(state.apiBase || preferredBase);
+    }
     if (!locateUi()) return;
     ensureHost();
     _initSectionContextMenu();
     wireStartupBackendBase();
     wireSecurityDeterrent();
-    renderPages(true);
-
-    window.setTimeout(() => {
-      const preferredBase = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') ? 'http://localhost:3000' : DEFAULT_BACKEND_BASE;
-      const savedBase = normalizeApiBase(localStorage.getItem(API_BASE_KEY) || '');
-      if ((location.protocol === 'http:' || location.protocol === 'https:')) {
-        if (!savedBase || savedBase === 'http://localhost:3000' || savedBase === 'https://localhost:3000' || savedBase === normalizeApiBase(location.origin)) saveApiBase(preferredBase);
-        chooseWorkingApiBase(state.apiBase || preferredBase).catch(() => {});
-      }
-    }, 250);
-
-    window.setTimeout(async () => {
-      try {
-        await refreshConfig();
-        if (!document.hidden) await refreshPresence();
-        if (state.session && state.session.credential) {
-          await refreshSession();
-          await heartbeat();
-          await refreshCloudSaves();
-          state.savedDancesUiSignature = '';
-          await restoreLatestCloudSaveIfNeeded();
-          if (hasUnsavedChanges()) await syncCurrentDanceToBackend(false);
-          await refreshNotifications();
-          await refreshSubscription();
-          await confirmCheckoutIfPresent();
-          if (isAdminSession() && (state.activePage === 'admin' || state.activePage === 'moderator')) {
-            await refreshAdminDances();
-            await refreshSubmissions();
-            await refreshGlossaryRequests();
-          }
-        }
-        if (state.activePage === 'glossary' || state.activePage === 'friends' || state.activePage === 'admin' || state.activePage === 'moderator') {
-          await refreshGlossaryApproved();
-        }
-        await syncFeaturedFromBackend();
-      } catch (error) {
-        console.warn('[Stepper] Deferred admin bootstrap failed', error);
-      } finally {
-        renderPages(true);
-      }
-    }, 1200);
+    await refreshConfig();
+    await refreshPresence();
+    if (state.session && state.session.credential) {
+      await refreshSession();
+      await heartbeat();
+      await refreshCloudSaves();
+    state.savedDancesUiSignature = '';
+      await restoreLatestCloudSaveIfNeeded();
+      await syncCurrentDanceToBackend(false);
+      await refreshNotifications();
+      await refreshSubscription();
+      await confirmCheckoutIfPresent();
+      if (isAdminSession()) { await refreshAdminDances(); await refreshSubmissions(); await refreshGlossaryRequests(); }
+    }
+    await refreshGlossaryApproved();
+    await syncFeaturedFromBackend();
+    renderPages();
   }
 
   if (document.readyState === 'loading') {
@@ -5222,7 +5122,6 @@
   }
 
   setInterval(() => {
-    if (!shouldRunAdminUiPulse()) return;
     if (shouldDeferAdminAutoRender()) {
       scheduleRenderPages(2000);
       return;
@@ -5239,26 +5138,19 @@
     const __savedPage = document.getElementById('stepper-saved-dances-page');
     if (__savedPage && ((__savedPage.offsetParent || __savedPage.getClientRects().length) && getComputedStyle(__savedPage).display !== 'none' && getComputedStyle(__savedPage).visibility !== 'hidden')) patchSavedDancesPage();
     renderSaveButton();
-  }, 10000);
+  }, 2200);
 
   setInterval(() => {
-    if (!shouldRunCloudSyncTask()) return;
-    if (!hasUnsavedChanges()) {
-      renderSaveButton();
-      return;
-    }
     syncCurrentDanceToBackend(false);
     renderSaveButton();
   }, SYNC_INTERVAL_MS);
 
   setInterval(() => {
-    if (!canRunForegroundTask()) return;
     refreshPresence();
     if (state.session && state.session.credential) heartbeat();
   }, PRESENCE_INTERVAL_MS);
 
   setInterval(() => {
-    if (!shouldRunFeatureSyncTask()) return;
     syncFeaturedFromBackend();
     patchFeaturedPageCopy();
     if (state.session && state.session.credential) { refreshNotifications(); refreshSubscription(); }
@@ -5271,8 +5163,6 @@
     event.preventDefault();
     event.returnValue = '';
   });
-
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) scheduleRenderPages(250); });
 
   window.addEventListener('storage', () => {
     if (state.session && state.session.credential) syncCurrentDanceToBackend(false);
@@ -6435,10 +6325,10 @@ Newest user question: ${question}`;
 
   let __stepperLiveQueueRefreshBusy = false;
   setInterval(() => {
-    if (__stepperLiveQueueRefreshBusy || !shouldRunLiveQueueTask()) return;
+    if (__stepperLiveQueueRefreshBusy || !(state.session && state.session.credential)) return;
     __stepperLiveQueueRefreshBusy = true;
     refreshLiveQueues().then(() => {
-      if (state.activePage === 'admin' || state.activePage === 'moderator' || state.activePage === 'signin' || state.activePage === 'subscription' || state.activePage === 'friends' || state.activePage === 'glossary' || state.activePage === 'pdfimport') renderPages();
+      if (state.activePage === 'admin' || state.activePage === 'signin' || state.activePage === 'subscription' || state.activePage === 'friends' || state.activePage === 'glossary' || state.activePage === 'pdfimport') renderPages();
     }).catch(() => {}).finally(() => { __stepperLiveQueueRefreshBusy = false; });
   }, LIVE_QUEUE_SYNC_INTERVAL_MS);
 

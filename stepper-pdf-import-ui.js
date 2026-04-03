@@ -14,55 +14,28 @@
   const PAGE_IDS = [
     'stepper-whatsnew-page',
     'stepper-saved-dances-page',
-    'stepper-featured-choreo-page',
-    'stepper-google-signin-page',
-    'stepper-google-subscription-page',
-    'stepper-google-admin-page',
-    'stepper-google-moderator-page',
-    'stepper-friends-page',
-    'stepper-glossary-page',
-    'stepper-pdf-page',
-    'stepper-settings-page',
-    'stepper-music-page',
-    'stepper-templates-page'
+    'stepper-featured-choreo-page'
   ];
 
   function isEditorVisible() {
-    try {
-      if (typeof window.__stepperIsDedicatedPageOpen === 'function' && window.__stepperIsDedicatedPageOpen()) return false;
-    } catch (_) {}
+    // If any overlay page is visible, editor is NOT the active page
     for (const id of PAGE_IDS) {
       const el = document.getElementById(id);
       if (el && !el.hidden && el.style.display !== 'none') return false;
     }
-    const mainEl = document.querySelector('main');
-    if (!mainEl || mainEl.style.display === 'none') return false;
     return true;
   }
 
   function startImportUiWatcher() {
-    let ensureTimer = null;
     const ensure = () => {
-      if (document.hidden) return;
       let btn = document.getElementById('stepper-pdf-import-btn');
       if (!btn && typeof injectUi === 'function') { try { injectUi(); } catch (_) {} btn = document.getElementById('stepper-pdf-import-btn'); }
       if (btn) { btn.style.display = 'inline-flex'; btn.style.visibility = 'visible'; }
       updateButtonVisibility();
     };
-    const queueEnsure = (delay) => {
-      if (ensureTimer) clearTimeout(ensureTimer);
-      ensureTimer = setTimeout(() => { ensureTimer = null; ensure(); }, Number.isFinite(delay) ? delay : 0);
-    };
     ensure();
-    document.addEventListener('click', (event) => {
-      if (!event.target || !event.target.closest) return;
-      if (event.target.closest('button, a, [role="tab"], [data-stepper-own-page]')) queueEnsure(120);
-    }, true);
-    window.addEventListener('hashchange', () => queueEnsure(80));
-    window.addEventListener('popstate', () => queueEnsure(80));
-    window.addEventListener('storage', () => queueEnsure(150));
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) queueEnsure(120); });
-    setInterval(() => { if (!document.hidden) ensure(); }, 20000);
+    try { new MutationObserver(() => ensure()).observe(document.body, { childList:true, subtree:true }); } catch (_) {}
+    setInterval(ensure, 1200);
   }
 
   function updateButtonVisibility() {
@@ -74,18 +47,9 @@
     btn.style.transform = show ? 'translateY(0)' : 'translateY(20px)';
   }
 
-  // React state isn't accessible from outside, so use light-touch events plus a slow backup tick.
+  // Poll for tab changes (React state isn't accessible from outside)
   function startTabWatcher() {
-    const queueVisibilityRefresh = () => setTimeout(updateButtonVisibility, 80);
-    document.addEventListener('click', (event) => {
-      if (!event.target || !event.target.closest) return;
-      if (event.target.closest('button, a, [role="tab"], [data-stepper-own-page]')) queueVisibilityRefresh();
-    }, true);
-    window.addEventListener('hashchange', queueVisibilityRefresh);
-    window.addEventListener('popstate', queueVisibilityRefresh);
-    window.addEventListener('storage', queueVisibilityRefresh);
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) queueVisibilityRefresh(); });
-    setInterval(() => { if (!document.hidden) updateButtonVisibility(); }, 12000);
+    setInterval(updateButtonVisibility, 400);
   }
 
   // --- Wait for app ---

@@ -343,12 +343,9 @@
       if (document.visibilityState === 'visible') scheduleRefresh();
     });
     setInterval(() => {
-      if (document.hidden) return;
-      const main = document.querySelector('main');
-      if (!main || main.style.display === 'none') return;
       if (!suppressHistory) queueSnapshot(0);
       scheduleRefresh();
-    }, 12000);
+    }, 2000);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once:true });

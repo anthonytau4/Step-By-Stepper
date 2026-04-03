@@ -99,25 +99,14 @@
     const saved = readJson(SETTINGS_KEY, {});
     return {
       sfxEnabled: saved.sfxEnabled !== false,
-      thinkingMusicEnabled: saved.thinkingMusicEnabled === true
+      thinkingMusicEnabled: saved.thinkingMusicEnabled === true,
+      fontFamily: ['system','rounded','elegant'].includes(saved.fontFamily) ? saved.fontFamily : 'system'
     };
   }
 
   function saveSettings(settings){
     const current = getSettings();
     writeJson(SETTINGS_KEY, Object.assign({}, current, settings));
-  }
-
-  function getUpgradedFontFamily(){
-    try {
-      const upgraded = JSON.parse(localStorage.getItem('stepper_settings_v1') || '{}');
-      const chosen = String((upgraded && upgraded.fontFamily) || '').trim();
-      if (chosen) {
-        const published = getComputedStyle(document.documentElement).getPropertyValue('--stepper-font-family').trim();
-        if (published) return published;
-      }
-    } catch {}
-    return getComputedStyle(document.documentElement).getPropertyValue('--stepper-font-family').trim() || '';
   }
 
   function isDarkMode(){
@@ -504,10 +493,8 @@
   }
 
   function applyFontSettings(){
-    const upgradedFamily = getUpgradedFontFamily();
-    if (upgradedFamily) {
-      document.documentElement.style.setProperty('--stepper-font-family', upgradedFamily);
-    }
+    const settings = getSettings();
+    document.documentElement.style.setProperty('--stepper-font-family', FONT_FAMILIES[settings.fontFamily] || FONT_FAMILIES.system);
   }
 
   function ensureInlineHost(){
@@ -739,6 +726,11 @@
     if (!panel) return;
     const theme = themeClasses();
     const settings = getSettings();
+    const fontChoices = [
+      { key:'system', title:'Classic', sample:'Clean editor finish', family: FONT_FAMILIES.system },
+      { key:'rounded', title:'Rounded', sample:'Soft and friendly', family: FONT_FAMILIES.rounded },
+      { key:'elegant', title:'Elegant', sample:'Formal sheet look', family: FONT_FAMILIES.elegant }
+    ];
     panel.className = `rounded-3xl border shadow-sm overflow-hidden ${theme.shell}`;
     panel.innerHTML = `
       <div class="px-6 py-5 border-b ${theme.panel}">
@@ -746,8 +738,15 @@
       </div>
       <div class="p-6 sm:p-8 space-y-5">
         <div class="rounded-3xl border p-5 sm:p-6 ${theme.soft}">
-          <div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle} mb-2">Font Style</div>
-          <p class="text-sm leading-relaxed ${theme.subtle}">Font controls now live in the upgraded Settings tab only, so re-renders stop forcing the editor back to the old three-font presets.</p>
+          <div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle} mb-3">Font Style</div>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            ${fontChoices.map(choice => `
+              <button type="button" class="stepper-font-choice ${theme.button}" data-font-choice="${choice.key}" data-active="${settings.fontFamily === choice.key ? 'true' : 'false'}" style="font-family:${choice.family}">
+                <strong>${escapeHtml(choice.title)}</strong>
+                <span>${escapeHtml(choice.sample)}</span>
+              </button>
+            `).join('')}
+          </div>
         </div>
         <button type="button" data-stepper-setting="sfx" class="rounded-3xl border w-full text-left p-5 sm:p-6 flex items-center justify-between gap-4 ${theme.soft}">
           <div><div class="text-lg font-black tracking-tight">SFX Sounds</div><p class="mt-1 text-sm ${theme.subtle}">Menu clicks, tab changes and all the little app noises.</p></div>
@@ -761,6 +760,13 @@
     `;
     panel.querySelector('[data-stepper-setting="sfx"]').addEventListener('click', () => { const current = getSettings(); current.sfxEnabled = !current.sfxEnabled; saveSettings(current); renderSettingsPanel(); });
     panel.querySelector('[data-stepper-setting="thinking"]').addEventListener('click', () => { const current = getSettings(); current.thinkingMusicEnabled = !current.thinkingMusicEnabled; saveSettings(current); renderSettingsPanel(); });
+    panel.querySelectorAll('[data-font-choice]').forEach(button => {
+      button.addEventListener('click', () => {
+        saveSettings({ fontFamily: button.getAttribute('data-font-choice') || 'system' });
+        applyFontSettings();
+        renderSettingsPanel();
+      });
+    });
   }
 
   function renderChoreoPanel(){
@@ -1551,24 +1557,10 @@
     }
 
     setInterval(() => {
-      if (document.hidden) return;
-      const mainEl = document.querySelector('main');
-      if (!mainEl || mainEl.style.display === 'none') return;
       saveFeaturedSnapshot();
       patchPreviewSurface();
-    }, 15000);
-
-    const shouldRefreshForSettingsChange = (event) => {
-      const detail = event && event.detail ? event.detail : {};
-      const key = String(detail.key || '');
-      return !key || key === '_all' || key === 'fontFamily' || key === 'fontSize' || key === 'dyslexiaFriendlyFont' || key === 'reduceMotion' || key === 'highContrastMode' || key === 'textSpacing' || key === 'tabSize';
-    };
-
+    }, 4200);
     window.addEventListener('storage', refresh);
-    window.addEventListener('stepper-settings-changed', (event) => {
-      if (!shouldRefreshForSettingsChange(event)) return;
-      refresh();
-    });
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once:true });

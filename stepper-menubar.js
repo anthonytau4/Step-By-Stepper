@@ -17,26 +17,8 @@
   window.__stepperMenubarInstalled = true;
 
   var MENUBAR_ID = 'stepper-docstyle-menubar';
-  var MENUBAR_HOST_ID = 'stepper-docstyle-menubar-host';
-  var QUICK_FORMAT_ID = 'stepper-menubar-quick-format';
-  var NON_EDITOR_PAGES = [
-    'stepper-whatsnew-page',
-    'stepper-saved-dances-page',
-    'stepper-featured-choreo-page',
-    'stepper-google-signin-page',
-    'stepper-google-subscription-page',
-    'stepper-google-admin-page',
-    'stepper-google-moderator-page',
-    'stepper-friends-page',
-    'stepper-glossary-page',
-    'stepper-pdf-page',
-    'stepper-settings-page',
-    'stepper-music-page',
-    'stepper-templates-page'
-  ];
   var _ic = window.__stepperIcons || {};
   var _injected = false;
-  var _rerenderTimer = 0;
 
   /* ── Theme detection ── */
   function isDarkMode() {
@@ -230,8 +212,11 @@
     /* Check URL path */
     var path = location.pathname.toLowerCase();
     if (path.includes('/editor') || path.includes('/sheet') || path === '/' || path === '/index.html') {
-      for (var i = 0; i < NON_EDITOR_PAGES.length; i++) {
-        var pg = document.getElementById(NON_EDITOR_PAGES[i]);
+      /* Also make sure no extra tab page is currently active */
+      var extraPages = ['stepper-friends-page','stepper-glossary-page','stepper-pdf-page',
+                        'stepper-settings-page','stepper-music-page','stepper-templates-page'];
+      for (var i = 0; i < extraPages.length; i++) {
+        var pg = document.getElementById(extraPages[i]);
         if (pg && !pg.hidden && pg.style.display !== 'none') return false;
       }
       return true;
@@ -799,40 +784,6 @@
   }
 
   /* ── Render menu bar ── */
-  function getMenuHost() {
-    var host = document.getElementById(MENUBAR_HOST_ID);
-    if (host) return host;
-    host = document.createElement('div');
-    host.id = MENUBAR_HOST_ID;
-    host.style.cssText = 'position:sticky;top:0;z-index:9996;width:100%;';
-    if (document.body.firstChild) document.body.insertBefore(host, document.body.firstChild);
-    else document.body.appendChild(host);
-    return host;
-  }
-
-  function getAccentHex() {
-    try {
-      var raw = JSON.parse(localStorage.getItem('stepper_settings_v1') || '{}');
-      var map = { indigo:'#4f46e5', blue:'#2563eb', green:'#16a34a', red:'#dc2626', purple:'#9333ea', orange:'#ea580c', teal:'#0d9488', pink:'#db2777' };
-      return map[String(raw.accentColor || 'indigo')] || '#4f46e5';
-    } catch (e) { return '#4f46e5'; }
-  }
-
-  function buildQuickFormatButton(action, label, title) {
-    var btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'stepper-quick-format-btn';
-    btn.dataset.menuAction = action;
-    btn.setAttribute('title', title);
-    btn.setAttribute('aria-label', title);
-    btn.textContent = label;
-    btn.addEventListener('click', function (e) {
-      e.stopPropagation();
-      dispatchMenuAction(action);
-    });
-    return btn;
-  }
-
   function renderMenuBar() {
     /* Don't re-render while a dropdown is open — it destroys the open menu */
     if (_activeMenu !== null) return;
@@ -841,12 +792,11 @@
     if (existing) existing.remove();
 
     var dark = isDarkMode();
-    var accent = getAccentHex();
     var menus = getMenus();
 
     var bar = document.createElement('div');
     bar.id = MENUBAR_ID;
-    bar.style.cssText = 'display:flex;align-items:center;gap:0;padding:0 8px;height:28px;font-size:12px;font-family:var(--stepper-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);user-select:none;position:relative;z-index:50;' +
+    bar.style.cssText = 'display:flex;align-items:center;gap:0;padding:0 8px;height:28px;font-size:12px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;user-select:none;position:relative;z-index:50;' +
       (dark ? 'background:#1e1e2e;color:#d4d4e0;border-bottom:1px solid #3a3a52;' : 'background:#ffffff;color:#1f2937;border-bottom:1px solid #d1d5db;');
 
     for (var i = 0; i < menus.length; i++) {
@@ -925,25 +875,23 @@
       bar.appendChild(wrapper);
     }
 
-    if (_isEditorTab()) {
-      var spacer = document.createElement('div');
-      spacer.style.cssText = 'flex:1 1 auto;';
-      bar.appendChild(spacer);
-
-      var quickFormat = document.createElement('div');
-      quickFormat.id = QUICK_FORMAT_ID;
-      quickFormat.className = 'stepper-quick-format-strip';
-      quickFormat.appendChild(buildQuickFormatButton('format-bold', 'B', 'Bold (Ctrl+B)'));
-      quickFormat.appendChild(buildQuickFormatButton('format-italic', 'I', 'Italic (Ctrl+I)'));
-      quickFormat.appendChild(buildQuickFormatButton('format-underline', 'U', 'Underline (Ctrl+U)'));
-      quickFormat.appendChild(buildQuickFormatButton('format-strike', 'S', 'Strikethrough'));
-      quickFormat.appendChild(buildQuickFormatButton('clear-format', 'Tx', 'Clear formatting'));
-      bar.appendChild(quickFormat);
+    /* Find a good insertion point */
+    var tabStrip = null;
+    var buildBtn = Array.from(document.querySelectorAll('button')).find(function (b) { return (b.textContent || '').trim() === 'Build'; });
+    if (buildBtn && buildBtn.parentElement) {
+      tabStrip = buildBtn.parentElement;
     }
 
-    var host = getMenuHost();
-    host.innerHTML = '';
-    host.appendChild(bar);
+    if (tabStrip && tabStrip.parentElement) {
+      tabStrip.parentElement.insertBefore(bar, tabStrip);
+    } else {
+      var root = document.getElementById('root');
+      if (root && root.firstChild) {
+        root.insertBefore(bar, root.firstChild);
+      } else if (document.body.firstChild) {
+        document.body.insertBefore(bar, document.body.firstChild);
+      }
+    }
 
     _injected = true;
   }
@@ -954,14 +902,9 @@
     var style = document.createElement('style');
     style.id = 'stepper-menubar-style';
     style.textContent = [
-      '.stepper-menu-trigger:hover, .stepper-menu-trigger--open { background: color-mix(in srgb, var(--stepper-accent-color, #4f46e5) 14%, transparent) !important; color: var(--stepper-accent-color, #4f46e5) !important; }',
+      '.stepper-menu-trigger:hover, .stepper-menu-trigger--open { background: rgba(99,102,241,.1) !important; }',
       '.stepper-menu-trigger--open { font-weight: 600 !important; }',
-      '#' + MENUBAR_ID + ' { border-bottom-color: color-mix(in srgb, var(--stepper-accent-color, #4f46e5) 18%, rgba(0,0,0,.16)) !important; }',
       '.stepper-menu-dropdown { animation: stepper-menu-drop .12s ease; }',
-      '.stepper-quick-format-strip { display:inline-flex; align-items:center; gap:4px; margin-left:12px; padding-left:10px; border-left:1px solid color-mix(in srgb, var(--stepper-accent-color, #4f46e5) 18%, rgba(0,0,0,.14)); }',
-      '.stepper-quick-format-btn { min-width:28px; height:22px; padding:0 8px; border-radius:7px; border:1px solid color-mix(in srgb, var(--stepper-accent-color, #4f46e5) 22%, rgba(0,0,0,.14)); background:color-mix(in srgb, var(--stepper-accent-color, #4f46e5) 6%, transparent); color:inherit; cursor:pointer; font-size:11px; font-weight:800; line-height:1; transition:background .12s ease, color .12s ease, transform .12s ease; }',
-      '.stepper-quick-format-btn:hover { background: color-mix(in srgb, var(--stepper-accent-color, #4f46e5) 16%, transparent); color: var(--stepper-accent-color, #4f46e5); transform: translateY(-1px); }',
-      '.stepper-quick-format-btn:active { transform: translateY(0); }',
       '@keyframes stepper-menu-drop { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }',
       '#' + MENUBAR_ID + ' svg { width: 14px !important; height: 14px !important; }'
     ].join('\n');
@@ -984,30 +927,18 @@
 
     /* Re-inject if the Build button appears later (SPA navigation) */
     var observer = new MutationObserver(function () {
-      var host = document.getElementById(MENUBAR_HOST_ID);
-      if (!host || !document.getElementById(MENUBAR_ID)) {
+      if (!document.getElementById(MENUBAR_ID)) {
         renderMenuBar();
       }
     });
     observer.observe(document.body, { childList: true, subtree: true });
 
-    /* Re-render on theme/layout changes */
-    function rerenderMenuBar() {
-      if (_rerenderTimer) return;
-      _rerenderTimer = window.requestAnimationFrame(function () {
-        _rerenderTimer = 0;
-        if (document.getElementById(MENUBAR_ID)) {
-          renderMenuBar();
-        }
-      });
-    }
-    window.addEventListener('storage', rerenderMenuBar);
-    window.addEventListener('stepper-settings-changed', function (event) {
-      var detail = event && event.detail ? event.detail : {};
-      var key = String(detail.key || '');
-      if (!key || key === '_all' || key === 'theme' || key === 'fontFamily') rerenderMenuBar();
+    /* Re-render on theme change */
+    window.addEventListener('storage', function () {
+      if (document.getElementById(MENUBAR_ID)) {
+        renderMenuBar();
+      }
     });
-    window.addEventListener('stepper-theme-updated', rerenderMenuBar);
   }
 
   if (document.readyState === 'loading') {
