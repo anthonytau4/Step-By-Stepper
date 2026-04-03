@@ -218,6 +218,7 @@
   function startWatching(){
     if (observer) return;
     observer = new MutationObserver(() => {
+      if (document.hidden) return;
       bindButtons();
     });
     observer.observe(document.documentElement || document.body, { childList: true, subtree: true });

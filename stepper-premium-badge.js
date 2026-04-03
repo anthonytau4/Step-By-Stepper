@@ -129,12 +129,16 @@
     injectBadgeStyles();
     hookFetchForMembership();
     stabiliseEditing();
-    // Periodically try to inject badge
-    setInterval(() => {
+    const tryInjectIfNeeded = () => {
+      if (document.hidden) return;
       if (window.__STEPPER_IS_PREMIUM && !badgeInjected) {
         badgeInjected = tryInjectBadge();
       }
-    }, 2000);
+    };
+    document.addEventListener('click', () => { setTimeout(tryInjectIfNeeded, 120); }, true);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) tryInjectIfNeeded(); });
+    window.addEventListener('storage', tryInjectIfNeeded);
+    setInterval(tryInjectIfNeeded, 15000);
   }
 
   if (document.readyState === 'loading') {

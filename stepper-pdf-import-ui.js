@@ -41,15 +41,28 @@
   }
 
   function startImportUiWatcher() {
+    let ensureTimer = null;
     const ensure = () => {
+      if (document.hidden) return;
       let btn = document.getElementById('stepper-pdf-import-btn');
       if (!btn && typeof injectUi === 'function') { try { injectUi(); } catch (_) {} btn = document.getElementById('stepper-pdf-import-btn'); }
       if (btn) { btn.style.display = 'inline-flex'; btn.style.visibility = 'visible'; }
       updateButtonVisibility();
     };
+    const queueEnsure = (delay) => {
+      if (ensureTimer) clearTimeout(ensureTimer);
+      ensureTimer = setTimeout(() => { ensureTimer = null; ensure(); }, Number.isFinite(delay) ? delay : 0);
+    };
     ensure();
-    try { new MutationObserver(() => ensure()).observe(document.body, { childList:true, subtree:true }); } catch (_) {}
-    setInterval(ensure, 1200);
+    document.addEventListener('click', (event) => {
+      if (!event.target || !event.target.closest) return;
+      if (event.target.closest('button, a, [role="tab"], [data-stepper-own-page]')) queueEnsure(120);
+    }, true);
+    window.addEventListener('hashchange', () => queueEnsure(80));
+    window.addEventListener('popstate', () => queueEnsure(80));
+    window.addEventListener('storage', () => queueEnsure(150));
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) queueEnsure(120); });
+    setInterval(() => { if (!document.hidden) ensure(); }, 8000);
   }
 
   function updateButtonVisibility() {
@@ -61,9 +74,18 @@
     btn.style.transform = show ? 'translateY(0)' : 'translateY(20px)';
   }
 
-  // Poll for tab changes (React state isn't accessible from outside)
+  // React state isn't accessible from outside, so use light-touch events plus a slow backup tick.
   function startTabWatcher() {
-    setInterval(updateButtonVisibility, 400);
+    const queueVisibilityRefresh = () => setTimeout(updateButtonVisibility, 80);
+    document.addEventListener('click', (event) => {
+      if (!event.target || !event.target.closest) return;
+      if (event.target.closest('button, a, [role="tab"], [data-stepper-own-page]')) queueVisibilityRefresh();
+    }, true);
+    window.addEventListener('hashchange', queueVisibilityRefresh);
+    window.addEventListener('popstate', queueVisibilityRefresh);
+    window.addEventListener('storage', queueVisibilityRefresh);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) queueVisibilityRefresh(); });
+    setInterval(() => { if (!document.hidden) updateButtonVisibility(); }, 3000);
   }
 
   // --- Wait for app ---

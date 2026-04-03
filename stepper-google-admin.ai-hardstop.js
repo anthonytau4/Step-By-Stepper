@@ -33,10 +33,10 @@
   const DEFAULT_BACKEND_BASE = 'https://step-by-stepper.onrender.com';
   const ALT_BACKEND_BASE = 'https://api.step-by-stepper.com';
   const FALLBACK_GOOGLE_CLIENT_ID = '1038282546217-a7qv2i1puevmtjf38f6sv761vt7he26s.apps.googleusercontent.com';
-  const SYNC_INTERVAL_MS = 6000;
-  const PRESENCE_INTERVAL_MS = 30000;
-  const FEATURED_SYNC_INTERVAL_MS = 18000;
-  const LIVE_QUEUE_SYNC_INTERVAL_MS = 4000;
+  const SYNC_INTERVAL_MS = 15000;
+  const PRESENCE_INTERVAL_MS = 60000;
+  const FEATURED_SYNC_INTERVAL_MS = 45000;
+  const LIVE_QUEUE_SYNC_INTERVAL_MS = 15000;
 
   const state = {
     activePage: null,
@@ -151,6 +151,31 @@
     const active = document.activeElement;
     if (isTextEntryElement(active) && getTextEntryValue(active)) return true;
     return adminDraftExists();
+  }
+
+  function canRunForegroundTask(){
+    return !document.hidden;
+  }
+
+  function shouldRunAdminUiPulse(){
+    if (!canRunForegroundTask()) return false;
+    if (state.activePage) return true;
+    const savedPage = document.getElementById('stepper-saved-dances-page');
+    if (!savedPage) return false;
+    return !!((savedPage.offsetParent || savedPage.getClientRects().length) && getComputedStyle(savedPage).display !== 'none' && getComputedStyle(savedPage).visibility !== 'hidden');
+  }
+
+  function shouldRunCloudSyncTask(){
+    return canRunForegroundTask() && !!(state.session && state.session.credential) && !shouldDeferAdminAutoRender();
+  }
+
+  function shouldRunFeatureSyncTask(){
+    return canRunForegroundTask();
+  }
+
+  function shouldRunLiveQueueTask(){
+    if (!canRunForegroundTask() || !(state.session && state.session.credential)) return false;
+    return ['admin','moderator','signin','subscription','friends','glossary','pdfimport','settings','templates'].includes(String(state.activePage || ''));
   }
 
   function scheduleRenderPages(delay){
@@ -5179,6 +5204,7 @@
   }
 
   setInterval(() => {
+    if (!shouldRunAdminUiPulse()) return;
     if (shouldDeferAdminAutoRender()) {
       scheduleRenderPages(2000);
       return;
@@ -5195,19 +5221,26 @@
     const __savedPage = document.getElementById('stepper-saved-dances-page');
     if (__savedPage && ((__savedPage.offsetParent || __savedPage.getClientRects().length) && getComputedStyle(__savedPage).display !== 'none' && getComputedStyle(__savedPage).visibility !== 'hidden')) patchSavedDancesPage();
     renderSaveButton();
-  }, 2200);
+  }, 10000);
 
   setInterval(() => {
+    if (!shouldRunCloudSyncTask()) return;
+    if (!hasUnsavedChanges()) {
+      renderSaveButton();
+      return;
+    }
     syncCurrentDanceToBackend(false);
     renderSaveButton();
   }, SYNC_INTERVAL_MS);
 
   setInterval(() => {
+    if (!canRunForegroundTask()) return;
     refreshPresence();
     if (state.session && state.session.credential) heartbeat();
   }, PRESENCE_INTERVAL_MS);
 
   setInterval(() => {
+    if (!shouldRunFeatureSyncTask()) return;
     syncFeaturedFromBackend();
     patchFeaturedPageCopy();
     if (state.session && state.session.credential) { refreshNotifications(); refreshSubscription(); }
@@ -5220,6 +5253,8 @@
     event.preventDefault();
     event.returnValue = '';
   });
+
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) scheduleRenderPages(250); });
 
   window.addEventListener('storage', () => {
     if (state.session && state.session.credential) syncCurrentDanceToBackend(false);
@@ -6382,10 +6417,10 @@ Newest user question: ${question}`;
 
   let __stepperLiveQueueRefreshBusy = false;
   setInterval(() => {
-    if (__stepperLiveQueueRefreshBusy || !(state.session && state.session.credential)) return;
+    if (__stepperLiveQueueRefreshBusy || !shouldRunLiveQueueTask()) return;
     __stepperLiveQueueRefreshBusy = true;
     refreshLiveQueues().then(() => {
-      if (state.activePage === 'admin' || state.activePage === 'signin' || state.activePage === 'subscription' || state.activePage === 'friends' || state.activePage === 'glossary' || state.activePage === 'pdfimport') renderPages();
+      if (state.activePage === 'admin' || state.activePage === 'moderator' || state.activePage === 'signin' || state.activePage === 'subscription' || state.activePage === 'friends' || state.activePage === 'glossary' || state.activePage === 'pdfimport') renderPages();
     }).catch(() => {}).finally(() => { __stepperLiveQueueRefreshBusy = false; });
   }, LIVE_QUEUE_SYNC_INTERVAL_MS);
 

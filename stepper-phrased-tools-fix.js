@@ -1551,9 +1551,12 @@
     }
 
     setInterval(() => {
+      if (document.hidden) return;
+      const mainEl = document.querySelector('main');
+      if (!mainEl || mainEl.style.display === 'none') return;
       saveFeaturedSnapshot();
       patchPreviewSurface();
-    }, 4200);
+    }, 15000);
 
     const shouldRefreshForSettingsChange = (event) => {
       const detail = event && event.detail ? event.detail : {};
