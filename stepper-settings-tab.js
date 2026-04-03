@@ -730,6 +730,73 @@
   }
 
   /* ════════════════════════════════════════════════════════════
+     FONT PICKER
+     ════════════════════════════════════════════════════════════ */
+  function renderFontPicker(theme) {
+    if (!settingMatchesSearch('fontFamily')) return '';
+    var currentFont = getSetting('fontFamily');
+    var html = '';
+    html += '<div style="padding:12px 0;border-bottom:1px solid ' + theme.border + ';" data-setting-row="fontFamily">';
+    html += '<div style="font-size:13px;font-weight:600;">Font Family</div>';
+    html += '<div class="' + theme.subtle + '" style="font-size:11px;margin-top:2px;">Choose from ' + FONT_LIST.length + ' fonts — click to preview &amp; apply</div>';
+
+    /* Category filter pills */
+    html += '<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:10px;">';
+    for (var ci = 0; ci < FONT_CATEGORIES.length; ci++) {
+      var cat = FONT_CATEGORIES[ci];
+      var catActive = _fontCategoryFilter === cat.id;
+      html += '<button data-font-category="' + cat.id + '" style="';
+      html += 'padding:4px 12px;border-radius:999px;border:1px solid;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s ease;';
+      html += catActive ? theme.chipActive : theme.chipBg;
+      html += '">' + escapeHtml(cat.label) + '</button>';
+    }
+    html += '</div>';
+
+    /* Font search */
+    html += '<div style="position:relative;margin-top:8px;">';
+    html += '<input data-font-search type="text" placeholder="Search fonts…" value="' + escapeHtml(_fontSearchQuery) + '" style="';
+    html += 'width:100%;padding:8px 12px 8px 32px;border-radius:10px;border:1px solid;font-size:12px;box-sizing:border-box;' + theme.inputBg + '">';
+    html += '<span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);opacity:.4;">' + icon('search') + '</span>';
+    html += '</div>';
+
+    /* Font grid */
+    html += '<div data-font-grid style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;margin-top:10px;max-height:320px;overflow-y:auto;padding:4px 2px;">';
+    var query = _fontSearchQuery.toLowerCase();
+    var visibleCount = 0;
+    for (var fi = 0; fi < FONT_LIST.length; fi++) {
+      var f = FONT_LIST[fi];
+      /* Category filter */
+      if (_fontCategoryFilter !== 'all' && f.category !== _fontCategoryFilter) continue;
+      /* Search filter */
+      if (query && f.label.toLowerCase().indexOf(query) === -1 && f.category.indexOf(query) === -1) continue;
+      visibleCount++;
+      var isActive = currentFont === f.id;
+      /* Preload Google Font for preview */
+      if (f.google) loadGoogleFont(f);
+      html += '<button data-font-pick="' + f.id + '" title="' + escapeHtml(f.label) + '" style="';
+      html += 'padding:10px 12px;border-radius:12px;border:2px solid;cursor:pointer;text-align:left;transition:all .15s ease;';
+      html += isActive
+        ? 'border-color:#4f46e5;background:' + (theme.dark ? 'rgba(79,70,229,.15)' : 'rgba(79,70,229,.08)') + ';box-shadow:0 0 0 2px rgba(79,70,229,.25);'
+        : 'border-color:' + theme.border + ';background:' + (theme.dark ? '#1a1a2e' : '#fafafa') + ';';
+      html += '">';
+      html += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;opacity:.5;">' + escapeHtml(f.category) + '</div>';
+      html += '<div style="font-family:' + f.family + ';font-size:15px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(f.label) + '</div>';
+      html += '<div style="font-family:' + f.family + ';font-size:12px;opacity:.6;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">The quick brown fox</div>';
+      html += '</button>';
+    }
+    if (visibleCount === 0) {
+      html += '<div style="grid-column:1/-1;text-align:center;padding:20px;opacity:.5;font-size:13px;">No fonts match your search</div>';
+    }
+    html += '</div>';
+
+    /* Current selection label */
+    var cur = getFontById(currentFont);
+    html += '<div style="margin-top:8px;font-size:12px;opacity:.7;">Currently using: <strong style="font-family:' + cur.family + ';">' + escapeHtml(cur.label) + '</strong></div>';
+    html += '</div>';
+    return html;
+  }
+
+  /* ════════════════════════════════════════════════════════════
      RENDER SECTIONS
      ════════════════════════════════════════════════════════════ */
   function renderAppearanceSection(theme) {
@@ -751,13 +818,7 @@
       html += '</div>';
     }
 
-    html += renderSelect('fontFamily', 'Font Family', 'Choose the typeface for the editor', [
-      { value: 'system', label: 'System Default' },
-      { value: 'serif', label: 'Serif' },
-      { value: 'sans-serif', label: 'Sans-serif' },
-      { value: 'monospace', label: 'Monospace' },
-      { value: 'dancing-script', label: 'Dancing Script' }
-    ], theme);
+    html += renderFontPicker(theme);
 
     html += renderRadioGroup('editorWidth', 'Editor Width', 'Set the maximum width of the editor area', [
       { value: 'compact', label: 'Compact' }, { value: 'normal', label: 'Normal' }, { value: 'wide', label: 'Wide' }
@@ -1171,6 +1232,36 @@
       btn.addEventListener('click', function () {
         var id = btn.getAttribute('data-settings-section');
         settingsState.expandedSection = settingsState.expandedSection === id ? null : id;
+        renderSettingsPage();
+      });
+    });
+
+    // Font picker: category pills
+    page.querySelectorAll('[data-font-category]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        _fontCategoryFilter = btn.getAttribute('data-font-category');
+        renderSettingsPage();
+      });
+    });
+
+    // Font picker: search
+    var fontSearch = page.querySelector('[data-font-search]');
+    if (fontSearch) {
+      fontSearch.addEventListener('input', function () {
+        _fontSearchQuery = fontSearch.value;
+        renderSettingsPage();
+        var nf = document.querySelector('#' + PAGE_ID + ' [data-font-search]');
+        if (nf) { nf.focus(); nf.setSelectionRange(nf.value.length, nf.value.length); }
+      });
+    }
+
+    // Font picker: card selection
+    page.querySelectorAll('[data-font-pick]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var fontId = btn.getAttribute('data-font-pick');
+        var fontObj = getFontById(fontId);
+        if (fontObj.google) loadGoogleFont(fontObj);
+        setSetting('fontFamily', fontId);
         renderSettingsPage();
       });
     });
