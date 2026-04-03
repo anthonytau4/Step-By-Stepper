@@ -226,7 +226,7 @@
 
       /* ── Hamburger button ── */
       '#' + HAMBURGER_ID + ' {',
-      '  position: fixed; top: 10px; right: 14px; z-index: 10001;',
+      '  position: fixed; top: max(10px, env(safe-area-inset-top, 0px)); right: max(14px, env(safe-area-inset-right, 0px)); z-index: 10001;',
       '  width: 44px; height: 44px; border: none; border-radius: 14px;',
       '  display: flex; align-items: center; justify-content: center;',
       '  cursor: pointer; padding: 0;',
@@ -323,12 +323,12 @@
       '.shn-user-info {',
       '  font-size: 12px; margin-top: 2px; opacity: 0.6; font-weight: 400;',
       '  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;',
-      '  max-width: 200px;',
+      '  max-width: calc(var(--shn-drawer-w) - 100px);',
       '}',
       'html:not(.dark) .shn-user-info { color: #6b7280; }',
       'html.dark .shn-user-info { color: #9ca3af; }',
       '.shn-close-btn {',
-      '  width: 32px; height: 32px; border: none; border-radius: 10px;',
+      '  width: 36px; height: 36px; padding: 4px; border: none; border-radius: 10px;',
       '  display: flex; align-items: center; justify-content: center;',
       '  cursor: pointer; flex-shrink: 0; margin-top: -2px;',
       '  transition: background .15s, transform .15s;',
@@ -352,7 +352,7 @@
       '  transition: opacity .2s, color .2s;',
       '}',
       '.shn-search input {',
-      '  width: 100%; height: 40px; border-radius: 12px;',
+      '  width: 100%; height: 44px; border-radius: 12px;',
       '  padding: 0 14px 0 38px; font-size: 13px; font-family: inherit;',
       '  border: 1.5px solid transparent; outline: none;',
       '  transition: border-color .2s, box-shadow .2s, background .2s;',
@@ -468,7 +468,7 @@
       'html:not(.dark) .shn-footer { border-top: 1px solid rgba(0,0,0,0.06); }',
       'html.dark .shn-footer { border-top: 1px solid rgba(255,255,255,0.06); }',
       '.shn-qa-btn {',
-      '  width: 38px; height: 38px; border: none; border-radius: 12px;',
+      '  width: 44px; height: 44px; border: none; border-radius: 12px;',
       '  display: flex; align-items: center; justify-content: center;',
       '  cursor: pointer; font-family: inherit;',
       '  transition: background .15s, transform .15s;',
@@ -511,6 +511,9 @@
       '  .shn-ripple { animation-duration: 0.01ms; }',
       '  .shn-pill, .shn-close-btn, .shn-qa-btn, .shn-search input { transition-duration: 0.01ms; }',
       '  @keyframes shn-border-flow { 0%, 100% { background-position: 0 0; } }',
+      '}',
+      '@media (max-width: 480px) {',
+      '  .shn-brand { font-size: 17px; }',
       '}'
     ].join('\n');
   }
