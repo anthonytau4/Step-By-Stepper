@@ -116,6 +116,121 @@
     { id: 'pink',    hex: '#db2777', label: 'Pink' }
   ];
 
+  /* ── Comprehensive Font List (60+) ── */
+  var FONT_LIST = [
+    /* System Fonts */
+    { id: 'system',           label: 'System Default',       family: '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif', category: 'system', google: false },
+    { id: 'arial',            label: 'Arial',                family: 'Arial,Helvetica,sans-serif',      category: 'system', google: false },
+    { id: 'helvetica-neue',   label: 'Helvetica Neue',       family: '"Helvetica Neue",Helvetica,Arial,sans-serif', category: 'system', google: false },
+    { id: 'times-new-roman',  label: 'Times New Roman',      family: '"Times New Roman",Times,serif',   category: 'system', google: false },
+    { id: 'georgia',          label: 'Georgia',              family: 'Georgia,"Times New Roman",serif',  category: 'system', google: false },
+    { id: 'courier-new',      label: 'Courier New',          family: '"Courier New",Courier,monospace', category: 'system', google: false },
+    { id: 'verdana',          label: 'Verdana',              family: 'Verdana,Geneva,sans-serif',       category: 'system', google: false },
+    { id: 'trebuchet-ms',     label: 'Trebuchet MS',         family: '"Trebuchet MS",Helvetica,sans-serif', category: 'system', google: false },
+    { id: 'palatino',         label: 'Palatino Linotype',    family: '"Palatino Linotype","Book Antiqua",Palatino,serif', category: 'system', google: false },
+    { id: 'lucida-console',   label: 'Lucida Console',       family: '"Lucida Console","Lucida Sans Typewriter",monospace', category: 'system', google: false },
+    { id: 'tahoma',           label: 'Tahoma',               family: 'Tahoma,Verdana,sans-serif',       category: 'system', google: false },
+    { id: 'garamond',         label: 'Garamond',             family: 'Garamond,"Times New Roman",serif', category: 'system', google: false },
+    { id: 'comic-sans',       label: 'Comic Sans MS',        family: '"Comic Sans MS","Comic Sans",cursive', category: 'system', google: false },
+    /* Sans-Serif (Google Fonts) */
+    { id: 'roboto',           label: 'Roboto',               family: '"Roboto",sans-serif',              category: 'sans-serif', google: true },
+    { id: 'open-sans',        label: 'Open Sans',            family: '"Open Sans",sans-serif',           category: 'sans-serif', google: true },
+    { id: 'lato',             label: 'Lato',                 family: '"Lato",sans-serif',                category: 'sans-serif', google: true },
+    { id: 'montserrat',       label: 'Montserrat',           family: '"Montserrat",sans-serif',          category: 'sans-serif', google: true },
+    { id: 'poppins',          label: 'Poppins',              family: '"Poppins",sans-serif',             category: 'sans-serif', google: true },
+    { id: 'raleway',          label: 'Raleway',              family: '"Raleway",sans-serif',             category: 'sans-serif', google: true },
+    { id: 'inter',            label: 'Inter',                family: '"Inter",sans-serif',               category: 'sans-serif', google: true },
+    { id: 'nunito',           label: 'Nunito',               family: '"Nunito",sans-serif',              category: 'sans-serif', google: true },
+    { id: 'oswald',           label: 'Oswald',               family: '"Oswald",sans-serif',              category: 'sans-serif', google: true },
+    { id: 'fira-sans',        label: 'Fira Sans',            family: '"Fira Sans",sans-serif',           category: 'sans-serif', google: true },
+    { id: 'noto-sans',        label: 'Noto Sans',            family: '"Noto Sans",sans-serif',           category: 'sans-serif', google: true },
+    { id: 'pt-sans',          label: 'PT Sans',              family: '"PT Sans",sans-serif',             category: 'sans-serif', google: true },
+    { id: 'rubik',            label: 'Rubik',                family: '"Rubik",sans-serif',               category: 'sans-serif', google: true },
+    { id: 'work-sans',        label: 'Work Sans',            family: '"Work Sans",sans-serif',           category: 'sans-serif', google: true },
+    { id: 'quicksand',        label: 'Quicksand',            family: '"Quicksand",sans-serif',           category: 'sans-serif', google: true },
+    { id: 'barlow',           label: 'Barlow',               family: '"Barlow",sans-serif',              category: 'sans-serif', google: true },
+    { id: 'karla',            label: 'Karla',                family: '"Karla",sans-serif',               category: 'sans-serif', google: true },
+    { id: 'josefin-sans',     label: 'Josefin Sans',         family: '"Josefin Sans",sans-serif',        category: 'sans-serif', google: true },
+    { id: 'cabin',            label: 'Cabin',                family: '"Cabin",sans-serif',               category: 'sans-serif', google: true },
+    { id: 'dosis',            label: 'Dosis',                family: '"Dosis",sans-serif',               category: 'sans-serif', google: true },
+    { id: 'archivo',          label: 'Archivo',              family: '"Archivo",sans-serif',             category: 'sans-serif', google: true },
+    { id: 'mulish',           label: 'Mulish',               family: '"Mulish",sans-serif',              category: 'sans-serif', google: true },
+    { id: 'ubuntu',           label: 'Ubuntu',               family: '"Ubuntu",sans-serif',              category: 'sans-serif', google: true },
+    { id: 'source-sans-3',    label: 'Source Sans 3',        family: '"Source Sans 3",sans-serif',       category: 'sans-serif', google: true },
+    { id: 'manrope',          label: 'Manrope',              family: '"Manrope",sans-serif',             category: 'sans-serif', google: true },
+    { id: 'dm-sans',          label: 'DM Sans',              family: '"DM Sans",sans-serif',             category: 'sans-serif', google: true },
+    { id: 'lexend',           label: 'Lexend',               family: '"Lexend",sans-serif',              category: 'sans-serif', google: true },
+    /* Serif (Google Fonts) */
+    { id: 'playfair-display', label: 'Playfair Display',     family: '"Playfair Display",serif',         category: 'serif', google: true },
+    { id: 'merriweather',     label: 'Merriweather',         family: '"Merriweather",serif',             category: 'serif', google: true },
+    { id: 'bitter',           label: 'Bitter',               family: '"Bitter",serif',                   category: 'serif', google: true },
+    { id: 'libre-baskerville',label: 'Libre Baskerville',    family: '"Libre Baskerville",serif',        category: 'serif', google: true },
+    { id: 'crimson-text',     label: 'Crimson Text',         family: '"Crimson Text",serif',             category: 'serif', google: true },
+    { id: 'eb-garamond',      label: 'EB Garamond',          family: '"EB Garamond",serif',              category: 'serif', google: true },
+    { id: 'cormorant-garamond',label:'Cormorant Garamond',   family: '"Cormorant Garamond",serif',       category: 'serif', google: true },
+    { id: 'spectral',         label: 'Spectral',             family: '"Spectral",serif',                 category: 'serif', google: true },
+    { id: 'vollkorn',         label: 'Vollkorn',             family: '"Vollkorn",serif',                 category: 'serif', google: true },
+    { id: 'pt-serif',         label: 'PT Serif',             family: '"PT Serif",serif',                 category: 'serif', google: true },
+    { id: 'noto-serif',       label: 'Noto Serif',           family: '"Noto Serif",serif',               category: 'serif', google: true },
+    { id: 'lora',             label: 'Lora',                 family: '"Lora",serif',                     category: 'serif', google: true },
+    /* Display / Decorative */
+    { id: 'abril-fatface',    label: 'Abril Fatface',        family: '"Abril Fatface",serif',            category: 'display', google: true },
+    { id: 'bebas-neue',       label: 'Bebas Neue',           family: '"Bebas Neue",sans-serif',          category: 'display', google: true },
+    { id: 'comfortaa',        label: 'Comfortaa',            family: '"Comfortaa",cursive',              category: 'display', google: true },
+    { id: 'lobster',          label: 'Lobster',              family: '"Lobster",cursive',                category: 'display', google: true },
+    { id: 'permanent-marker', label: 'Permanent Marker',     family: '"Permanent Marker",cursive',       category: 'display', google: true },
+    { id: 'righteous',        label: 'Righteous',            family: '"Righteous",sans-serif',           category: 'display', google: true },
+    { id: 'fredoka',          label: 'Fredoka',              family: '"Fredoka",sans-serif',             category: 'display', google: true },
+    { id: 'bangers',          label: 'Bangers',              family: '"Bangers",cursive',                category: 'display', google: true },
+    /* Handwriting / Script */
+    { id: 'dancing-script',   label: 'Dancing Script',       family: '"Dancing Script",cursive',         category: 'handwriting', google: true },
+    { id: 'pacifico',         label: 'Pacifico',             family: '"Pacifico",cursive',               category: 'handwriting', google: true },
+    { id: 'caveat',           label: 'Caveat',               family: '"Caveat",cursive',                 category: 'handwriting', google: true },
+    { id: 'sacramento',       label: 'Sacramento',           family: '"Sacramento",cursive',             category: 'handwriting', google: true },
+    { id: 'great-vibes',      label: 'Great Vibes',          family: '"Great Vibes",cursive',            category: 'handwriting', google: true },
+    { id: 'satisfy',          label: 'Satisfy',              family: '"Satisfy",cursive',                category: 'handwriting', google: true },
+    { id: 'cookie',           label: 'Cookie',               family: '"Cookie",cursive',                 category: 'handwriting', google: true },
+    { id: 'indie-flower',     label: 'Indie Flower',         family: '"Indie Flower",cursive',           category: 'handwriting', google: true },
+    { id: 'kalam',            label: 'Kalam',                family: '"Kalam",cursive',                  category: 'handwriting', google: true },
+    /* Monospace */
+    { id: 'jetbrains-mono',   label: 'JetBrains Mono',       family: '"JetBrains Mono",monospace',      category: 'monospace', google: true },
+    { id: 'fira-code',        label: 'Fira Code',            family: '"Fira Code",monospace',            category: 'monospace', google: true },
+    { id: 'source-code-pro',  label: 'Source Code Pro',      family: '"Source Code Pro",monospace',      category: 'monospace', google: true },
+    { id: 'ibm-plex-mono',    label: 'IBM Plex Mono',        family: '"IBM Plex Mono",monospace',       category: 'monospace', google: true },
+    { id: 'space-mono',       label: 'Space Mono',           family: '"Space Mono",monospace',           category: 'monospace', google: true },
+    { id: 'roboto-mono',      label: 'Roboto Mono',          family: '"Roboto Mono",monospace',          category: 'monospace', google: true }
+  ];
+
+  var FONT_CATEGORIES = [
+    { id: 'all',          label: 'All' },
+    { id: 'system',       label: 'System' },
+    { id: 'sans-serif',   label: 'Sans-Serif' },
+    { id: 'serif',        label: 'Serif' },
+    { id: 'display',      label: 'Display' },
+    { id: 'handwriting',  label: 'Handwriting' },
+    { id: 'monospace',    label: 'Monospace' }
+  ];
+
+  var _loadedGoogleFonts = {};
+  function loadGoogleFont(fontObj) {
+    if (!fontObj.google || _loadedGoogleFonts[fontObj.id]) return;
+    _loadedGoogleFonts[fontObj.id] = true;
+    var link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = 'https://fonts.googleapis.com/css2?family=' + encodeURIComponent(fontObj.label) + ':wght@400;600;700&display=swap';
+    document.head.appendChild(link);
+  }
+
+  function getFontById(id) {
+    for (var i = 0; i < FONT_LIST.length; i++) {
+      if (FONT_LIST[i].id === id) return FONT_LIST[i];
+    }
+    return FONT_LIST[0]; // fallback to system
+  }
+
+  var _fontSearchQuery = '';
+  var _fontCategoryFilter = 'all';
+
   var SECTIONS = [
     { id: 'appearance',    label: 'Appearance',       icon: 'palette',       desc: 'Theme, colors, fonts & layout' },
     { id: 'editor',        label: 'Editor Behavior',  icon: 'edit',          desc: 'Auto-save, defaults & smart features' },
@@ -247,14 +362,9 @@
         root.style.setProperty('--stepper-font-size', value + 'px');
         break;
       case 'fontFamily':
-        var families = {
-          system: '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif',
-          serif: 'Georgia,"Times New Roman",Times,serif',
-          'sans-serif': '"Helvetica Neue",Arial,sans-serif',
-          monospace: '"SF Mono",Consolas,"Liberation Mono",Menlo,monospace',
-          'dancing-script': '"Dancing Script",cursive,sans-serif'
-        };
-        root.style.setProperty('--stepper-font-family', families[value] || families.system);
+        var fontObj = getFontById(value);
+        if (fontObj.google) loadGoogleFont(fontObj);
+        root.style.setProperty('--stepper-font-family', fontObj.family);
         break;
       case 'reduceMotion':
         if (value) root.classList.add('stepper-reduce-motion');
