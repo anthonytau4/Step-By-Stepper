@@ -80,6 +80,8 @@
     showSortDropdown: false
   };
 
+  var _sortDropdownHandler = null;
+
   /* ── Persistence helpers ── */
   function loadJSON(key, fallback) {
     try { return JSON.parse(localStorage.getItem(key)) || fallback; }
@@ -556,7 +558,7 @@
   function renderSearchBar(theme) {
     var html = '<div style="position:relative;margin-bottom:12px;">';
     html += '<div style="position:absolute;left:14px;top:50%;transform:translateY(-50%);pointer-events:none;opacity:.5;">' + icon('search') + '</div>';
-    html += '<input data-glossary-search type="text" placeholder="Search steps... (e.g. vine, shuffle, coaster)" value="' + escapeHtml(glossaryState.searchQuery) + '" ';
+    html += '<input data-glossary-search type="text" placeholder="Search steps\u2026 (e.g. vine, shuffle, coaster)" value="' + escapeHtml(glossaryState.searchQuery) + '" ';
     html += 'style="width:100%;border-radius:14px;border:1px solid;padding:12px 18px 12px 42px;font-size:15px;outline:none;transition:border-color .2s,box-shadow .2s;' + theme.inputBg + '" />';
     if (glossaryState.searchQuery) {
       html += '<button data-glossary-action="clear-search" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);padding:4px;border:none;background:none;cursor:pointer;opacity:.5;transition:opacity .15s;" title="Clear search (Esc)">' + icon('close') + '</button>';
@@ -1025,13 +1027,19 @@
 
     /* Close sort dropdown on outside click */
     if (glossaryState.showSortDropdown) {
+      if (_sortDropdownHandler) {
+        document.removeEventListener('click', _sortDropdownHandler, true);
+      }
+      _sortDropdownHandler = function () {
+        glossaryState.showSortDropdown = false;
+        document.removeEventListener('click', _sortDropdownHandler, true);
+        _sortDropdownHandler = null;
+        renderGlossaryPage();
+      };
       setTimeout(function () {
-        var handler = function () {
-          glossaryState.showSortDropdown = false;
-          renderGlossaryPage();
-          document.removeEventListener('click', handler, true);
-        };
-        document.addEventListener('click', handler, true);
+        if (_sortDropdownHandler) {
+          document.addEventListener('click', _sortDropdownHandler, true);
+        }
       }, 0);
     }
 
