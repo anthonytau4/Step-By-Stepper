@@ -111,6 +111,11 @@
     wireEvents(page);
   }
 
+  /* ── Helpers for the virtual "straight" category ── */
+  function getStraightSteps(dict) {
+    return dict.STEPS.filter(function (s) { return s.category !== 'syncopated'; });
+  }
+
   function renderCategoryChips(dict, theme) {
     var cats = dict.CATEGORIES;
     var keys = Object.keys(cats);
@@ -125,7 +130,8 @@
       var key = keys[i];
       var cat = cats[key];
       var active = glossaryState.selectedCategory === key;
-      var count = dict.getAllSteps(key).length;
+      /* "straight" is a virtual category — count all non-syncopated steps */
+      var count = key === 'straight' ? getStraightSteps(dict).length : dict.getAllSteps(key).length;
       html += '<button data-glossary-cat="' + key + '" style="display:inline-flex;align-items:center;gap:4px;padding:7px 14px;border-radius:999px;border:1px solid;font-size:12px;font-weight:800;cursor:pointer;transition:all .2s;' + (active ? theme.chipActive : theme.chipBg) + '">';
       html += cat.icon + ' ' + escapeHtml(cat.label) + ' <span style="opacity:.6;">(' + count + ')</span></button>';
     }
@@ -137,6 +143,9 @@
     var steps;
     if (glossaryState.searchQuery) {
       steps = dict.search(glossaryState.searchQuery);
+    } else if (glossaryState.selectedCategory === 'straight') {
+      /* Virtual category: all steps that are NOT syncopated */
+      steps = getStraightSteps(dict);
     } else if (glossaryState.selectedCategory) {
       steps = dict.getAllSteps(glossaryState.selectedCategory);
     } else {
