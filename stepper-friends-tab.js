@@ -1064,10 +1064,20 @@
     var friend = friendsState.invitingToDance;
     if (!friend) return '';
 
+    /* Build a dance entry from the currently-loaded dance in localStorage */
     var dances = [];
     try {
       var data = JSON.parse(localStorage.getItem(BUILDER_DATA_KEY) || 'null');
-      if (data && Array.isArray(data.dances)) dances = data.dances;
+      if (data && data.meta) {
+        var meta = data.meta;
+        var title = String(meta.title || '').trim() || 'Untitled Dance';
+        var choreographer = String(meta.choreographer || '').trim() || 'Uncredited';
+        dances.push({
+          id: title.toLowerCase() + '|' + choreographer.toLowerCase(),
+          title: title,
+          choreographer: choreographer
+        });
+      }
     } catch (e) { /* ignore */ }
 
     var html = '';
@@ -1078,20 +1088,20 @@
     html += '<button data-friends-invite-close style="position:absolute;top:12px;right:12px;background:none;border:none;cursor:pointer;font-size:18px;opacity:.5;">' + _ic.close + '</button>';
 
     html += '<h3 style="font-size:16px;font-weight:900;margin:0 0 4px;">Invite ' + escapeHtml(friend.name || friend.email || 'Friend') + '</h3>';
-    html += '<p class="' + theme.subtle + '" style="font-size:13px;margin:0 0 16px;">Select a dance to invite them to collaborate on.</p>';
+    html += '<p class="' + theme.subtle + '" style="font-size:13px;margin:0 0 16px;">Send them a collaboration invite for your current dance.</p>';
 
     if (!dances.length) {
       html += '<div style="text-align:center;padding:20px;">';
-      html += '<p class="' + theme.subtle + '" style="font-size:13px;margin:0;">No saved dances found. Create a dance first!</p>';
+      html += '<p class="' + theme.subtle + '" style="font-size:13px;margin:0;">No dance loaded. Create or load a dance first!</p>';
       html += '</div>';
     } else {
       html += '<div style="max-height:240px;overflow-y:auto;display:grid;gap:8px;">';
       for (var i = 0; i < dances.length; i++) {
         var d = dances[i];
-        var danceName = d.name || d.title || ('Dance #' + (i + 1));
-        var danceId = d.id || d._id || i;
-        html += '<button data-friends-send-dance-invite="' + escapeHtml(String(danceId)) + '" style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:14px;border:1px solid;cursor:pointer;text-align:left;font-size:13px;font-weight:700;transition:all .2s ease;' + theme.cardBg + '">';
-        html += '<span>&#x1F57A;</span><span style="flex:1;">' + escapeHtml(danceName) + '</span>';
+        var danceName = d.title || ('Dance #' + (i + 1));
+        var subtitle = d.choreographer && d.choreographer !== 'Uncredited' ? ' by ' + d.choreographer : '';
+        html += '<button data-friends-send-dance-invite="' + escapeHtml(String(d.id)) + '" style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:14px;border:1px solid;cursor:pointer;text-align:left;font-size:13px;font-weight:700;transition:all .2s ease;' + theme.cardBg + '">';
+        html += '<span>&#x1F57A;</span><span style="flex:1;">' + escapeHtml(danceName) + escapeHtml(subtitle) + '</span>';
         html += '<span style="font-size:11px;opacity:.6;">Send</span>';
         html += '</button>';
       }
@@ -1380,6 +1390,44 @@
     },
     refresh: refreshFriends,
     getState: function () { return friendsState; },
+    /** Send a dance-collaboration invite to a friend (by email) for the current project. */
+    sendCurrentDanceInvite: function (email) {
+      if (!isSignedIn()) return;
+      var base = getApiBase().replace(/\/+$/, '');
+      var currentDanceJson = null;
+      var danceId = '';
+      try {
+        var data = JSON.parse(localStorage.getItem(BUILDER_DATA_KEY) || 'null');
+        if (data && data.meta) {
+          currentDanceJson = data;
+          var title = String(data.meta.title || '').trim() || 'Untitled Dance';
+          var choreographer = String(data.meta.choreographer || '').trim() || 'Uncredited';
+          danceId = title.toLowerCase() + '|' + choreographer.toLowerCase();
+        }
+      } catch (e) { /* ignore */ }
+      if (!danceId) return;
+      fetch(base + '/api/collaborators/invite', {
+        method: 'POST',
+        mode: 'cors',
+        credentials: 'omit',
+        headers: authHeaders(),
+        body: JSON.stringify({ danceId: danceId, email: email, danceData: currentDanceJson })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (data && data.ok) {
+            friendsState.success = 'Dance invite sent to ' + escapeHtml(email) + '!';
+          } else {
+            friendsState.error = (data && data.error) || 'Could not send dance invite.';
+          }
+          renderFriendsPage();
+        })
+        .catch(function () {
+          friendsState.error = 'Could not send the dance invite. Server might be down.';
+          renderFriendsPage();
+        });
+    },
+    getFriends: function () { return friendsState.friends || []; },
     icon: function () {
       return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>';
     }
