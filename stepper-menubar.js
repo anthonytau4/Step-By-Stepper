@@ -28,6 +28,20 @@
     } catch (e) { return false; }
   }
 
+  /* ── Lightweight toast (used by dispatchMenuAction) ── */
+  function _toast(msg) {
+    if (window.__stepperStepSelect && window.__stepperStepSelect.showToast) {
+      window.__stepperStepSelect.showToast(msg);
+      return;
+    }
+    var t = document.createElement('div');
+    t.textContent = msg;
+    t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:99999;padding:10px 22px;border-radius:12px;font-size:14px;font-weight:600;pointer-events:none;animation:stepper-toast-in .25s ease;' + (isDarkMode() ? 'background:#333;color:#e5e5e5;' : 'background:#1f2937;color:#fff;');
+    document.body.appendChild(t);
+    setTimeout(function(){ t.style.opacity = '0'; t.style.transition = 'opacity .3s'; }, 2200);
+    setTimeout(function(){ t.remove(); }, 2600);
+  }
+
   /* ── Menu definitions ── */
   function getMenus() {
     var dark = isDarkMode();
@@ -274,10 +288,325 @@
       case 'word-count':
         try {
           var bd = JSON.parse(localStorage.getItem('linedance_builder_data_v13') || '{}');
-          var steps = (bd.dances && bd.dances[0] && bd.dances[0].steps) || [];
-          alert('Step count: ' + steps.length + ' steps in the current dance.');
+          var secs = bd.sections || (bd.dances && bd.dances[0] && bd.dances[0].steps ? [{ steps: bd.dances[0].steps }] : []);
+          var total = 0; for (var wi = 0; wi < secs.length; wi++) total += (secs[wi].steps || []).length;
+          var msg = 'Word Count\n\nSections: ' + secs.length + '\nTotal steps: ' + total;
+          if (bd.meta) msg += '\nTitle: ' + (bd.meta.title || '(untitled)') + '\nChoreographer: ' + (bd.meta.choreographer || '(none)');
+          alert(msg);
         } catch (e) { alert('Could not count steps.'); }
         break;
+
+      /* ── Clipboard / Selection (wired to stepper-step-select.js) ── */
+      case 'copy':
+        if (window.__stepperStepSelect) window.__stepperStepSelect.copySelectedSteps();
+        break;
+      case 'cut':
+        if (window.__stepperStepSelect) window.__stepperStepSelect.cutSelectedSteps();
+        break;
+      case 'paste':
+        if (window.__stepperStepSelect) window.__stepperStepSelect.pasteSteps();
+        break;
+      case 'select-all':
+        if (window.__stepperStepSelect) window.__stepperStepSelect.selectAllSteps();
+        break;
+      case 'delete-selected':
+        if (window.__stepperStepSelect) window.__stepperStepSelect.deleteSelectedSteps();
+        break;
+
+      /* ── Find & Replace ── */
+      case 'find-replace':
+        if (window.__stepperStepSelect) window.__stepperStepSelect.openFindReplace();
+        break;
+
+      /* ── Insert operations ── */
+      case 'insert-step':
+        if (window.__stepperStepSelect) window.__stepperStepSelect.insertStep();
+        else { _toast('Insert Step: select a position first'); }
+        break;
+      case 'insert-section':
+        if (window.__stepperStepSelect) window.__stepperStepSelect.insertSection();
+        break;
+      case 'insert-tag':
+        try {
+          var td = JSON.parse(localStorage.getItem('linedance_builder_data_v13') || '{}');
+          var tagName = prompt('Enter tag name (e.g. "Restart", "Wall Change"):');
+          if (tagName && tagName.trim()) {
+            if (!td.tags) td.tags = [];
+            td.tags.push(tagName.trim());
+            localStorage.setItem('linedance_builder_data_v13', JSON.stringify(td));
+            window.dispatchEvent(new Event('storage'));
+            _toast('Tag "' + tagName.trim() + '" added');
+          }
+        } catch (e) {}
+        break;
+      case 'insert-break':
+        if (window.__stepperStepSelect) window.__stepperStepSelect.insertSection();
+        break;
+      case 'insert-comment':
+        try {
+          var cData = JSON.parse(localStorage.getItem('linedance_builder_data_v13') || '{}');
+          var comment = prompt('Add a comment / note:');
+          if (comment && comment.trim() && cData.sections && cData.sections.length > 0) {
+            var lastSec = cData.sections[cData.sections.length - 1];
+            if (lastSec.steps && lastSec.steps.length > 0) {
+              var lastStep = lastSec.steps[lastSec.steps.length - 1];
+              lastStep.showNote = true;
+              lastStep.note = (lastStep.note ? lastStep.note + ' | ' : '') + comment.trim();
+            }
+            localStorage.setItem('linedance_builder_data_v13', JSON.stringify(cData));
+            window.dispatchEvent(new Event('storage'));
+            _toast('Comment added to last step');
+          }
+        } catch (e) {}
+        break;
+
+      /* ── Format operations ── */
+      case 'format-bold':
+        if (window.__stepperStepSelect) window.__stepperStepSelect.formatBold();
+        break;
+      case 'format-italic':
+        if (window.__stepperStepSelect) window.__stepperStepSelect.formatItalic();
+        break;
+      case 'format-underline':
+        if (window.__stepperStepSelect) window.__stepperStepSelect.formatUnderline();
+        break;
+      case 'format-strike':
+        if (window.__stepperStepSelect) window.__stepperStepSelect.formatStrikethrough();
+        break;
+      case 'clear-format':
+        if (window.__stepperStepSelect) window.__stepperStepSelect.clearFormatting();
+        break;
+      case 'align-left':
+      case 'align-center':
+      case 'align-right':
+        _toast('Alignment: ' + action.replace('align-', ''));
+        break;
+
+      /* ── File extras ── */
+      case 'save-as':
+        try {
+          var saData = JSON.parse(localStorage.getItem('linedance_builder_data_v13') || '{}');
+          var saName = prompt('Save copy as:', (saData.meta && saData.meta.title ? saData.meta.title : 'My Dance') + ' (copy)');
+          if (saName && saName.trim()) {
+            var copy = JSON.parse(JSON.stringify(saData));
+            if (copy.meta) copy.meta.title = saName.trim();
+            var saved = JSON.parse(localStorage.getItem('stepper_saved_dances') || '[]');
+            saved.push({ id: 'dance-' + Date.now(), data: copy, savedAt: new Date().toISOString() });
+            localStorage.setItem('stepper_saved_dances', JSON.stringify(saved));
+            _toast('Saved as "' + saName.trim() + '"');
+          }
+        } catch (e) {}
+        break;
+      case 'make-copy':
+        try {
+          var mcData = JSON.parse(localStorage.getItem('linedance_builder_data_v13') || '{}');
+          var mcCopy = JSON.parse(JSON.stringify(mcData));
+          if (mcCopy.meta) mcCopy.meta.title = (mcCopy.meta.title || 'Dance') + ' (copy)';
+          localStorage.setItem('linedance_builder_data_v13', JSON.stringify(mcCopy));
+          window.dispatchEvent(new Event('storage'));
+          _toast('Working on a copy now');
+        } catch (e) {}
+        break;
+      case 'email-dance':
+        try {
+          var emData = JSON.parse(localStorage.getItem('linedance_builder_data_v13') || '{}');
+          var emTitle = (emData.meta && emData.meta.title) || 'My Dance';
+          var emBody = 'Check out my dance: ' + emTitle;
+          if (emData.sections) {
+            emBody += '%0A%0ASections: ' + emData.sections.length;
+            var emSteps = 0; emData.sections.forEach(function(s){ emSteps += (s.steps||[]).length; });
+            emBody += ', Steps: ' + emSteps;
+          }
+          window.open('mailto:?subject=' + encodeURIComponent('Dance: ' + emTitle) + '&body=' + emBody);
+        } catch (e) {}
+        break;
+      case 'dance-details':
+        try {
+          var dd = JSON.parse(localStorage.getItem('linedance_builder_data_v13') || '{}');
+          var m = dd.meta || {};
+          alert('Dance Details\n\nTitle: ' + (m.title||'(none)') + '\nChoreographer: ' + (m.choreographer||'(none)') + '\nLevel: ' + (m.level||'?') + '\nCounts: ' + (m.counts||'?') + '\nWalls: ' + (m.walls||'?') + '\nMusic: ' + (m.music||'(none)') + '\nStyle: ' + (m.danceStyle || m.type || '8-count'));
+        } catch (e) {}
+        break;
+      case 'version-history':
+        _toast('Version history coming soon');
+        break;
+
+      /* ── View extras ── */
+      case 'fit-width':
+        document.body.dataset.stepperZoom = '1';
+        document.body.style.transform = '';
+        document.body.style.width = '';
+        _toast('Zoom reset to 100%');
+        break;
+      case 'show-ruler':
+        document.body.classList.toggle('stepper-show-ruler');
+        _toast('Ruler ' + (document.body.classList.contains('stepper-show-ruler') ? 'shown' : 'hidden'));
+        break;
+      case 'show-sections':
+        document.body.classList.toggle('stepper-show-section-numbers');
+        _toast('Section numbers ' + (document.body.classList.contains('stepper-show-section-numbers') ? 'shown' : 'hidden'));
+        break;
+
+      /* ── Tools extras ── */
+      case 'spell-check':
+        _toast('Spell check: steps use a built-in dictionary');
+        if (window.__stepperStepDictionary) {
+          var spData = JSON.parse(localStorage.getItem('linedance_builder_data_v13') || '{}');
+          var spSecs = spData.sections || [];
+          var issues = [];
+          spSecs.forEach(function(sec, si) {
+            (sec.steps || []).forEach(function(st, sti) {
+              if (st.name) {
+                var match = window.__stepperStepDictionary.lookup ? window.__stepperStepDictionary.lookup(st.name) : null;
+                if (match && match.name && match.name.toLowerCase() !== st.name.toLowerCase()) {
+                  issues.push('Section ' + (si+1) + ', Step ' + (sti+1) + ': "' + st.name + '" → "' + match.name + '"');
+                }
+              }
+            });
+          });
+          if (issues.length) alert('Step name suggestions:\n\n' + issues.join('\n'));
+          else _toast('All step names look good!');
+        }
+        break;
+      case 'step-dictionary':
+        var glossTab2 = document.getElementById('stepper-glossary-tab');
+        if (glossTab2) glossTab2.click();
+        break;
+      case 'auto-level':
+        try {
+          var alData = JSON.parse(localStorage.getItem('linedance_builder_data_v13') || '{}');
+          var alSecs = alData.sections || [];
+          var syncoCount = 0, totalSteps = 0;
+          alSecs.forEach(function(sec) {
+            (sec.steps || []).forEach(function(st) {
+              totalSteps++;
+              if (st.name && /shuffle|coaster|sailor|weave|cross|syncopat/i.test(st.name)) syncoCount++;
+            });
+          });
+          var ratio = totalSteps > 0 ? syncoCount / totalSteps : 0;
+          var level = ratio > 0.3 ? 'Intermediate' : ratio > 0.1 ? 'Improver' : 'Beginner';
+          if (alData.meta) alData.meta.level = level;
+          localStorage.setItem('linedance_builder_data_v13', JSON.stringify(alData));
+          window.dispatchEvent(new Event('storage'));
+          _toast('Auto-detected level: ' + level);
+        } catch (e) {}
+        break;
+      case 'gen-counts':
+        try {
+          var gcData = JSON.parse(localStorage.getItem('linedance_builder_data_v13') || '{}');
+          var gcSecs = gcData.sections || [];
+          var totalCounts = 0;
+          gcSecs.forEach(function(sec) {
+            (sec.steps || []).forEach(function(st) {
+              var c = parseInt(st.count, 10);
+              totalCounts += (isNaN(c) ? 1 : c);
+            });
+          });
+          if (gcData.meta) gcData.meta.counts = String(totalCounts);
+          localStorage.setItem('linedance_builder_data_v13', JSON.stringify(gcData));
+          window.dispatchEvent(new Event('storage'));
+          _toast('Generated counts: ' + totalCounts);
+        } catch (e) {}
+        break;
+      case 'smart-split':
+        try {
+          var ssData = JSON.parse(localStorage.getItem('linedance_builder_data_v13') || '{}');
+          var ssSecs = ssData.sections || [];
+          var limit = (ssData.meta && ssData.meta.danceStyle === 'waltz') ? 6 : 8;
+          var newSecs = [];
+          ssSecs.forEach(function(sec) {
+            var steps = sec.steps || [];
+            var chunk = []; var count = 0;
+            steps.forEach(function(st) {
+              var c = parseInt(st.count, 10) || 1;
+              if (count + c > limit && chunk.length > 0) {
+                newSecs.push({ id: 'section-' + Date.now() + '-' + newSecs.length, name: sec.name + ' (' + (newSecs.length + 1) + ')', steps: chunk });
+                chunk = []; count = 0;
+              }
+              chunk.push(st); count += c;
+            });
+            if (chunk.length > 0) newSecs.push({ id: sec.id, name: sec.name, steps: chunk });
+          });
+          ssData.sections = newSecs;
+          localStorage.setItem('linedance_builder_data_v13', JSON.stringify(ssData));
+          window.dispatchEvent(new Event('storage'));
+          _toast('Smart split: ' + newSecs.length + ' sections');
+        } catch (e) {}
+        break;
+      case 'preferences':
+        if (window.__stepperSettingsTab && window.__stepperSettingsTab.open) window.__stepperSettingsTab.open();
+        else window.dispatchEvent(new CustomEvent('stepper-open-settings'));
+        break;
+      case 'shortcuts':
+      case 'help-shortcuts':
+        window.dispatchEvent(new CustomEvent('stepper-show-shortcuts'));
+        break;
+
+      /* ── Extensions extras ── */
+      case 'export-clipboard':
+        try {
+          var ecData = JSON.parse(localStorage.getItem('linedance_builder_data_v13') || '{}');
+          var ecLines = [];
+          if (ecData.meta) ecLines.push((ecData.meta.title || 'Untitled') + ' — ' + (ecData.meta.choreographer || ''));
+          (ecData.sections || []).forEach(function(sec, si) {
+            ecLines.push('\n[Section ' + (si + 1) + ': ' + (sec.name || '') + ']');
+            (sec.steps || []).forEach(function(st, sti) {
+              ecLines.push((sti + 1) + '. ' + (st.name || '?') + (st.description ? ' — ' + st.description : '') + (st.foot ? ' (' + st.foot + ')' : ''));
+            });
+          });
+          var ecText = ecLines.join('\n');
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(ecText).then(function(){ _toast('Dance copied to clipboard!'); });
+          } else { _toast('Clipboard not available'); }
+        } catch (e) {}
+        break;
+      case 'share-link':
+        try {
+          var slData = JSON.parse(localStorage.getItem('linedance_builder_data_v13') || '{}');
+          var slCompressed = btoa(unescape(encodeURIComponent(JSON.stringify(slData))));
+          var slUrl = location.origin + location.pathname + '#dance=' + slCompressed.slice(0, 2000);
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(slUrl).then(function(){ _toast('Share link copied!'); });
+          } else { prompt('Copy this link:', slUrl); }
+        } catch (e) {}
+        break;
+
+      /* ── Help extras ── */
+      case 'help-start':
+      case 'help-main':
+        var helpWn = Array.from(document.querySelectorAll('button')).find(function (b) { return (b.textContent || '').trim() === "What's New"; });
+        if (helpWn) helpWn.click();
+        break;
+      case 'report-issue':
+        window.open('https://github.com/anthonytau4/Step-By-Stepper/issues', '_blank');
+        break;
+      case 'about':
+        alert('Step by Stepper\n\nA modern line dance step sheet editor.\nBuild, preview, and share your choreography.\n\n© ' + new Date().getFullYear());
+        break;
+
+      /* ── Insert extras (stubs with toasts) ── */
+      case 'insert-image':
+        _toast('Image insert coming soon');
+        break;
+      case 'insert-table':
+        _toast('Table insert coming soon');
+        break;
+      case 'insert-special':
+        _toast('Special characters coming soon');
+        break;
+      case 'insert-footnote':
+        _toast('Footnote coming soon');
+        break;
+      case 'line-spacing':
+        document.body.classList.toggle('stepper-wide-spacing');
+        _toast('Line spacing toggled');
+        break;
+      case 'paragraph-styles':
+      case 'columns':
+      case 'manage-extensions':
+        _toast(action.replace(/-/g, ' ').replace(/\b\w/g, function(c){ return c.toUpperCase(); }) + ' — coming soon');
+        break;
+
       default:
         break;
     }
