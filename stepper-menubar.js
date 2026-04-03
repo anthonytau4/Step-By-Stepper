@@ -66,7 +66,7 @@
           { label: 'Select All Steps', icon: _ic.check || '', action: 'select-all', shortcut: 'Ctrl+A' },
           { label: 'Delete Selected', icon: _ic.trash || '', action: 'delete-selected', shortcut: 'Del' },
           { type: 'divider' },
-          { label: 'Find &amp; Replace…', icon: _ic.search || '', action: 'find-replace', shortcut: 'Ctrl+H' }
+          { label: 'Find & Replace…', icon: _ic.search || '', action: 'find-replace', shortcut: 'Ctrl+H' }
         ]
       },
       {
@@ -129,7 +129,7 @@
         label: 'Tools',
         icon: _ic.toolsMenu || _ic.settings || '',
         items: [
-          { label: 'Spelling &amp; Grammar', icon: _ic.spelling || _ic.check || '', action: 'spell-check' },
+          { label: 'Spelling & Grammar', icon: _ic.spelling || _ic.check || '', action: 'spell-check' },
           { label: 'Word Count', icon: _ic.wordCount || _ic.hashtag || '', action: 'word-count' },
           { type: 'divider' },
           { label: 'AI Site Helper', icon: _ic.brain || '', action: 'open-helper' },
@@ -252,10 +252,24 @@
         window.print();
         break;
       case 'zoom-in':
-        document.body.style.zoom = (parseFloat(document.body.style.zoom || '1') + 0.1).toFixed(1);
+        try {
+          var curScale = parseFloat(document.body.dataset.stepperZoom || '1');
+          var newScale = Math.min(2, curScale + 0.1);
+          document.body.dataset.stepperZoom = newScale.toFixed(1);
+          document.body.style.transform = 'scale(' + newScale.toFixed(1) + ')';
+          document.body.style.transformOrigin = 'top left';
+          document.body.style.width = (100 / newScale).toFixed(1) + '%';
+        } catch (e) {}
         break;
       case 'zoom-out':
-        document.body.style.zoom = Math.max(0.5, parseFloat(document.body.style.zoom || '1') - 0.1).toFixed(1);
+        try {
+          var curScale2 = parseFloat(document.body.dataset.stepperZoom || '1');
+          var newScale2 = Math.max(0.5, curScale2 - 0.1);
+          document.body.dataset.stepperZoom = newScale2.toFixed(1);
+          document.body.style.transform = newScale2 === 1 ? '' : 'scale(' + newScale2.toFixed(1) + ')';
+          document.body.style.transformOrigin = 'top left';
+          document.body.style.width = newScale2 === 1 ? '' : (100 / newScale2).toFixed(1) + '%';
+        } catch (e) {}
         break;
       case 'word-count':
         try {
@@ -368,12 +382,12 @@
 
         var iconSpan = document.createElement('span');
         iconSpan.style.cssText = 'width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;opacity:.7;';
-        iconSpan.innerHTML = item.icon || '';
+        if (item.icon) iconSpan.innerHTML = item.icon;
         row.appendChild(iconSpan);
 
         var labelSpan = document.createElement('span');
         labelSpan.style.cssText = 'flex:1;';
-        labelSpan.innerHTML = item.label;
+        labelSpan.textContent = item.label;
         row.appendChild(labelSpan);
 
         if (item.shortcut) {

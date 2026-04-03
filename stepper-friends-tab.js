@@ -365,20 +365,25 @@
   }
 
   /* ── Read receipts ── */
+  var _readReceiptTimer = null;
   function markChatAsRead(friendId) {
     if (!isSignedIn() || !friendId) return;
-    apiFetch('/api/friends/chat/read', {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify({ friendId: friendId })
-    })
-      .then(function (data) {
-        if (data && Array.isArray(data.messages)) {
-          friendsState.chatMessages = data.messages;
-          renderFriendsPage();
-        }
+    /* Debounce: only fire if user stays in this chat for 500ms */
+    clearTimeout(_readReceiptTimer);
+    _readReceiptTimer = setTimeout(function () {
+      apiFetch('/api/friends/chat/read', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ friendId: friendId })
       })
-      .catch(function () { /* silent */ });
+        .then(function (data) {
+          if (data && Array.isArray(data.messages)) {
+            friendsState.chatMessages = data.messages;
+            renderFriendsPage();
+          }
+        })
+        .catch(function () { /* silent */ });
+    }, 500);
   }
 
   function renderMessageStatus(msg, isMe) {
@@ -1582,6 +1587,10 @@
       /* Auto-refresh from backend when data is stale (>30 s) */
       if (isSignedIn() && Date.now() - friendsState.lastRefresh > 30000) {
         refreshFriends();
+      }
+      /* Fetch role once (not on every refresh cycle) */
+      if (isSignedIn() && friendsState.myRole === 'member' && !friendsState._roleFetched) {
+        friendsState._roleFetched = true;
         fetchMyRole();
       }
     },
