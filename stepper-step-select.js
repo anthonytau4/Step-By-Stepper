@@ -42,6 +42,10 @@
 
   function clone(v) { return JSON.parse(JSON.stringify(v)); }
 
+  function generateId(prefix) {
+    return prefix + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+  }
+
   function readData() {
     var d = safeParse(localStorage.getItem(DATA_KEY), null);
     if (!d || typeof d !== 'object') return null;
@@ -564,7 +568,7 @@
     var newSteps = [];
     for (var i = 0; i < clipboard.length; i++) {
       var s = clone(clipboard[i]);
-      s.id = 'step-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+      s.id = generateId('step-');
       newSteps.push(s);
     }
 
@@ -630,7 +634,7 @@
 
   function makeStepTemplate() {
     return {
-      id: 'step-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+      id: generateId('step-'),
       type: 'step',
       count: '1',
       name: '',
@@ -644,7 +648,7 @@
 
   function makeSectionTemplate() {
     return {
-      id: 'section-' + Date.now(),
+      id: generateId('section-'),
       name: 'New Section',
       steps: []
     };
