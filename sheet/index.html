@@ -7,7 +7,8 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
-    <meta name="theme-color" content="#111827" />
+    <meta name="theme-color" content="#f3f4f6" id="stepper-theme-color" />
+    <meta name="color-scheme" content="light dark" />
     <title>Step by Stepper</title>
     <link rel="icon" href="./favicon.ico" sizes="any" />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
@@ -95,6 +96,15 @@
 <style>
 
 
+</style>
+<style id="stepper-android-compat">
+html { background-color: #f3f4f6; color: #111827; }
+html.dark { background-color: #0a0a0a; color: #ffffff; }
+body { background-color: inherit; color: inherit; }
+@media (prefers-color-scheme: dark) {
+  html:not(.dark) { background-color: #f3f4f6; color: #111827; color-scheme: light; }
+  html:not(.dark) body { background-color: #f3f4f6; color: #111827; }
+}
 </style>
 </head>
   <body>

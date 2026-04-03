@@ -6,7 +6,8 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
-    <meta name="theme-color" content="#111827" />
+    <meta name="theme-color" content="#f3f4f6" id="stepper-theme-color" />
+    <meta name="color-scheme" content="light dark" />
     <title>Step by Stepper</title>
     <link rel="icon" href="./favicon.ico" sizes="any" />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
@@ -112,9 +113,54 @@
 })();
 </script>
 <style>
-
-
+/* ── Android / Mobile compatibility ── */
+/* Prevent Android WebView and Chrome from auto-darkening.
+   The app controls its own dark mode via the .dark class on <html>. */
+html {
+  background-color: #f3f4f6;
+  color: #111827;
+}
+html.dark {
+  background-color: #0a0a0a;
+  color: #ffffff;
+}
+body {
+  background-color: inherit;
+  color: inherit;
+}
+/* Prevent forced dark mode inversion on Android WebViews */
+@media (prefers-color-scheme: dark) {
+  html:not(.dark) {
+    background-color: #f3f4f6;
+    color: #111827;
+    color-scheme: light;
+  }
+  html:not(.dark) body {
+    background-color: #f3f4f6;
+    color: #111827;
+  }
+}
 </style>
+<script>
+/* Dynamic theme-color: update the meta tag when dark mode changes */
+(function(){
+  function updateThemeColor(){
+    try {
+      var meta = document.getElementById('stepper-theme-color');
+      if (!meta) return;
+      var data = JSON.parse(localStorage.getItem('linedance_builder_data_v13') || 'null');
+      var isDark = !!(data && data.isDarkMode);
+      meta.setAttribute('content', isDark ? '#0a0a0a' : '#f3f4f6');
+    } catch(e){}
+  }
+  updateThemeColor();
+  window.addEventListener('storage', updateThemeColor);
+  /* Also listen for class changes on <html> for real-time sync */
+  try {
+    new MutationObserver(updateThemeColor).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+  } catch(e){}
+})();
+</script>
 </head>
   <body>
 

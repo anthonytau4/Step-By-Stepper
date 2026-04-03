@@ -16,6 +16,37 @@
       html { scroll-behavior: smooth; }
       body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
 
+      /* ═══════════════════════════════════════════════════════
+         ANDROID / MOBILE COMPATIBILITY
+         Prevent auto-darkening by Chrome on Android.
+         The app manages dark mode via the .dark class on <html>.
+         ═══════════════════════════════════════════════════════ */
+      html:not(.dark) #root,
+      html:not(.dark) body,
+      html:not(.dark) [role="tablist"],
+      html:not(.dark) #stepper-docstyle-menubar,
+      html:not(.dark) #stepper-google-admin-host {
+        color-scheme: light !important;
+      }
+      html.dark #root,
+      html.dark body,
+      html.dark [role="tablist"],
+      html.dark #stepper-docstyle-menubar,
+      html.dark #stepper-google-admin-host {
+        color-scheme: dark !important;
+      }
+      /* Explicit backgrounds to override Android forced-dark inversion */
+      html:not(.dark) [role="tablist"],
+      html:not(.dark) .tab-strip,
+      html:not(.dark) .tabs-strip {
+        background: #ffffff !important;
+        color: #1f2937 !important;
+      }
+      html:not(.dark) #stepper-docstyle-menubar {
+        background: #ffffff !important;
+        color: #1f2937 !important;
+      }
+
       /* ── Tab content isolation: prevent editor/sheet bleeding ── */
       main > div > div[class*="flex"][class*="flex-col"] { overflow: hidden; contain: layout paint; }
       #root main { contain: layout style; overflow-x: hidden; }

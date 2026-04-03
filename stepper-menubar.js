@@ -340,7 +340,7 @@
     var bar = document.createElement('div');
     bar.id = MENUBAR_ID;
     bar.style.cssText = 'display:flex;align-items:center;gap:0;padding:0 8px;height:28px;font-size:12px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;user-select:none;position:relative;z-index:50;' +
-      (dark ? 'background:#1a1a2e;color:#c4c4d4;border-bottom:1px solid #2d2d44;' : 'background:#f8f9fa;color:#3c4043;border-bottom:1px solid #dadce0;');
+      (dark ? 'background:#1e1e2e;color:#d4d4e0;border-bottom:1px solid #3a3a52;' : 'background:#ffffff;color:#1f2937;border-bottom:1px solid #d1d5db;');
 
     for (var i = 0; i < menus.length; i++) {
       var menu = menus[i];
@@ -350,7 +350,7 @@
       var trigger = document.createElement('button');
       trigger.type = 'button';
       trigger.className = 'stepper-menu-trigger';
-      trigger.style.cssText = 'background:none;border:none;cursor:pointer;padding:4px 8px;border-radius:4px;font-size:12px;font-weight:500;color:inherit;white-space:nowrap;line-height:1;transition:background .12s;';
+      trigger.style.cssText = 'background:none;border:none;cursor:pointer;padding:4px 8px;border-radius:4px;font-size:12px;font-weight:600;color:inherit;white-space:nowrap;line-height:1;transition:background .12s;';
       trigger.textContent = menu.label;
       trigger.dataset.menuIdx = String(i);
 
@@ -364,7 +364,7 @@
       var dropdown = document.createElement('div');
       dropdown.className = 'stepper-menu-dropdown';
       dropdown.style.cssText = 'display:none;position:absolute;top:100%;left:0;min-width:240px;padding:4px 0;border-radius:8px;z-index:999;' +
-        (dark ? 'background:#252538;border:1px solid #3a3a52;box-shadow:0 8px 32px rgba(0,0,0,.45);' : 'background:#fff;border:1px solid #dadce0;box-shadow:0 8px 32px rgba(0,0,0,.12);');
+        (dark ? 'background:#1e1e2e;border:1px solid #3a3a52;box-shadow:0 8px 32px rgba(0,0,0,.45);' : 'background:#ffffff;border:1px solid #d1d5db;box-shadow:0 8px 32px rgba(0,0,0,.12);');
 
       for (var j = 0; j < menu.items.length; j++) {
         var item = menu.items[j];
