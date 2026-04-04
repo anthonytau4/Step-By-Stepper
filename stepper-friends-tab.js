@@ -226,9 +226,11 @@
     if (copy.direction === 'sent') {
       copy.name = copy.toDisplayName || copy.toName || copy.toEmail || '';
       copy.email = copy.toEmail || '';
+      copy.role = copy.toRole || 'member';
     } else {
       copy.name = copy.fromDisplayName || copy.fromName || copy.fromEmail || '';
       copy.email = copy.fromEmail || '';
+      copy.role = copy.fromRole || 'member';
     }
     return copy;
   }
@@ -1176,7 +1178,7 @@
     html += '<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid;' + (theme.dark ? 'border-color:#2d2d44;background:#1e1e2e;' : 'border-color:#e5e7eb;background:#f9fafb;') + '">';
     html += '<button data-friends-chat-back style="background:none;border:none;cursor:pointer;font-size:18px;opacity:.6;transition:opacity .2s;">&larr;</button>';
     html += '<div style="width:32px;height:32px;border-radius:999px;background:#4f46e5;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:14px;flex-shrink:0;">' + friendName.charAt(0).toUpperCase() + '</div>';
-    html += '<div style="flex:1;min-width:0;"><div style="font-weight:800;font-size:14px;">' + friendName + '</div><div class="' + theme.subtle + '" style="font-size:11px;">Live chat • read receipts • reactions</div></div>';
+    html += '<div style="flex:1;min-width:0;"><div style="display:flex;align-items:center;gap:6px;font-weight:800;font-size:14px;">' + friendName + renderRoleBadge(friend.role || 'member') + '</div><div class="' + theme.subtle + '" style="font-size:11px;">Live chat • read receipts • reactions</div></div>';
     html += '</div>';
     html += '<div style="padding:8px 14px;border-bottom:1px solid;' + (theme.dark ? 'border-color:#2d2d44;background:#171726;' : 'border-color:#e5e7eb;background:#fcfcff;') + '">';
     html += '<input data-friends-chat-search type="text" placeholder="Search messages..." value="' + escapeHtml(friendsState.chatSearch) + '" style="width:100%;border-radius:10px;border:1px solid;padding:8px 12px;font-size:12px;outline:none;' + theme.inputBg + '" />';
@@ -1203,7 +1205,7 @@
         html += '<div style="max-width:75%;padding:10px 14px;border-radius:16px;font-size:13px;line-height:1.5;word-wrap:break-word;' + bubbleBg + '">';
         html += escapeHtml(msg.text || '');
         html += '<div style="font-size:10px;opacity:.6;margin-top:4px;display:flex;align-items:center;gap:3px;flex-wrap:wrap;justify-content:' + (isMe ? 'flex-end' : 'flex-start') + ';">';
-        html += escapeHtml(msg.senderName || '') + renderRoleBadge(msg.senderRole) + ' &middot; ' + formatTime(msg.createdAt);
+        html += escapeHtml(msg.senderName || '') + ' &middot; ' + formatTime(msg.createdAt);
         if (msg.editedAt) html += ' &middot; edited';
         html += renderMessageStatus(msg, isMe);
         html += '</div>';

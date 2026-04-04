@@ -2162,12 +2162,21 @@ app.get("/api/friends/list", requireGoogleUser, async (req, res) => {
     const found = Object.values(db.users || {}).find(b => normalizeEmail(b?.profile?.email) === normalized);
     return found?.displayName || "";
   };
+  const lookupRole = (userKey, userEmail) => {
+    if (userKey && db.users[userKey]) return getRoleForBucket(db.users[userKey], db.users[userKey]?.profile || null);
+    const normalized = normalizeEmail(userEmail);
+    const found = Object.values(db.users || {}).find(b => normalizeEmail(b?.profile?.email) === normalized);
+    if (!found) return normalized === adminEmail ? 'admin' : 'member';
+    return getRoleForBucket(found, found?.profile || null);
+  };
   const items = list.filter(f => f && (f.fromKey === key || f.toEmail === email)).map(f => {
     const isSender = f.fromKey === key;
     return Object.assign({}, f, {
       direction: isSender ? "sent" : "received",
       fromDisplayName: lookupDisplayName(f.fromKey, f.fromEmail),
-      toDisplayName: lookupDisplayName("", f.toEmail)
+      toDisplayName: lookupDisplayName("", f.toEmail),
+      fromRole: lookupRole(f.fromKey, f.fromEmail),
+      toRole: lookupRole("", f.toEmail)
     });
   });
   res.json({ ok: true, items });
