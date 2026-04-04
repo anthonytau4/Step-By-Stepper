@@ -69,6 +69,20 @@
   var _chatPollTimer = null;
   var _staffChatPollTimer = null;
 
+  function goToBuildTab() {
+    var ids = ['stepper-build-tab', 'stepper-editor-tab'];
+    for (var i = 0; i < ids.length; i++) {
+      var byId = document.getElementById(ids[i]);
+      if (byId) { byId.click(); return true; }
+    }
+    var buildTab = Array.prototype.slice.call(document.querySelectorAll('button')).find(function (btn) {
+      var label = String(btn.textContent || '').trim();
+      return label === 'Build' || label === 'Editor';
+    });
+    if (buildTab) { buildTab.click(); return true; }
+    return false;
+  }
+
   /* ── Persistence ── */
   function saveFriendsLocal(friends) {
     try { localStorage.setItem(FRIENDS_KEY, JSON.stringify(friends || [])); } catch (e) { /* quota */ }
@@ -399,6 +413,11 @@
     stopChatPolling();
     if (!friendId || !isSignedIn()) return;
     _chatPollTimer = setInterval(function () {
+      var page = document.getElementById(PAGE_ID);
+      if (!page || page.hidden || page.style.display === 'none') {
+        stopChatPolling();
+        return;
+      }
       if (friendsState.activeView !== 'chat' || !friendsState.chatFriend || friendsState.chatFriend.id !== friendId) {
         stopChatPolling();
         return;
@@ -609,6 +628,11 @@
     stopStaffChatPolling();
     if (!isSignedIn()) return;
     _staffChatPollTimer = setInterval(function () {
+      var page = document.getElementById(PAGE_ID);
+      if (!page || page.hidden || page.style.display === 'none') {
+        stopStaffChatPolling();
+        return;
+      }
       if (friendsState.activeView !== 'staffchat') {
         stopStaffChatPolling();
         return;
@@ -1533,10 +1557,7 @@
     if (refreshBtn) refreshBtn.addEventListener('click', function () { refreshFriends(); });
     var backToEditorBtn = page.querySelector('[data-friends-goto-editor]');
     if (backToEditorBtn) backToEditorBtn.addEventListener('click', function () {
-      var buildTab = Array.prototype.slice.call(document.querySelectorAll('button')).find(function (btn) {
-        return String(btn.textContent || '').trim() === 'Build';
-      });
-      if (buildTab) buildTab.click();
+      goToBuildTab();
     });
 
     /* Dismiss alerts */
@@ -1840,7 +1861,16 @@
     TAB_ID: TAB_ID,
     render: function () {
       ensureFriendsStyles();
-      renderFriendsPage();
+      try {
+        renderFriendsPage();
+      } catch (error) {
+        var page = document.getElementById(PAGE_ID);
+        if (page) {
+          page.innerHTML = '<div style="padding:16px;border-radius:14px;border:1px solid #fca5a5;background:#fff1f2;color:#9f1239;font-size:13px;">Friends tab hit a recoverable error. <button data-friends-hard-back style="margin-left:8px;padding:6px 10px;border:none;border-radius:8px;background:#111827;color:#fff;cursor:pointer;">Back to Build</button></div>';
+          var hardBack = page.querySelector('[data-friends-hard-back]');
+          if (hardBack) hardBack.addEventListener('click', function () { goToBuildTab(); });
+        }
+      }
       /* Auto-refresh from backend when data is stale (>30 s) */
       if (isSignedIn() && Date.now() - friendsState.lastRefresh > 30000) {
         refreshFriends();
