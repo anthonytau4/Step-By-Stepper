@@ -16,6 +16,9 @@
   const STARTUP_MIN_MS = 8400;
   const STARTUP_FALLBACK_MS = 9800;
   const STARTUP_FADE_MS = 340;
+  const STARTUP_AUTOSTART_MS = 2200;
+  const STARTUP_HARD_CAP_MS = 20000;
+  const STARTUP_POST_BEGIN_HARD_CAP_MS = 12000;
   const STARTUP_AUDIO_FALLBACK_DURATION_MS = 8411;
   const SETTINGS_KEY = 'stepper_sound_settings_v1';
   const STARTUP_AUDIO_VERSION = '20260327-startup-refresh-1';
@@ -80,6 +83,14 @@
     let started = false;
     let audioPrimed = false;
     let firstPlaySucceeded = false;
+    const initStartedAt = Date.now();
+    let beginAt = 0;
+    let hardCapTimer = null;
+    let postBeginHardCapTimer = null;
+    let forcePollTimer = null;
+    let autostartTimer = null;
+    let lastQueueReason = 'init';
+    let audioUnlockBound = false;
     function prewarmAudio(){
       try { audio.preload = 'auto'; audio.load(); } catch {}
     }
@@ -110,9 +121,25 @@
     }
     let leaving = false;
     let fallbackTimer = null;
+    function clearSafetyTimers(){
+      if (fallbackTimer) { window.clearTimeout(fallbackTimer); fallbackTimer = null; }
+      if (hardCapTimer) { window.clearTimeout(hardCapTimer); hardCapTimer = null; }
+      if (postBeginHardCapTimer) { window.clearTimeout(postBeginHardCapTimer); postBeginHardCapTimer = null; }
+      if (autostartTimer) { window.clearTimeout(autostartTimer); autostartTimer = null; }
+      if (forcePollTimer) { window.clearInterval(forcePollTimer); forcePollTimer = null; }
+    }
+    function detachUnlockListeners(){
+      if (!audioUnlockBound) return;
+      audioUnlockBound = false;
+      window.removeEventListener('pointerdown', unlockAudio, true);
+      window.removeEventListener('touchstart', unlockAudio, true);
+      window.removeEventListener('keydown', unlockAudio, true);
+    }
     function leave(){
       if (leaving) return;
       leaving = true;
+      clearSafetyTimers();
+      detachUnlockListeners();
       /* Mark session so reloads skip straight to editor */
       try { sessionStorage.setItem(SESSION_SEEN_KEY, '1'); } catch(e){}
       splash.classList.add('is-leaving');
@@ -123,22 +150,41 @@
         splash.remove();
       }, STARTUP_FADE_MS);
     }
+    function forceLeaveIfLagging(){
+      if (leaving) return;
+      const now = Date.now();
+      const postBeginElapsed = beginAt ? (now - beginAt) : 0;
+      const initElapsed = now - initStartedAt;
+      if (initElapsed >= STARTUP_HARD_CAP_MS || (beginAt && postBeginElapsed >= STARTUP_POST_BEGIN_HARD_CAP_MS)) {
+        leave();
+      }
+    }
     function getDurationMs(){
       const duration = Number(audio.duration);
       if (Number.isFinite(duration) && duration > 0) return Math.max(STARTUP_MIN_MS, Math.round(duration * 1000) + 240);
       return STARTUP_FALLBACK_MS;
     }
-    function queueLeave(){
+    function queueLeave(reason){
+      lastQueueReason = typeof reason === 'string' ? reason : 'unspecified';
       if (fallbackTimer) window.clearTimeout(fallbackTimer);
       fallbackTimer = window.setTimeout(leave, getDurationMs());
+    }
+    function armSafetyNets(){
+      if (!hardCapTimer) hardCapTimer = window.setTimeout(leave, STARTUP_HARD_CAP_MS);
+      if (!forcePollTimer) forcePollTimer = window.setInterval(forceLeaveIfLagging, 700);
+      if (beginAt && !postBeginHardCapTimer) postBeginHardCapTimer = window.setTimeout(leave, STARTUP_POST_BEGIN_HARD_CAP_MS);
     }
     function begin(){
       if (started) return;
       started = true;
+      beginAt = Date.now();
       splash.classList.add('is-playing');
       audio.addEventListener('ended', leave, { once: true });
       audio.addEventListener('loadedmetadata', queueLeave, { once: true });
       audio.addEventListener('durationchange', queueLeave);
+      audio.addEventListener('stalled', function(){ queueLeave('audio-stalled'); }, { passive: true });
+      audio.addEventListener('error', function(){ queueLeave('audio-error'); }, { passive: true });
+      audio.addEventListener('suspend', function(){ if (!firstPlaySucceeded) queueLeave('audio-suspend'); }, { passive: true });
       try {
         audio.pause();
         audio.currentTime = 0;
@@ -165,13 +211,32 @@
       try {
         if (typeof window.__stepperPrimeLoadingAudio === 'function') window.__stepperPrimeLoadingAudio({ randomize: true });
       } catch {}
-      queueLeave();
+      armSafetyNets();
+      queueLeave('begin');
     }
     prewarmAudio();
     window.addEventListener('pointerdown', unlockAudio, true);
     window.addEventListener('touchstart', unlockAudio, true);
     window.addEventListener('keydown', unlockAudio, true);
+    audioUnlockBound = true;
+    window.addEventListener('pointerdown', function(){
+      if (!started) begin();
+    }, { once: true, capture: true });
+    window.addEventListener('keydown', function(){
+      if (!started) begin();
+    }, { once: true, capture: true });
     if (button) button.addEventListener('click', begin, { once: true });
+    autostartTimer = window.setTimeout(function(){
+      if (!started) begin();
+    }, STARTUP_AUTOSTART_MS);
+    armSafetyNets();
+    document.addEventListener('visibilitychange', function(){
+      if (document.visibilityState === 'hidden' && started && !leaving) {
+        window.setTimeout(function(){
+          if (!leaving && lastQueueReason !== 'ended') leave();
+        }, 1200);
+      }
+    });
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
   else init();

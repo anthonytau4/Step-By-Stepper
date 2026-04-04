@@ -6012,9 +6012,31 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
 
 <script>
   // Use the current origin for API calls in preview, production URL otherwise
-  window.STEPPER_API_BASE = window.location.hostname.includes('preview.emergentagent.com')
+  window.STEPPER_API_BASE = window.location.hostname.includes('preview.stepper-agent.com')
     ? window.location.origin
     : "https://step-by-stepper.onrender.com";
+</script>
+<script>
+  (function(){
+    function injectLatestNotes(){
+      var host = document.querySelector('main, #root, [class*="whats"], body');
+      if (!host || document.getElementById('stepper-latest-dev-notes')) return;
+      var box = document.createElement('section');
+      box.id = 'stepper-latest-dev-notes';
+      box.style.cssText = 'margin:14px auto 10px;max-width:980px;border:1px solid rgba(99,102,241,.22);border-radius:18px;padding:14px 16px;background:rgba(99,102,241,.06);font:600 14px/1.45 Inter,system-ui,sans-serif;';
+      box.innerHTML = '<div style="font-weight:900;text-transform:uppercase;letter-spacing:.08em;font-size:11px;opacity:.7;margin-bottom:6px;">Latest updates</div>' +
+        '<ul style="margin:0;padding-left:18px;display:grid;gap:6px;">' +
+        '<li>Hamburger nav now handles slow Android tab mounting better (retry-based opens).</li>' +
+        '<li>Saved Dances folders/groups now use polished squircle tiles with active state + quick filtering.</li>' +
+        '<li>Top tab strip is hidden so nav stays clean and consistent with hamburger-first layout.</li>' +
+        '<li>UI emoji stand-ins for major tab icons were replaced with matching icon-family SVGs.</li>' +
+        '<li>Startup splash now has lag safety rails so it can’t hang the app entry screen.</li>' +
+        '</ul>';
+      host.insertBefore(box, host.firstChild || null);
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', injectLatestNotes, { once:true });
+    else injectLatestNotes();
+  })();
 </script>
 <script src="./stepper-site-helper-brain.js?v=20260403-brain-2"></script>
 <script src="../stepper-squircle-icons.js?v=20260403-squircle-2"></script>
