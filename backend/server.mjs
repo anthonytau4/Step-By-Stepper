@@ -205,6 +205,74 @@ function isPremiumUser(bucket, profile = null) {
   return !!membership.isPremium;
 }
 
+function isStaffRole(value) {
+  const role = String(value || '').trim().toLowerCase();
+  return role === 'admin' || role === 'moderator';
+}
+
+function collectStaffEmails(db) {
+  const emails = new Set();
+  if (adminEmail) emails.add(adminEmail);
+  for (const row of Array.isArray(db?.adminRegistry) ? db.adminRegistry : []) {
+    const email = normalizeEmail(row?.email);
+    if (email) emails.add(email);
+  }
+  for (const row of Array.isArray(db?.moderatorRegistry) ? db.moderatorRegistry : []) {
+    const email = normalizeEmail(row?.email);
+    if (email) emails.add(email);
+  }
+  for (const bucket of Object.values(db?.users || {})) {
+    if (!bucket || typeof bucket !== 'object') continue;
+    const email = normalizeEmail(bucket?.profile?.email);
+    if (!email) continue;
+    if (isStaffRole(bucket.role) || isAdminProfile(bucket.profile, db)) emails.add(email);
+  }
+  return Array.from(emails);
+}
+
+function ensureStaffAutoFriends(db, key, profile) {
+  const ownEmail = normalizeEmail(profile?.email);
+  if (!ownEmail) return false;
+  const bucket = db?.users?.[key];
+  const isStaff = isStaffRole(bucket?.role) || isAdminProfile(profile, db);
+  if (!isStaff) return false;
+  if (!Array.isArray(db.friends)) db.friends = [];
+  const ownName = String(bucket?.displayName || profile?.name || ownEmail).trim();
+  const staffEmails = collectStaffEmails(db);
+  let changed = false;
+  for (const staffEmail of staffEmails) {
+    if (!staffEmail || staffEmail === ownEmail) continue;
+    const existing = db.friends.find((item) =>
+      item &&
+      ((item.fromKey === key && normalizeEmail(item.toEmail) === staffEmail) ||
+        (normalizeEmail(item.fromEmail) === staffEmail && normalizeEmail(item.toEmail) === ownEmail))
+    );
+    if (existing) {
+      if (String(existing.status || '').trim().toLowerCase() !== 'accepted') {
+        existing.status = 'accepted';
+        existing.updatedAt = new Date().toISOString();
+        changed = true;
+      }
+      continue;
+    }
+    db.friends.push({
+      id: `friend-staff-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      fromKey: key,
+      fromEmail: ownEmail,
+      fromName: ownName,
+      toEmail: staffEmail,
+      toName: '',
+      status: 'accepted',
+      autoLinked: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    changed = true;
+  }
+  if (changed) db.friends = db.friends.slice(-10000);
+  return changed;
+}
+
 function clearExpiredSuspension(bucket) {
   if (!bucket || typeof bucket !== 'object') return null;
   const suspension = bucket.suspension && typeof bucket.suspension === 'object' ? bucket.suspension : null;
@@ -2083,6 +2151,9 @@ app.post("/api/friends/add", requireGoogleUser, async (req, res) => {
 app.get("/api/friends/list", requireGoogleUser, async (req, res) => {
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);
+  touchUser(db, req.stepperUser, key);
+  const autoLinked = ensureStaffAutoFriends(db, key, req.stepperUser);
+  if (autoLinked) await writeDb(db);
   const email = normalizeEmail(req.stepperUser?.email);
   const list = Array.isArray(db.friends) ? db.friends : [];
   const lookupDisplayName = (userKey, userEmail) => {
