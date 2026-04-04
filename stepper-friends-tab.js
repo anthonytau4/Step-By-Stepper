@@ -798,7 +798,10 @@
     }
     html += '</div></div>';
     if (signedIn) {
+      html += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">';
+      html += '<button data-friends-goto-editor class="stepper-google-cta" style="font-size:12px;padding:8px 14px;border-radius:10px;background:#111827;color:#fff;">' + (_ic.back || '↩') + ' Back to Build</button>';
       html += '<button data-friends-refresh class="stepper-google-cta" style="font-size:12px;padding:8px 14px;border-radius:10px;">' + _ic.refresh + ' Refresh</button>';
+      html += '</div>';
     }
     html += '</div></div>';
 
@@ -1528,6 +1531,13 @@
     /* Refresh */
     var refreshBtn = page.querySelector('[data-friends-refresh]');
     if (refreshBtn) refreshBtn.addEventListener('click', function () { refreshFriends(); });
+    var backToEditorBtn = page.querySelector('[data-friends-goto-editor]');
+    if (backToEditorBtn) backToEditorBtn.addEventListener('click', function () {
+      var buildTab = Array.prototype.slice.call(document.querySelectorAll('button')).find(function (btn) {
+        return String(btn.textContent || '').trim() === 'Build';
+      });
+      if (buildTab) buildTab.click();
+    });
 
     /* Dismiss alerts */
     var dismissErr = page.querySelector('[data-friends-dismiss-error]');
