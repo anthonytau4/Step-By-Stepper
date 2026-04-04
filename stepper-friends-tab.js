@@ -64,6 +64,8 @@
     staffChatLoading: false,
     myRole: 'member'
   };
+  var _chatPollTimer = null;
+  var _staffChatPollTimer = null;
 
   /* ── Persistence ── */
   function saveFriendsLocal(friends) {
@@ -382,6 +384,33 @@
       });
   }
 
+  function stopChatPolling() {
+    if (_chatPollTimer) {
+      clearInterval(_chatPollTimer);
+      _chatPollTimer = null;
+    }
+  }
+
+  function startChatPolling(friendId) {
+    stopChatPolling();
+    if (!friendId || !isSignedIn()) return;
+    _chatPollTimer = setInterval(function () {
+      if (friendsState.activeView !== 'chat' || !friendsState.chatFriend || friendsState.chatFriend.id !== friendId) {
+        stopChatPolling();
+        return;
+      }
+      apiFetch('/api/friends/chat?friendId=' + encodeURIComponent(friendId), { headers: authHeaders() })
+        .then(function (data) {
+          if (data && Array.isArray(data.messages)) {
+            friendsState.chatMessages = data.messages;
+            renderFriendsPage();
+            scrollChatToBottom();
+          }
+        })
+        .catch(function () { /* silent poll failure */ });
+    }, 4000);
+  }
+
   function sendChatMessage(text) {
     if (!isSignedIn() || !friendsState.chatFriend) return;
     var trimmed = String(text || '').trim();
@@ -499,6 +528,33 @@
         renderFriendsPage();
         scrollChatToBottom();
       });
+  }
+
+  function stopStaffChatPolling() {
+    if (_staffChatPollTimer) {
+      clearInterval(_staffChatPollTimer);
+      _staffChatPollTimer = null;
+    }
+  }
+
+  function startStaffChatPolling() {
+    stopStaffChatPolling();
+    if (!isSignedIn()) return;
+    _staffChatPollTimer = setInterval(function () {
+      if (friendsState.activeView !== 'staffchat') {
+        stopStaffChatPolling();
+        return;
+      }
+      apiFetch('/api/staff-chat', { headers: authHeaders() })
+        .then(function (data) {
+          if (data && Array.isArray(data.messages)) {
+            friendsState.staffChatMessages = data.messages;
+            renderFriendsPage();
+            scrollChatToBottom();
+          }
+        })
+        .catch(function () { /* silent poll failure */ });
+    }, 4000);
   }
 
   function sendStaffMessage(text) {
@@ -764,7 +820,7 @@
     /* Staff chat visible to admins/moderators */
     var role = String(friendsState.myRole || '').toLowerCase();
     if (role === 'admin' || role === 'moderator') {
-      views.push({ key: 'staffchat', label: 'Staff Chat', icon: (_ic.shield || '🛡'), count: 0 });
+      views.push({ key: 'staffchat', label: 'Admin Chat', icon: (_ic.shield || '🛡'), count: 0 });
     }
     var html = '<div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;">';
     for (var i = 0; i < views.length; i++) {
@@ -1204,8 +1260,8 @@
     html += '<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid;' + (theme.dark ? 'border-color:#2d2d44;background:#1e1e2e;' : 'border-color:#e5e7eb;background:#f9fafb;') + '">';
     html += '<button data-friends-staffchat-back style="background:none;border:none;cursor:pointer;font-size:18px;opacity:.6;transition:opacity .2s;">&larr;</button>';
     html += '<div style="width:32px;height:32px;border-radius:999px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:13px;flex-shrink:0;">' + (_ic.shield || '🛡') + '</div>';
-    html += '<div style="flex:1;min-width:0;"><div style="font-weight:800;font-size:14px;">Staff Chat</div>';
-    html += '<div class="' + theme.subtle + '" style="font-size:11px;">Admins &amp; Moderators only</div></div>';
+    html += '<div style="flex:1;min-width:0;"><div style="font-weight:800;font-size:14px;">Admin Chat</div>';
+    html += '<div class="' + theme.subtle + '" style="font-size:11px;">Admins + Moderators only</div></div>';
     html += renderRoleBadge(myRole);
     html += '</div>';
 
@@ -1214,7 +1270,7 @@
     if (friendsState.staffChatLoading) {
       html += '<div style="text-align:center;padding:20px;"><div class="stepper-friends-spinner"></div></div>';
     } else if (!friendsState.staffChatMessages.length) {
-      html += '<div style="text-align:center;padding:40px 16px;opacity:.5;font-size:13px;">No staff messages yet. Start the conversation!</div>';
+      html += '<div style="text-align:center;padding:40px 16px;opacity:.5;font-size:13px;">No admin chat messages yet. Start the conversation!</div>';
     } else {
       for (var i = 0; i < friendsState.staffChatMessages.length; i++) {
         var msg = friendsState.staffChatMessages[i];
@@ -1234,7 +1290,7 @@
 
     /* Input */
     html += '<div style="display:flex;gap:8px;padding:12px 16px;border-top:1px solid;' + (theme.dark ? 'border-color:#2d2d44;background:#1e1e2e;' : 'border-color:#e5e7eb;background:#f9fafb;') + '">';
-    html += '<input data-friends-staff-input type="text" placeholder="Message staff…" value="' + escapeHtml(friendsState.staffChatText) + '" ';
+    html += '<input data-friends-staff-input type="text" placeholder="Message admins + moderators…" value="' + escapeHtml(friendsState.staffChatText) + '" ';
     html += 'style="flex:1;border-radius:12px;border:1px solid;padding:10px 14px;font-size:13px;outline:none;' + theme.inputBg + '" />';
     html += '<button data-friends-staff-send class="stepper-google-cta" style="background:#4f46e5;color:#fff;padding:10px 16px;border-radius:12px;font-weight:800;font-size:13px;white-space:nowrap;">Send</button>';
     html += '</div>';
@@ -1373,7 +1429,13 @@
         friendsState.activeView = newView;
         friendsState.error = null;
         friendsState.success = null;
-        if (newView === 'staffchat') loadStaffChat();
+        if (newView === 'staffchat') {
+          loadStaffChat();
+          startStaffChatPolling();
+        } else {
+          stopStaffChatPolling();
+          if (newView !== 'chat') stopChatPolling();
+        }
         renderFriendsPage();
       });
     });
@@ -1437,7 +1499,10 @@
       btn.addEventListener('click', function () {
         var fId = btn.getAttribute('data-friends-chat-open');
         var friend = friendsState.friends.find(function (f) { return f.id === fId; });
-        if (friend) openChat(friend);
+        if (friend) {
+          openChat(friend);
+          startChatPolling(friend.id);
+        }
       });
     });
 
@@ -1446,13 +1511,17 @@
       btn.addEventListener('click', function () {
         var fId = btn.getAttribute('data-friends-chat-start');
         var friend = friendsState.friends.find(function (f) { return f.id === fId; });
-        if (friend) openChat(friend);
+        if (friend) {
+          openChat(friend);
+          startChatPolling(friend.id);
+        }
       });
     });
 
     /* Chat - back button */
     var chatBack = page.querySelector('[data-friends-chat-back]');
     if (chatBack) chatBack.addEventListener('click', function () {
+      stopChatPolling();
       friendsState.chatFriend = null;
       friendsState.chatMessages = [];
       renderFriendsPage();
@@ -1538,6 +1607,7 @@
         if (friend) {
           friendsState.showingProfile = null;
           openChat(friend);
+          startChatPolling(friend.id);
         }
       });
     });
@@ -1616,6 +1686,7 @@
     /* Staff chat - back */
     var staffBack = page.querySelector('[data-friends-staffchat-back]');
     if (staffBack) staffBack.addEventListener('click', function () {
+      stopStaffChatPolling();
       friendsState.activeView = 'list';
       renderFriendsPage();
     });
