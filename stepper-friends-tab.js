@@ -70,6 +70,12 @@
   var _staffChatPollTimer = null;
 
   function goToBuildTab() {
+    try {
+      if (window.__stepperRoutePaths && typeof window.__stepperRoutePaths.go === 'function') {
+        var routed = window.__stepperRoutePaths.go('editor');
+        if (routed) return true;
+      }
+    } catch (e) { /* fallback below */ }
     var ids = ['stepper-build-tab', 'stepper-editor-tab'];
     for (var i = 0; i < ids.length; i++) {
       var byId = document.getElementById(ids[i]);
