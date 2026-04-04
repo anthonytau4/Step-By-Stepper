@@ -39,7 +39,26 @@
   }
 
   function safeClick(el) {
-    if (el && typeof el.click === 'function') el.click();
+    if (!el) return false;
+    try {
+      el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+    } catch (e) { /* ignore */ }
+    if (typeof el.click === 'function') el.click();
+    return true;
+  }
+
+  function safeClickWithRetry(resolveFn, tries, delayMs) {
+    var maxTries = Math.max(1, Number(tries || 8));
+    var wait = Math.max(40, Number(delayMs || 130));
+    var attempt = 0;
+    function run() {
+      attempt++;
+      var ok = false;
+      try { ok = safeClick(resolveFn()); } catch (e) { ok = false; }
+      if (ok || attempt >= maxTries) return;
+      setTimeout(run, wait);
+    }
+    run();
   }
 
   function getSession() {
@@ -84,12 +103,12 @@
           {
             key: 'editor', label: 'Build', desc: 'Choreography editor',
             icon: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>'),
-            action: function () { safeClick(buttonByText('Build')); }
+            action: function () { safeClickWithRetry(function(){ return buttonByText('Build'); }); }
           },
           {
             key: 'preview', label: 'Sheet', desc: 'Print-ready view',
             icon: svg('<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/>'),
-            action: function () { safeClick(buttonByText('Sheet')); }
+            action: function () { safeClickWithRetry(function(){ return buttonByText('Sheet'); }); }
           }
         ]
       },
@@ -98,20 +117,20 @@
           {
             key: 'whatsnew', label: "What's New", desc: 'Latest updates',
             icon: svg('<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>'),
-            action: function () { safeClick(buttonByText("What's New")); }
+            action: function () { safeClickWithRetry(function(){ return buttonByText("What's New"); }); }
           },
           {
             key: 'featured', label: 'Featured Choreo', desc: 'Community picks',
             icon: svg('<circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/>'),
             action: function () {
-              safeClick(document.getElementById('stepper-featured-choreo-tab') || buttonByText('Featured Choreo'));
+              safeClickWithRetry(function(){ return document.getElementById('stepper-featured-choreo-tab') || buttonByText('Featured Choreo'); });
             }
           },
           {
             key: 'saveddances', label: 'My Saved Dances', desc: 'Your library',
             icon: svg('<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>'),
             action: function () {
-              safeClick(document.getElementById('stepper-saved-dances-tab') || buttonByText('My Saved Dances'));
+              safeClickWithRetry(function(){ return document.getElementById('stepper-saved-dances-tab') || buttonByText('My Saved Dances'); });
             }
           }
         ]
@@ -121,17 +140,38 @@
           {
             key: 'glossary', label: 'Glossary', desc: 'Step dictionary',
             icon: svg('<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>'),
-            action: function () { safeClick(document.getElementById('stepper-glossary-tab')); }
+            action: function () { safeClickWithRetry(function(){ return document.getElementById('stepper-glossary-tab'); }); }
           },
           {
             key: 'pdfimport', label: 'PDF Import', desc: 'Upload sheets',
             icon: svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>'),
-            action: function () { safeClick(document.getElementById('stepper-pdf-tab')); }
+            action: function () { safeClickWithRetry(function(){ return document.getElementById('stepper-pdf-tab'); }); }
           },
           {
             key: 'friends', label: 'Friends', desc: 'Dance community',
             icon: svg('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'),
-            action: function () { safeClick(document.getElementById('stepper-friends-tab')); }
+            action: function () { safeClickWithRetry(function(){ return document.getElementById('stepper-friends-tab'); }); }
+          },
+          {
+            key: 'music', label: 'Music', desc: 'BPM & metronome',
+            icon: svg('<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>'),
+            action: function () { safeClickWithRetry(function(){ return document.getElementById('stepper-music-tab'); }); }
+          },
+          {
+            key: 'templates', label: 'Templates', desc: 'Dance starters',
+            icon: svg('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>'),
+            action: function () { safeClickWithRetry(function(){ return document.getElementById('stepper-templates-tab'); }); }
+          },
+          {
+            key: 'notifications', label: 'Notifications', desc: 'Alerts & invites',
+            icon: svg('<path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>'),
+            action: function () {
+              if (window.__stepperNotificationsTab && typeof window.__stepperNotificationsTab.open === 'function') {
+                window.__stepperNotificationsTab.open();
+                return;
+              }
+              safeClickWithRetry(function(){ return document.getElementById('stepper-notifications-tab'); });
+            }
           }
         ]
       },
@@ -151,19 +191,19 @@
           {
             key: 'signin', label: 'Sign In', desc: 'Google account',
             icon: svg('<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/>'),
-            action: function () { safeClick(document.getElementById('stepper-google-signin-tab')); }
+            action: function () { safeClickWithRetry(function(){ return document.getElementById('stepper-google-signin-tab'); }); }
           },
           {
             key: 'subscription', label: 'Subscription', desc: 'Manage plan',
             icon: svg('<rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/>'),
             condition: function () { return isSignedIn(); },
-            action: function () { safeClick(document.getElementById('stepper-google-subscription-tab')); }
+            action: function () { safeClickWithRetry(function(){ return document.getElementById('stepper-google-subscription-tab'); }); }
           },
           {
             key: 'admin', label: 'Admin', desc: 'Dashboard',
             icon: svg('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>'),
             condition: function () { return !!window.__stepperGoogleAdminInstalled; },
-            action: function () { safeClick(document.getElementById('stepper-google-admin-tab')); }
+            action: function () { safeClickWithRetry(function(){ return document.getElementById('stepper-google-admin-tab'); }); }
           }
         ]
       }
@@ -533,27 +573,12 @@
     var s = document.createElement('style');
     s.id = TABSTRIP_HIDE;
     s.textContent =
-      '@media (max-width: 639px) {\n' +
-      '  [data-stepper-tabstrip="true"] {\n' +
-      '    position: absolute !important;\n' +
-      '    width: 1px !important; height: 1px !important;\n' +
-      '    overflow: hidden !important; clip: rect(0,0,0,0) !important;\n' +
-      '    white-space: nowrap !important; border: 0 !important;\n' +
-      '    padding: 0 !important; margin: -1px !important;\n' +
-      '  }\n' +
-      '}\n' +
-      '@media (min-width: 640px) {\n' +
-      '  [data-stepper-tabstrip="true"] {\n' +
-      '    position: relative !important;\n' +
-      '    width: auto !important; height: auto !important;\n' +
-      '    overflow-x: auto !important; overflow-y: hidden !important;\n' +
-      '    clip: unset !important;\n' +
-      '    white-space: nowrap !important;\n' +
-      '    padding: 0.25rem !important; margin: 0 !important;\n' +
-      '    flex: 1 1 auto !important;\n' +
-      '    min-width: 200px !important;\n' +
-      '    scrollbar-width: thin;\n' +
-      '  }\n' +
+      '[data-stepper-tabstrip="true"] {\n' +
+      '  position: absolute !important;\n' +
+      '  width: 1px !important; height: 1px !important;\n' +
+      '  overflow: hidden !important; clip: rect(0,0,0,0) !important;\n' +
+      '  white-space: nowrap !important; border: 0 !important;\n' +
+      '  padding: 0 !important; margin: -1px !important;\n' +
       '}';
     document.head.appendChild(s);
   }
