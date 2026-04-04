@@ -755,7 +755,7 @@
       html += '<button data-settings-color="' + key + '" data-value="' + c.id + '" title="' + escapeHtml(c.label) + '" style="';
       html += 'width:32px;height:32px;border-radius:50%;border:3px solid;cursor:pointer;transition:all .15s ease;';
       html += 'background:' + c.hex + ';';
-      html += active ? 'border-color:#4f46e5;box-shadow:0 0 0 2px #4f46e5;transform:scale(1.15);' : 'border-color:' + (theme.dark ? '#374151' : '#e5e7eb') + ';';
+      html += active ? 'border-color:' + c.hex + ';box-shadow:0 0 0 2px ' + c.hex + ';transform:scale(1.15);' : 'border-color:' + (theme.dark ? '#374151' : '#e5e7eb') + ';';
       html += '"></button>';
     }
     html += '</div></div>';
@@ -1521,12 +1521,42 @@
       '[data-stepper-text-spacing="relaxed"] body, [data-stepper-text-spacing="relaxed"] #root { letter-spacing:.015em; line-height:1.7; }',
       '[data-stepper-text-spacing="wide"] body, [data-stepper-text-spacing="wide"] #root { letter-spacing:.04em; line-height:1.9; }',
       '[data-stepper-tab-size="large"] #root, [data-stepper-tab-size="large"] #stepper-google-admin-host { tab-size:8; }',
-      '@media print { #' + PAGE_ID + ' { display:none!important; } }'
+      '@media print { #' + PAGE_ID + ' { display:none!important; } }',
+      /* ── Global accent color overrides for React app (Tailwind indigo → CSS variable) ── */
+      ':root { --stepper-accent-color: #4f46e5; --stepper-accent-rgb: 79 70 229; }',
+      '#root .bg-indigo-600 { background-color: var(--stepper-accent-color) !important; }',
+      '#root .bg-indigo-500 { background-color: var(--stepper-accent-color) !important; }',
+      '#root .text-indigo-600 { color: var(--stepper-accent-color) !important; }',
+      '#root .text-indigo-500 { color: var(--stepper-accent-color) !important; }',
+      '#root .text-indigo-400 { color: color-mix(in srgb, var(--stepper-accent-color) 75%, white) !important; }',
+      '.dark #root .text-indigo-400, .dark #root .dark\\:text-indigo-400 { color: color-mix(in srgb, var(--stepper-accent-color) 75%, white) !important; }',
+      '.dark #root .dark\\:text-indigo-300 { color: color-mix(in srgb, var(--stepper-accent-color) 60%, white) !important; }',
+      '#root .hover\\:bg-indigo-700:hover { background-color: color-mix(in srgb, var(--stepper-accent-color) 85%, black) !important; }',
+      '#root .border-indigo-600 { border-color: var(--stepper-accent-color) !important; }',
+      '#root .border-indigo-500 { border-color: var(--stepper-accent-color) !important; }',
+      '#root .border-indigo-200 { border-color: color-mix(in srgb, var(--stepper-accent-color) 25%, white) !important; }',
+      '#root .border-indigo-100 { border-color: color-mix(in srgb, var(--stepper-accent-color) 15%, white) !important; }',
+      '#root .bg-indigo-100 { background-color: color-mix(in srgb, var(--stepper-accent-color) 12%, white) !important; }',
+      '.dark #root .dark\\:bg-indigo-900\\/40 { background-color: color-mix(in srgb, var(--stepper-accent-color) 18%, black) !important; }',
+      '.dark #root .dark\\:bg-indigo-900\\/50 { background-color: color-mix(in srgb, var(--stepper-accent-color) 20%, black) !important; }',
+      '.dark #root .dark\\:bg-indigo-900\\/10 { background-color: color-mix(in srgb, var(--stepper-accent-color) 8%, black) !important; }',
+      '#root .bg-indigo-50\\/50 { background-color: color-mix(in srgb, var(--stepper-accent-color) 6%, white) !important; }',
+      '.dark #root .dark\\:border-indigo-500\\/30 { border-color: color-mix(in srgb, var(--stepper-accent-color) 30%, transparent) !important; }',
+      '#root .hover\\:text-indigo-500:hover { color: var(--stepper-accent-color) !important; }',
+      '#root .hover\\:border-indigo-500:hover { border-color: var(--stepper-accent-color) !important; }',
+      '#root .shadow-md { --tw-shadow-color: rgba(var(--stepper-accent-rgb), .12); }',
+      '#root .bg-indigo-500\\/10 { background-color: rgba(var(--stepper-accent-rgb), .1) !important; }',
+      '#root .bg-indigo-500\\/15 { background-color: rgba(var(--stepper-accent-rgb), .15) !important; }',
+      '#root .hover\\:bg-indigo-100:hover { background-color: color-mix(in srgb, var(--stepper-accent-color) 14%, white) !important; }',
+      '.dark #root .dark\\:hover\\:bg-indigo-900\\/50:hover { background-color: color-mix(in srgb, var(--stepper-accent-color) 20%, black) !important; }',
+      '#root p .text-indigo-600, #root a.text-indigo-600 { color: var(--stepper-accent-color) !important; }',
+      '.dark #root p .dark\\:text-indigo-400, .dark #root a.dark\\:text-indigo-400 { color: color-mix(in srgb, var(--stepper-accent-color) 75%, white) !important; }'
     ].join('\n');
     document.head.appendChild(style);
   }
 
   applyAllLiveSettings(settingsState.settings);
+  ensureSettingsStyles();
   window.addEventListener('storage', function (event) {
     if (!event || (event.key !== LS_KEY && event.key !== BUILDER_DATA_KEY)) return;
     settingsState.settings = loadSettings();

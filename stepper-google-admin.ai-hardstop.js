@@ -28,6 +28,8 @@
   const MUSIC_TAB_ID = 'stepper-music-tab';
   const TEMPLATES_PAGE_ID = 'stepper-templates-page';
   const TEMPLATES_TAB_ID = 'stepper-templates-tab';
+  const NOTIFICATIONS_PAGE_ID = 'stepper-notifications-page';
+  const NOTIFICATIONS_TAB_ID = 'stepper-notifications-tab';
   const ADMIN_EMAIL = 'anthonytau4@gmail.com';
   const DEFAULT_RENDER_SERVICE_ID = 'srv-d6ss4295pdvs73e1iifg';
   const DEFAULT_BACKEND_BASE = 'https://step-by-stepper.onrender.com';
@@ -572,10 +574,15 @@
     strip.style.overflowY = 'hidden';
     strip.style.webkitOverflowScrolling = 'touch';
     strip.style.whiteSpace = 'nowrap';
+    strip.style.flex = '1 1 auto';
+    strip.style.minWidth = '300px';
     strip.style.maxWidth = '100%';
-    strip.style.minWidth = '0';
-    strip.style.width = '100%';
+    strip.style.width = 'auto';
     strip.style.paddingBottom = '2px';
+    if (strip.parentElement) {
+      strip.parentElement.style.flex = '1 1 0';
+      strip.parentElement.style.minWidth = '0';
+    }
     strip.style.scrollbarWidth = 'none';
     strip.querySelectorAll('button, a, [role="tab"]').forEach((button) => {
       button.style.flex = '0 0 auto';
@@ -1398,6 +1405,10 @@
     if (/\b(go to|open|show|switch to|navigate to)\b.*\b(template|templates|starter|blank)\b/.test(q)) {
       openPage('templates');
       return { handled: true, message: '✅ Opened the **Templates** tab. Browse pre-built dance templates by level!' };
+    }
+    if (/\b(go to|open|show|switch to|navigate to)\b.*\b(notification|notifications|alerts|invites)\b/.test(q)) {
+      openPage('notifications');
+      return { handled: true, message: '✅ Opened the **Notifications** tab. Check your dance invites and updates!' };
     }
     /* ── Natural language navigation: "take me there", "yes go there", "please take me" ── */
     if (/\b(take me|bring me|go)\b.*\b(there|to it|to that)\b/.test(q) || /\b(yes|sure|please)\b.*\b(take me|go there|navigate|open it)\b/.test(q)) {
@@ -2339,6 +2350,7 @@
     if (state.ui.glossaryBtn) applyTabStyles(state.ui.glossaryBtn, state.activePage === 'glossary', '#4f46e5');
     if (state.ui.pdfBtn) applyTabStyles(state.ui.pdfBtn, state.activePage === 'pdfimport', '#4f46e5');
     if (state.ui.settingsBtn) applyTabStyles(state.ui.settingsBtn, state.activePage === 'settings', '#4f46e5');
+    if (state.ui.notificationsBtn) applyTabStyles(state.ui.notificationsBtn, state.activePage === 'notifications', '#4f46e5');
   }
 
   function makeTabButton(label, iconSvg, pageName, id){
@@ -2511,12 +2523,19 @@
       else tabStrip.appendChild(state.ui.templatesBtn);
     }
 
+    var notificationsIcon = (window.__stepperNotificationsTab && window.__stepperNotificationsTab.icon) ? window.__stepperNotificationsTab.icon() : '🔔';
+    state.ui.notificationsBtn = makeTabButton('Notifications', notificationsIcon, 'notifications', NOTIFICATIONS_TAB_ID);
+    if (!state.ui.notificationsBtn.parentNode) {
+      if (state.ui.friendsBtn && state.ui.friendsBtn.parentNode === tabStrip) state.ui.friendsBtn.insertAdjacentElement('afterend', state.ui.notificationsBtn);
+      else tabStrip.appendChild(state.ui.notificationsBtn);
+    }
+
     if (!tabStrip.__stepperGoogleAdminCloseWired) {
       tabStrip.__stepperGoogleAdminCloseWired = true;
       tabStrip.addEventListener('click', (event) => {
         const button = event.target.closest('button');
         if (!button) return;
-        const own = button.id === SIGNIN_TAB_ID || button.id === SUBSCRIPTION_TAB_ID || button.id === ADMIN_TAB_ID || button.id === FRIENDS_TAB_ID || button.id === GLOSSARY_TAB_ID || button.id === PDF_TAB_ID || button.id === SETTINGS_TAB_ID || button.id === MUSIC_TAB_ID || button.id === TEMPLATES_TAB_ID;
+        const own = button.id === SIGNIN_TAB_ID || button.id === SUBSCRIPTION_TAB_ID || button.id === ADMIN_TAB_ID || button.id === FRIENDS_TAB_ID || button.id === GLOSSARY_TAB_ID || button.id === PDF_TAB_ID || button.id === SETTINGS_TAB_ID || button.id === MUSIC_TAB_ID || button.id === TEMPLATES_TAB_ID || button.id === NOTIFICATIONS_TAB_ID;
         if (!own && state.activePage) closePages();
       }, true);
     }
@@ -2538,7 +2557,7 @@
     host.id = HOST_ID;
     host.hidden = true;
     host.className = 'max-w-4xl mx-auto px-3 sm:px-4 py-6 sm:py-8 pb-28 sm:pb-32 print:hidden';
-    host.innerHTML = `<div class="space-y-5"><section id="${SIGNIN_PAGE_ID}" hidden style="display:none"></section><section id="${SUBSCRIPTION_PAGE_ID}" hidden style="display:none"></section><section id="${ADMIN_PAGE_ID}" hidden style="display:none"></section><section id="${FRIENDS_PAGE_ID}" hidden style="display:none"></section><section id="${GLOSSARY_PAGE_ID}" hidden style="display:none"></section><section id="${PDF_PAGE_ID}" hidden style="display:none"></section><section id="${SETTINGS_PAGE_ID}" hidden style="display:none"></section><section id="${MUSIC_PAGE_ID}" hidden style="display:none"></section><section id="${TEMPLATES_PAGE_ID}" hidden style="display:none"></section></div>`;
+    host.innerHTML = `<div class="space-y-5"><section id="${SIGNIN_PAGE_ID}" hidden style="display:none"></section><section id="${SUBSCRIPTION_PAGE_ID}" hidden style="display:none"></section><section id="${ADMIN_PAGE_ID}" hidden style="display:none"></section><section id="${FRIENDS_PAGE_ID}" hidden style="display:none"></section><section id="${GLOSSARY_PAGE_ID}" hidden style="display:none"></section><section id="${PDF_PAGE_ID}" hidden style="display:none"></section><section id="${SETTINGS_PAGE_ID}" hidden style="display:none"></section><section id="${MUSIC_PAGE_ID}" hidden style="display:none"></section><section id="${TEMPLATES_PAGE_ID}" hidden style="display:none"></section><section id="${NOTIFICATIONS_PAGE_ID}" hidden style="display:none"></section></div>`;
     if (parent) parent.insertBefore(host, anchor || null);
     else document.body.appendChild(host);
     state.ui.host = host;
@@ -2584,7 +2603,7 @@
   }
 
   function openPage(pageName){
-    var validPages = { admin: 1, subscription: 1, signin: 1, friends: 1, glossary: 1, pdfimport: 1, settings: 1, music: 1, templates: 1 };
+    var validPages = { admin: 1, subscription: 1, signin: 1, friends: 1, glossary: 1, pdfimport: 1, settings: 1, music: 1, templates: 1, notifications: 1 };
     state.activePage = validPages[pageName] ? pageName : 'signin';
     const host = ensureHost();
     host.hidden = false;
@@ -5006,6 +5025,7 @@
     const settingsPage = document.getElementById(SETTINGS_PAGE_ID);
     const musicPage = document.getElementById(MUSIC_PAGE_ID);
     const templatesPage = document.getElementById(TEMPLATES_PAGE_ID);
+    const notificationsPage = document.getElementById(NOTIFICATIONS_PAGE_ID);
     const showSignIn = state.activePage === 'signin';
     const showSubscription = state.activePage === 'subscription';
     const showAdmin = state.activePage === 'admin';
@@ -5015,6 +5035,7 @@
     const showSettings = state.activePage === 'settings';
     const showMusic = state.activePage === 'music';
     const showTemplates = state.activePage === 'templates';
+    const showNotifications = state.activePage === 'notifications';
     setVisibility(signInPage, showSignIn);
     setVisibility(subscriptionPage, showSubscription);
     setVisibility(adminPage, showAdmin);
@@ -5024,10 +5045,11 @@
     setVisibility(settingsPage, showSettings);
     setVisibility(musicPage, showMusic);
     setVisibility(templatesPage, showTemplates);
+    setVisibility(notificationsPage, showNotifications);
     host.hidden = !state.activePage;
     host.style.display = state.activePage ? '' : 'none';
     /* ── Enforce contain on hidden pages to prevent bleed ── */
-    [signInPage, adminPage, subscriptionPage, friendsPage, glossaryPage, pdfPage, settingsPage, musicPage, templatesPage].forEach(function(el){
+    [signInPage, adminPage, subscriptionPage, friendsPage, glossaryPage, pdfPage, settingsPage, musicPage, templatesPage, notificationsPage].forEach(function(el){
       if (!el) return;
       if (el.hidden) { el.style.overflow = 'hidden'; el.style.height = '0'; el.style.pointerEvents = 'none'; }
       else { el.style.overflow = ''; el.style.height = ''; el.style.pointerEvents = ''; }
@@ -5100,6 +5122,7 @@
     if (state.activePage === 'settings' && window.__stepperSettingsTab) window.__stepperSettingsTab.render();
     if (state.activePage === 'music' && window.__stepperMusicTab) window.__stepperMusicTab.render();
     if (state.activePage === 'templates' && window.__stepperTemplatesTab) window.__stepperTemplatesTab.render();
+    if (state.activePage === 'notifications' && window.__stepperNotificationsTab) window.__stepperNotificationsTab.render();
     renderPresenceOnly();
     renderSuspensionBanner();
     patchFeaturedPageCopy();

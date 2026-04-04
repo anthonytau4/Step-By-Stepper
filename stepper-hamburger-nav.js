@@ -193,7 +193,8 @@
     var pageMap = {
       glossary:  'stepper-glossary-page',
       friends:   'stepper-friends-page',
-      pdfimport: 'stepper-pdf-page'
+      pdfimport: 'stepper-pdf-page',
+      notifications: 'stepper-notifications-page'
     };
     for (var key in pageMap) {
       var el = document.getElementById(pageMap[key]);
@@ -532,12 +533,27 @@
     var s = document.createElement('style');
     s.id = TABSTRIP_HIDE;
     s.textContent =
-      '[data-stepper-tabstrip="true"] {\n' +
-      '  position: absolute !important;\n' +
-      '  width: 1px !important; height: 1px !important;\n' +
-      '  overflow: hidden !important; clip: rect(0,0,0,0) !important;\n' +
-      '  white-space: nowrap !important; border: 0 !important;\n' +
-      '  padding: 0 !important; margin: -1px !important;\n' +
+      '@media (max-width: 639px) {\n' +
+      '  [data-stepper-tabstrip="true"] {\n' +
+      '    position: absolute !important;\n' +
+      '    width: 1px !important; height: 1px !important;\n' +
+      '    overflow: hidden !important; clip: rect(0,0,0,0) !important;\n' +
+      '    white-space: nowrap !important; border: 0 !important;\n' +
+      '    padding: 0 !important; margin: -1px !important;\n' +
+      '  }\n' +
+      '}\n' +
+      '@media (min-width: 640px) {\n' +
+      '  [data-stepper-tabstrip="true"] {\n' +
+      '    position: relative !important;\n' +
+      '    width: auto !important; height: auto !important;\n' +
+      '    overflow-x: auto !important; overflow-y: hidden !important;\n' +
+      '    clip: unset !important;\n' +
+      '    white-space: nowrap !important;\n' +
+      '    padding: 0.25rem !important; margin: 0 !important;\n' +
+      '    flex: 1 1 auto !important;\n' +
+      '    min-width: 200px !important;\n' +
+      '    scrollbar-width: thin;\n' +
+      '  }\n' +
       '}';
     document.head.appendChild(s);
   }
