@@ -31,9 +31,19 @@
   /* ── Helpers ────────────────────────────────────────────────────────── */
 
   function buttonByText(text) {
+    function norm(v) {
+      return String(v || '')
+        .toLowerCase()
+        .replace(/[’']/g, "'")
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+    var target = norm(text);
     var btns = document.querySelectorAll('button');
     for (var i = 0; i < btns.length; i++) {
-      if ((btns[i].textContent || '').trim() === text) return btns[i];
+      var label = norm(btns[i].textContent || '');
+      if (label === target) return btns[i];
+      if (target && label.indexOf(target) !== -1) return btns[i];
     }
     return null;
   }
@@ -116,12 +126,12 @@
           {
             key: 'editor', label: 'Build', desc: 'Choreography editor',
             icon: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>'),
-            action: function () { openPageDirect('editor', function(){ return buttonByText('Build'); }); }
+            action: function () { openPageDirect('editor', function(){ return buttonByText('Build') || document.querySelector('[data-tab="build"]'); }); }
           },
           {
             key: 'preview', label: 'Sheet', desc: 'Print-ready view',
             icon: svg('<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/>'),
-            action: function () { openPageDirect('preview', function(){ return buttonByText('Sheet'); }); }
+            action: function () { openPageDirect('preview', function(){ return buttonByText('Sheet') || document.querySelector('[data-tab="sheet"]'); }); }
           }
         ]
       },
@@ -130,20 +140,20 @@
           {
             key: 'whatsnew', label: "What's New", desc: 'Latest updates',
             icon: svg('<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>'),
-            action: function () { openPageDirect('whatsnew', function(){ return buttonByText("What's New"); }); }
+            action: function () { openPageDirect('whatsnew', function(){ return buttonByText("What's New") || document.querySelector('[data-tab="whats-new"],[data-tab="whatsnew"]'); }); }
           },
           {
             key: 'featured', label: 'Featured Choreo', desc: 'Community picks',
             icon: svg('<circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/>'),
             action: function () {
-              openPageDirect('featured', function(){ return document.getElementById('stepper-featured-choreo-tab') || buttonByText('Featured Choreo'); });
+              openPageDirect('featured', function(){ return document.getElementById('stepper-featured-choreo-tab') || buttonByText('Featured Choreo') || document.querySelector('[data-tab="featured-choreo"],[data-tab="featured"]'); });
             }
           },
           {
             key: 'saveddances', label: 'My Saved Dances', desc: 'Your library',
             icon: svg('<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>'),
             action: function () {
-              openPageDirect('saveddances', function(){ return document.getElementById('stepper-saved-dances-tab') || buttonByText('My Saved Dances'); });
+              openPageDirect('saveddances', function(){ return document.getElementById('stepper-saved-dances-tab') || buttonByText('My Saved Dances') || document.querySelector('[data-tab="saved-dances"],[data-tab="my-saved-dances"]'); });
             }
           }
         ]

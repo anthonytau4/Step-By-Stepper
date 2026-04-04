@@ -6410,7 +6410,15 @@ Newest user question: ${question}`;
 
   window.__stepperOpenPage = function(pageName){
     try {
-      openPage(pageName || 'signin');
+      var safe = String(pageName || '').toLowerCase().trim();
+      if (!safe) return false;
+      var allowed = {
+        signin: 1, subscription: 1, admin: 1, moderator: 1,
+        friends: 1, glossary: 1, pdfimport: 1, settings: 1,
+        music: 1, templates: 1, notifications: 1
+      };
+      if (!allowed[safe]) return false;
+      openPage(safe);
       renderPages(true);
       return true;
     } catch (e) {
