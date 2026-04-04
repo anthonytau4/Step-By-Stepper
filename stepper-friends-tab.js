@@ -160,7 +160,11 @@
     if (!msgKey || !emoji) return;
     var reactions = loadReactions();
     if (!reactions[msgKey]) reactions[msgKey] = {};
-    reactions[msgKey][emoji] = Number(reactions[msgKey][emoji] || 0) + 1;
+    var current = Number(reactions[msgKey][emoji] || 0);
+    if (current > 0) reactions[msgKey][emoji] = 0;
+    else reactions[msgKey][emoji] = 1;
+    if (!reactions[msgKey][emoji]) delete reactions[msgKey][emoji];
+    if (!Object.keys(reactions[msgKey]).length) delete reactions[msgKey];
     saveReactions(reactions);
     renderFriendsPage();
   }

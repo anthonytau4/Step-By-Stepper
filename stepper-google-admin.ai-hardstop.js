@@ -6408,6 +6408,16 @@ Newest user question: ${question}`;
     };
   };
 
+  window.__stepperOpenPage = function(pageName){
+    try {
+      openPage(pageName || 'signin');
+      renderPages(true);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  };
+
   let __stepperLiveQueueRefreshBusy = false;
   setInterval(() => {
     if (__stepperLiveQueueRefreshBusy || !(state.session && state.session.credential)) return;

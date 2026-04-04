@@ -65,6 +65,15 @@
     run();
   }
 
+  function openPageDirect(pageName, fallbackResolver) {
+    if (window.__stepperOpenPage && typeof window.__stepperOpenPage === 'function') {
+      try {
+        if (window.__stepperOpenPage(pageName)) return;
+      } catch (e) { /* ignore and fallback */ }
+    }
+    safeClickWithRetry(fallbackResolver);
+  }
+
   function getSession() {
     try { return JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); }
     catch (e) { return null; }
@@ -107,12 +116,12 @@
           {
             key: 'editor', label: 'Build', desc: 'Choreography editor',
             icon: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>'),
-            action: function () { safeClickWithRetry(function(){ return buttonByText('Build'); }); }
+            action: function () { openPageDirect('editor', function(){ return buttonByText('Build'); }); }
           },
           {
             key: 'preview', label: 'Sheet', desc: 'Print-ready view',
             icon: svg('<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/>'),
-            action: function () { safeClickWithRetry(function(){ return buttonByText('Sheet'); }); }
+            action: function () { openPageDirect('preview', function(){ return buttonByText('Sheet'); }); }
           }
         ]
       },
@@ -121,20 +130,20 @@
           {
             key: 'whatsnew', label: "What's New", desc: 'Latest updates',
             icon: svg('<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>'),
-            action: function () { safeClickWithRetry(function(){ return buttonByText("What's New"); }); }
+            action: function () { openPageDirect('whatsnew', function(){ return buttonByText("What's New"); }); }
           },
           {
             key: 'featured', label: 'Featured Choreo', desc: 'Community picks',
             icon: svg('<circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/>'),
             action: function () {
-              safeClickWithRetry(function(){ return document.getElementById('stepper-featured-choreo-tab') || buttonByText('Featured Choreo'); });
+              openPageDirect('featured', function(){ return document.getElementById('stepper-featured-choreo-tab') || buttonByText('Featured Choreo'); });
             }
           },
           {
             key: 'saveddances', label: 'My Saved Dances', desc: 'Your library',
             icon: svg('<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>'),
             action: function () {
-              safeClickWithRetry(function(){ return document.getElementById('stepper-saved-dances-tab') || buttonByText('My Saved Dances'); });
+              openPageDirect('saveddances', function(){ return document.getElementById('stepper-saved-dances-tab') || buttonByText('My Saved Dances'); });
             }
           }
         ]
@@ -144,27 +153,27 @@
           {
             key: 'glossary', label: 'Glossary', desc: 'Step dictionary',
             icon: svg('<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>'),
-            action: function () { safeClickWithRetry(function(){ return document.getElementById('stepper-glossary-tab'); }); }
+            action: function () { openPageDirect('glossary', function(){ return document.getElementById('stepper-glossary-tab'); }); }
           },
           {
             key: 'pdfimport', label: 'PDF Import', desc: 'Upload sheets',
             icon: svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>'),
-            action: function () { safeClickWithRetry(function(){ return document.getElementById('stepper-pdf-tab'); }); }
+            action: function () { openPageDirect('pdfimport', function(){ return document.getElementById('stepper-pdf-tab'); }); }
           },
           {
             key: 'friends', label: 'Friends', desc: 'Dance community',
             icon: svg('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'),
-            action: function () { safeClickWithRetry(function(){ return document.getElementById('stepper-friends-tab'); }); }
+            action: function () { openPageDirect('friends', function(){ return document.getElementById('stepper-friends-tab'); }); }
           },
           {
             key: 'music', label: 'Music', desc: 'BPM & metronome',
             icon: svg('<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>'),
-            action: function () { safeClickWithRetry(function(){ return document.getElementById('stepper-music-tab'); }); }
+            action: function () { openPageDirect('music', function(){ return document.getElementById('stepper-music-tab'); }); }
           },
           {
             key: 'templates', label: 'Templates', desc: 'Dance starters',
             icon: svg('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>'),
-            action: function () { safeClickWithRetry(function(){ return document.getElementById('stepper-templates-tab'); }); }
+            action: function () { openPageDirect('templates', function(){ return document.getElementById('stepper-templates-tab'); }); }
           },
           {
             key: 'notifications', label: 'Notifications', desc: 'Alerts & invites',
@@ -174,7 +183,7 @@
                 window.__stepperNotificationsTab.open();
                 return;
               }
-              safeClickWithRetry(function(){ return document.getElementById('stepper-notifications-tab'); });
+              openPageDirect('notifications', function(){ return document.getElementById('stepper-notifications-tab'); });
             }
           }
         ]
@@ -195,19 +204,19 @@
           {
             key: 'signin', label: 'Sign In', desc: 'Google account',
             icon: svg('<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/>'),
-            action: function () { safeClickWithRetry(function(){ return document.getElementById('stepper-google-signin-tab'); }); }
+            action: function () { openPageDirect('signin', function(){ return document.getElementById('stepper-google-signin-tab'); }); }
           },
           {
             key: 'subscription', label: 'Subscription', desc: 'Manage plan',
             icon: svg('<rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/>'),
             condition: function () { return isSignedIn(); },
-            action: function () { safeClickWithRetry(function(){ return document.getElementById('stepper-google-subscription-tab'); }); }
+            action: function () { openPageDirect('subscription', function(){ return document.getElementById('stepper-google-subscription-tab'); }); }
           },
           {
             key: 'admin', label: 'Admin', desc: 'Dashboard',
             icon: svg('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>'),
             condition: function () { return !!window.__stepperGoogleAdminInstalled; },
-            action: function () { safeClickWithRetry(function(){ return document.getElementById('stepper-google-admin-tab'); }); }
+            action: function () { openPageDirect('admin', function(){ return document.getElementById('stepper-google-admin-tab'); }); }
           }
         ]
       }
@@ -586,11 +595,6 @@
     for (var k = 0; k < knownIds.length; k++) {
       var tab = document.getElementById(knownIds[k]);
       if (tab && tab.parentElement) candidates.push(tab.parentElement);
-    }
-    var possibleStrips = document.querySelectorAll('.nav-tabs, [role="tablist"], .tab-strip, .tabs-strip');
-    for (var p = 0; p < possibleStrips.length; p++) {
-      var txt = String(possibleStrips[p].textContent || '');
-      if (/Build|Sheet|What's New|My Saved Dances|Sign In/i.test(txt)) candidates.push(possibleStrips[p]);
     }
     for (var c = 0; c < candidates.length; c++) {
       if (candidates[c]) candidates[c].setAttribute('data-stepper-tabstrip', 'true');
