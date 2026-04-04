@@ -76,6 +76,27 @@
   }
 
   function openPageDirect(pageName, fallbackResolver) {
+    var normalized = String(pageName || '').trim().toLowerCase();
+    var routeAlias = {
+      editor: 'editor',
+      build: 'editor',
+      preview: 'preview',
+      sheet: 'preview',
+      whatsnew: 'whatsnew',
+      saveddances: 'saveddances',
+      featured: 'featured',
+      friends: 'friends',
+      glossary: 'glossary',
+      pdfimport: 'pdfimport',
+      settings: 'settings',
+      music: 'music',
+      templates: 'templates'
+    };
+    if (window.__stepperRoutePaths && typeof window.__stepperRoutePaths.go === 'function' && routeAlias[normalized]) {
+      try {
+        if (window.__stepperRoutePaths.go(routeAlias[normalized])) return;
+      } catch (e) { /* ignore route fallback */ }
+    }
     if (window.__stepperOpenPage && typeof window.__stepperOpenPage === 'function') {
       try {
         if (window.__stepperOpenPage(pageName)) return;
