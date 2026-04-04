@@ -50,6 +50,8 @@
   function safeClickWithRetry(resolveFn, tries, delayMs) {
     var maxTries = Math.max(1, Number(tries || 24));
     var wait = Math.max(40, Number(delayMs || 180));
+    var maxTries = Math.max(1, Number(tries || 8));
+    var wait = Math.max(40, Number(delayMs || 130));
     var attempt = 0;
     function run() {
       attempt++;
@@ -151,16 +153,19 @@
             key: 'friends', label: 'Friends', desc: 'Dance community',
             icon: svg('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'),
             action: function () { safeClickWithRetry(function(){ return document.getElementById('stepper-friends-tab'); }); }
+            action: function () { safeClick(document.getElementById('stepper-friends-tab')); }
           },
           {
             key: 'music', label: 'Music', desc: 'BPM & metronome',
             icon: svg('<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>'),
             action: function () { safeClickWithRetry(function(){ return document.getElementById('stepper-music-tab'); }); }
+            action: function () { safeClick(document.getElementById('stepper-music-tab')); }
           },
           {
             key: 'templates', label: 'Templates', desc: 'Dance starters',
             icon: svg('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>'),
             action: function () { safeClickWithRetry(function(){ return document.getElementById('stepper-templates-tab'); }); }
+            action: function () { safeClick(document.getElementById('stepper-templates-tab')); }
           },
           {
             key: 'notifications', label: 'Notifications', desc: 'Alerts & invites',
@@ -171,6 +176,7 @@
                 return;
               }
               safeClickWithRetry(function(){ return document.getElementById('stepper-notifications-tab'); });
+              safeClick(document.getElementById('stepper-notifications-tab'));
             }
           }
         ]
