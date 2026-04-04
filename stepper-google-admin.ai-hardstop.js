@@ -2481,49 +2481,49 @@
     }
 
     /* ── New feature tabs ── */
-    var friendsIcon = (window.__stepperFriendsTab && window.__stepperFriendsTab.icon) ? window.__stepperFriendsTab.icon() : '👥';
+    var friendsIcon = (window.__stepperFriendsTab && window.__stepperFriendsTab.icon) ? window.__stepperFriendsTab.icon() : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>';
     state.ui.friendsBtn = makeTabButton('Friends', friendsIcon, 'friends', FRIENDS_TAB_ID);
     if (!state.ui.friendsBtn.parentNode) {
       if (state.ui.signInBtn && state.ui.signInBtn.parentNode === tabStrip) state.ui.signInBtn.insertAdjacentElement('beforebegin', state.ui.friendsBtn);
       else tabStrip.appendChild(state.ui.friendsBtn);
     }
 
-    var glossaryIcon = (window.__stepperGlossaryTab && window.__stepperGlossaryTab.icon) ? window.__stepperGlossaryTab.icon() : '📖';
+    var glossaryIcon = (window.__stepperGlossaryTab && window.__stepperGlossaryTab.icon) ? window.__stepperGlossaryTab.icon() : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>';
     state.ui.glossaryBtn = makeTabButton('Glossary', glossaryIcon, 'glossary', GLOSSARY_TAB_ID);
     if (!state.ui.glossaryBtn.parentNode) {
       if (state.ui.friendsBtn && state.ui.friendsBtn.parentNode === tabStrip) state.ui.friendsBtn.insertAdjacentElement('beforebegin', state.ui.glossaryBtn);
       else tabStrip.appendChild(state.ui.glossaryBtn);
     }
 
-    var pdfIcon = (window.__stepperPdfTab && window.__stepperPdfTab.icon) ? window.__stepperPdfTab.icon() : '📄';
+    var pdfIcon = (window.__stepperPdfTab && window.__stepperPdfTab.icon) ? window.__stepperPdfTab.icon() : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
     state.ui.pdfBtn = makeTabButton('PDF Import', pdfIcon, 'pdfimport', PDF_TAB_ID);
     if (!state.ui.pdfBtn.parentNode) {
       if (state.ui.glossaryBtn && state.ui.glossaryBtn.parentNode === tabStrip) state.ui.glossaryBtn.insertAdjacentElement('beforebegin', state.ui.pdfBtn);
       else tabStrip.appendChild(state.ui.pdfBtn);
     }
 
-    var settingsIcon = (window.__stepperSettingsTab && window.__stepperSettingsTab.icon) ? window.__stepperSettingsTab.icon() : '⚙️';
+    var settingsIcon = (window.__stepperSettingsTab && window.__stepperSettingsTab.icon) ? window.__stepperSettingsTab.icon() : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33"/></svg>';
     state.ui.settingsBtn = makeTabButton('Settings', settingsIcon, 'settings', SETTINGS_TAB_ID);
     if (!state.ui.settingsBtn.parentNode) {
       if (state.ui.pdfBtn && state.ui.pdfBtn.parentNode === tabStrip) state.ui.pdfBtn.insertAdjacentElement('beforebegin', state.ui.settingsBtn);
       else tabStrip.appendChild(state.ui.settingsBtn);
     }
 
-    var musicIcon = (window.__stepperMusicTab && window.__stepperMusicTab.icon) ? window.__stepperMusicTab.icon() : '🎵';
+    var musicIcon = (window.__stepperMusicTab && window.__stepperMusicTab.icon) ? window.__stepperMusicTab.icon() : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>';
     state.ui.musicBtn = makeTabButton('Music', musicIcon, 'music', MUSIC_TAB_ID);
     if (!state.ui.musicBtn.parentNode) {
       if (state.ui.settingsBtn && state.ui.settingsBtn.parentNode === tabStrip) state.ui.settingsBtn.insertAdjacentElement('beforebegin', state.ui.musicBtn);
       else tabStrip.appendChild(state.ui.musicBtn);
     }
 
-    var templatesIcon = (window.__stepperTemplatesTab && window.__stepperTemplatesTab.icon) ? window.__stepperTemplatesTab.icon() : '📋';
+    var templatesIcon = (window.__stepperTemplatesTab && window.__stepperTemplatesTab.icon) ? window.__stepperTemplatesTab.icon() : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>';
     state.ui.templatesBtn = makeTabButton('Templates', templatesIcon, 'templates', TEMPLATES_TAB_ID);
     if (!state.ui.templatesBtn.parentNode) {
       if (state.ui.musicBtn && state.ui.musicBtn.parentNode === tabStrip) state.ui.musicBtn.insertAdjacentElement('beforebegin', state.ui.templatesBtn);
       else tabStrip.appendChild(state.ui.templatesBtn);
     }
 
-    var notificationsIcon = (window.__stepperNotificationsTab && window.__stepperNotificationsTab.icon) ? window.__stepperNotificationsTab.icon() : '🔔';
+    var notificationsIcon = (window.__stepperNotificationsTab && window.__stepperNotificationsTab.icon) ? window.__stepperNotificationsTab.icon() : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>';
     state.ui.notificationsBtn = makeTabButton('Notifications', notificationsIcon, 'notifications', NOTIFICATIONS_TAB_ID);
     if (!state.ui.notificationsBtn.parentNode) {
       if (state.ui.friendsBtn && state.ui.friendsBtn.parentNode === tabStrip) state.ui.friendsBtn.insertAdjacentElement('afterend', state.ui.notificationsBtn);
@@ -4316,7 +4316,18 @@
     const groupNames = Object.keys(groups);
     const archivedList = _getArchivedDances();
     const archivedCount = signedIn ? state.cloudSaves.filter(function(it){ return archivedList.indexOf(it.id) !== -1; }).length : 0;
-    const groupFilterHtml = signedIn ? `<div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;"><span style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;opacity:.7;">Filter:</span><button type="button" data-group-filter="" class="stepper-google-pill" style="cursor:pointer;font-size:12px;">All</button>${groupNames.map(function(gn){ return '<button type="button" data-group-filter="' + escapeHtml(gn) + '" class="stepper-google-pill" style="cursor:pointer;font-size:12px;">' + escapeHtml(gn) + ' (' + (groups[gn] || []).length + ')</button>'; }).join('')}${archivedCount ? '<button type="button" data-group-filter="__archived" class="stepper-google-pill" style="cursor:pointer;font-size:12px;opacity:.6;">📦 Archived (' + archivedCount + ')</button>' : ''}</div>` : '';
+    if (typeof state.savedGroupFilter === 'undefined') state.savedGroupFilter = '';
+    var folderIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3z"/></svg>';
+    var archiveIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9h14v9a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z"/><path d="M10 13h4"/></svg>';
+    var groupTiles = ['<button type="button" data-group-filter="" data-selected="' + (state.savedGroupFilter === '' ? 'true' : 'false') + '" class="stepper-saved-group-tile"><span class="stepper-saved-group-icon">' + folderIcon + '</span><span class="stepper-saved-group-copy"><strong>All dances</strong><small>' + escapeHtml(String(state.cloudSaves.length || 0)) + ' items</small></span></button>'];
+    groupNames.forEach(function(gn){
+      var count = (groups[gn] || []).length;
+      groupTiles.push('<button type="button" data-group-filter="' + escapeHtml(gn) + '" data-selected="' + (state.savedGroupFilter === gn ? 'true' : 'false') + '" class="stepper-saved-group-tile"><span class="stepper-saved-group-icon">' + folderIcon + '</span><span class="stepper-saved-group-copy"><strong>' + escapeHtml(gn) + '</strong><small>' + escapeHtml(String(count)) + ' items</small></span></button>');
+    });
+    if (archivedCount) {
+      groupTiles.push('<button type="button" data-group-filter="__archived" data-selected="' + (state.savedGroupFilter === '__archived' ? 'true' : 'false') + '" class="stepper-saved-group-tile"><span class="stepper-saved-group-icon">' + archiveIcon + '</span><span class="stepper-saved-group-copy"><strong>Archived</strong><small>' + escapeHtml(String(archivedCount)) + ' items</small></span></button>');
+    }
+    const groupFilterHtml = signedIn ? `<div class="stepper-saved-group-shell"><div class="stepper-saved-group-grid">${groupTiles.join('')}</div></div>` : '';
 
     const cloudCards = signedIn && state.cloudSaves.length ? state.cloudSaves.slice(0, 30).map(item => {
       const itemGroup = _getDanceGroup(item.id);
@@ -4326,7 +4337,7 @@
       <article class="rounded-3xl border p-5 sm:p-6 ${theme.soft}${isArchived ? ' stepper-cloud-archived' : ''}" data-stepper-cloud-id="${escapeHtml(item.id)}" data-dance-group="${escapeHtml(itemGroup)}" data-archived="${isArchived ? 'true' : 'false'}" style="${isArchived ? 'display:none;' : ''}">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div class="min-w-0" style="flex:1 1 200px;">
-            <h3 class="text-lg font-black tracking-tight">${escapeHtml(item.title || 'Untitled Dance')}${isArchived ? ' <span style="font-size:11px;opacity:.6;">📦 archived</span>' : ''}</h3>
+            <h3 class="text-lg font-black tracking-tight">${escapeHtml(item.title || 'Untitled Dance')}${isArchived ? ' <span style="font-size:11px;opacity:.6;">archived</span>' : ''}</h3>
             <p class="mt-1 text-sm font-semibold ${theme.subtle}">${escapeHtml(item.choreographer || 'Uncredited')}${item.country ? ` • ${escapeHtml(item.country)}` : ''}</p>
             <p class="mt-2 text-sm ${theme.subtle}">Updated ${escapeHtml(formatDate(item.updatedAt))}</p>
           </div>
@@ -4334,7 +4345,7 @@
             <span class="stepper-google-pill ${theme.orange}">${escapeHtml(item.level || 'Unlabelled')}</span>
             ${groupNames.length ? `<select data-action="set-group" style="font-size:11px;padding:3px 8px;border-radius:999px;border:1px solid rgba(99,102,241,.18);background:transparent;cursor:pointer;"><option value="">No group</option>${groupOptions}</select>` : ''}
             <button type="button" class="stepper-google-cta ${theme.button}" data-action="load-cloud" style="white-space:nowrap;padding:6px 12px;font-size:12px;">Load</button>
-            <button type="button" class="stepper-google-cta ${theme.button}" data-action="archive-cloud" style="white-space:nowrap;padding:6px 12px;font-size:12px;opacity:.7;" title="${isArchived ? 'Unarchive' : 'Archive'}">${isArchived ? '📤' : '📦'}</button>
+            <button type="button" class="stepper-google-cta ${theme.button}" data-action="archive-cloud" style="white-space:nowrap;padding:6px 12px;font-size:12px;opacity:.7;display:inline-flex;align-items:center;gap:6px;" title="${isArchived ? 'Unarchive' : 'Archive'}">${archiveIcon}<span>${isArchived ? 'Restore' : 'Archive'}</span></button>
             <button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="delete-cloud" style="white-space:nowrap;padding:6px 12px;font-size:12px;">✕</button>
           </div>
         </div>
@@ -4357,10 +4368,21 @@
       </section>
     `;
 
+    if (!document.getElementById('stepper-saved-group-style')) {
+      var gs = document.createElement('style');
+      gs.id = 'stepper-saved-group-style';
+      gs.textContent = '.stepper-saved-group-shell{margin-top:14px}.stepper-saved-group-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}.stepper-saved-group-tile{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:22px;border:1px solid rgba(99,102,241,.2);cursor:pointer;background:rgba(99,102,241,.07);text-align:left;transition:all .18s ease}.stepper-saved-group-tile:hover{transform:translateY(-1px);border-color:rgba(99,102,241,.45)}.stepper-saved-group-tile:active{transform:scale(.985)}.stepper-saved-group-tile[data-selected=\"true\"]{background:rgba(99,102,241,.18);border-color:rgba(99,102,241,.6);box-shadow:0 8px 22px rgba(99,102,241,.17)}.stepper-saved-group-icon{width:36px;height:36px;border-radius:13px;display:inline-flex;align-items:center;justify-content:center;background:rgba(99,102,241,.12);flex-shrink:0}.stepper-saved-group-copy{display:flex;flex-direction:column;min-width:0}.stepper-saved-group-copy strong{font-size:13px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.stepper-saved-group-copy small{font-size:11px;opacity:.7;}';
+      document.head.appendChild(gs);
+    }
+
     /* ── Group & archive filter buttons ── */
     wrap.querySelectorAll('[data-group-filter]').forEach(function(btn){
       btn.addEventListener('click', function(){
-        var gf = btn.getAttribute('data-group-filter');
+        var gf = btn.getAttribute('data-group-filter') || '';
+        state.savedGroupFilter = gf;
+        wrap.querySelectorAll('[data-group-filter]').forEach(function(other){
+          other.setAttribute('data-selected', (other.getAttribute('data-group-filter') || '') === gf ? 'true' : 'false');
+        });
         var cards = wrap.querySelectorAll('[data-stepper-cloud-id]');
         cards.forEach(function(card){
           var cg = card.getAttribute('data-dance-group') || '';
@@ -4375,6 +4397,13 @@
         });
       });
     });
+    var initialFilterBtn = null;
+    var targetFilter = String(state.savedGroupFilter || '');
+    wrap.querySelectorAll('[data-group-filter]').forEach(function(btn){
+      if (!initialFilterBtn && String(btn.getAttribute('data-group-filter') || '') === targetFilter) initialFilterBtn = btn;
+    });
+    if (!initialFilterBtn) initialFilterBtn = wrap.querySelector('[data-group-filter=""]');
+    if (initialFilterBtn) initialFilterBtn.click();
 
     const openBtn = wrap.querySelector('[data-stepper-open-signin="1"]');
     if (openBtn) openBtn.addEventListener('click', ()=> openPage('signin'));

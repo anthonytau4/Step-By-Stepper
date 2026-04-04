@@ -48,6 +48,8 @@
   }
 
   function safeClickWithRetry(resolveFn, tries, delayMs) {
+    var maxTries = Math.max(1, Number(tries || 24));
+    var wait = Math.max(40, Number(delayMs || 180));
     var maxTries = Math.max(1, Number(tries || 8));
     var wait = Math.max(40, Number(delayMs || 130));
     var attempt = 0;
