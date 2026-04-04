@@ -1036,7 +1036,15 @@
   /* ── Render hamburger button ────────────────────────────────────────── */
 
   function renderHamburger() {
-    if (document.getElementById(HAMBURGER_ID)) return;
+    var existing = document.getElementById(HAMBURGER_ID);
+    if (existing) {
+      existing.style.display = 'flex';
+      existing.style.visibility = 'visible';
+      existing.style.opacity = '1';
+      existing.style.pointerEvents = 'auto';
+      existing.style.zIndex = '10001';
+      return;
+    }
     var btn = document.createElement('button');
     btn.id = HAMBURGER_ID;
     btn.setAttribute('aria-label', 'Navigation menu');
@@ -1049,6 +1057,11 @@
       '<span class="shn-bar"></span>' +
       '<span class="shn-bar"></span>' +
       '<span class="shn-bar"></span>';
+    btn.style.display = 'flex';
+    btn.style.visibility = 'visible';
+    btn.style.opacity = '1';
+    btn.style.pointerEvents = 'auto';
+    btn.style.zIndex = '10001';
 
     btn.addEventListener('click', function (e) {
       e.stopPropagation();
@@ -1066,7 +1079,7 @@
     document.addEventListener('keydown', onGlobalKey);
 
     var observer = new MutationObserver(function () {
-      if (!document.getElementById(HAMBURGER_ID)) renderHamburger();
+      renderHamburger();
       if (!document.getElementById(TABSTRIP_HIDE)) hideTabStrip();
     });
     observer.observe(document.body, { childList: true, subtree: true });
