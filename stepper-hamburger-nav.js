@@ -97,6 +97,11 @@
         if (window.__stepperRoutePaths.go(routeAlias[normalized])) return;
       } catch (e) { /* ignore route fallback */ }
     }
+    /* Build/editor should always resolve to the actual Build tab click, never AI/editor helper shortcuts. */
+    if (normalized === 'editor' || normalized === 'build') {
+      safeClickWithRetry(fallbackResolver);
+      return;
+    }
     if (window.__stepperOpenPage && typeof window.__stepperOpenPage === 'function') {
       try {
         if (window.__stepperOpenPage(pageName)) return;
