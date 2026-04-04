@@ -47,6 +47,8 @@
     chatFriend: null,     /* currently chatting friend object */
     chatMessages: [],
     chatText: '',
+    chatSearch: '',
+    chatEditingId: '',
     chatLoading: false,
     blockedFriends: [],
     favoriteFriends: [],
@@ -360,6 +362,8 @@
     friendsState.chatFriend = friend;
     friendsState.chatMessages = [];
     friendsState.chatText = '';
+    friendsState.chatSearch = '';
+    friendsState.chatEditingId = '';
     friendsState.chatLoading = true;
     friendsState.activeView = 'chat';
     renderFriendsPage();
@@ -437,6 +441,66 @@
       });
   }
 
+  function beginEditChatMessage(messageId, currentText) {
+    friendsState.chatEditingId = String(messageId || '');
+    friendsState.chatText = String(currentText || '');
+    renderFriendsPage();
+  }
+
+  function cancelEditChatMessage() {
+    friendsState.chatEditingId = '';
+    friendsState.chatText = '';
+    renderFriendsPage();
+  }
+
+  function editChatMessage(messageId, text) {
+    if (!isSignedIn() || !friendsState.chatFriend) return;
+    var trimmed = String(text || '').trim();
+    if (!trimmed) return;
+    friendsState.chatLoading = true;
+    renderFriendsPage();
+    apiFetch('/api/friends/chat/edit', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ friendId: friendsState.chatFriend.id, messageId: messageId, text: trimmed })
+    })
+      .then(function (data) {
+        friendsState.chatMessages = (data && Array.isArray(data.messages)) ? data.messages : [];
+        friendsState.chatEditingId = '';
+        friendsState.chatText = '';
+      })
+      .catch(function () {
+        friendsState.error = 'Could not edit message.';
+      })
+      .finally(function () {
+        friendsState.chatLoading = false;
+        renderFriendsPage();
+        scrollChatToBottom();
+      });
+  }
+
+  function deleteChatMessage(messageId) {
+    if (!isSignedIn() || !friendsState.chatFriend || !messageId) return;
+    friendsState.chatLoading = true;
+    renderFriendsPage();
+    apiFetch('/api/friends/chat/delete', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ friendId: friendsState.chatFriend.id, messageId: messageId })
+    })
+      .then(function (data) {
+        friendsState.chatMessages = (data && Array.isArray(data.messages)) ? data.messages : [];
+      })
+      .catch(function () {
+        friendsState.error = 'Could not delete message.';
+      })
+      .finally(function () {
+        friendsState.chatLoading = false;
+        renderFriendsPage();
+        scrollChatToBottom();
+      });
+  }
+
   function scrollChatToBottom() {
     setTimeout(function () {
       var chatBox = document.querySelector('[data-friends-chat-messages]');
@@ -491,10 +555,14 @@
     if (!role) return '';
     var r = String(role).toLowerCase();
     if (r === 'admin') {
-      return '<span style="display:inline-flex;align-items:center;gap:2px;padding:1px 6px;border-radius:6px;font-size:9px;font-weight:900;letter-spacing:.3px;background:rgba(239,68,68,.15);color:#ef4444;margin-left:4px;vertical-align:middle;" title="Admin">' + (_ic.badgeAdmin || '🛡') + ' ADMIN</span>';
+      return '<span style="display:inline-flex;align-items:center;gap:4px;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:900;letter-spacing:.3px;background:rgba(239,68,68,.15);color:#ef4444;margin-left:4px;vertical-align:middle;" title="Admin">' +
+        '<span style="display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;">' + (_ic.crown || _ic.badgeAdmin || '👑') + '</span>' +
+        '<span>ADMIN</span></span>';
     }
     if (r === 'moderator') {
-      return '<span style="display:inline-flex;align-items:center;gap:2px;padding:1px 6px;border-radius:6px;font-size:9px;font-weight:900;letter-spacing:.3px;background:rgba(99,102,241,.15);color:#6366f1;margin-left:4px;vertical-align:middle;" title="Moderator">' + (_ic.badgeMod || '🛡') + ' MOD</span>';
+      return '<span style="display:inline-flex;align-items:center;gap:4px;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:900;letter-spacing:.3px;background:rgba(99,102,241,.15);color:#6366f1;margin-left:4px;vertical-align:middle;" title="Moderator">' +
+        '<span style="display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;">' + (_ic.shield || _ic.badgeMod || '🛡') + '</span>' +
+        '<span>MOD</span></span>';
     }
     return '';
   }
@@ -1081,7 +1149,10 @@
     html += '<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid;' + (theme.dark ? 'border-color:#2d2d44;background:#1e1e2e;' : 'border-color:#e5e7eb;background:#f9fafb;') + '">';
     html += '<button data-friends-chat-back style="background:none;border:none;cursor:pointer;font-size:18px;opacity:.6;transition:opacity .2s;">&larr;</button>';
     html += '<div style="width:32px;height:32px;border-radius:999px;background:#4f46e5;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:14px;flex-shrink:0;">' + friendName.charAt(0).toUpperCase() + '</div>';
-    html += '<div style="font-weight:800;font-size:14px;">' + friendName + '</div>';
+    html += '<div style="flex:1;min-width:0;"><div style="font-weight:800;font-size:14px;">' + friendName + '</div><div class="' + theme.subtle + '" style="font-size:11px;">Live chat • read receipts • reactions</div></div>';
+    html += '</div>';
+    html += '<div style="padding:8px 14px;border-bottom:1px solid;' + (theme.dark ? 'border-color:#2d2d44;background:#171726;' : 'border-color:#e5e7eb;background:#fcfcff;') + '">';
+    html += '<input data-friends-chat-search type="text" placeholder="Search messages..." value="' + escapeHtml(friendsState.chatSearch) + '" style="width:100%;border-radius:10px;border:1px solid;padding:8px 12px;font-size:12px;outline:none;' + theme.inputBg + '" />';
     html += '</div>';
 
     /* Messages area */
@@ -1091,8 +1162,12 @@
     } else if (!friendsState.chatMessages.length) {
       html += '<div style="text-align:center;padding:40px 16px;opacity:.5;font-size:13px;">No messages yet. Say hello!</div>';
     } else {
-      for (var j = 0; j < friendsState.chatMessages.length; j++) {
-        var msg = friendsState.chatMessages[j];
+      var query = String(friendsState.chatSearch || '').trim().toLowerCase();
+      var filteredMessages = !query ? friendsState.chatMessages : friendsState.chatMessages.filter(function (m) {
+        return String(m && m.text || '').toLowerCase().indexOf(query) !== -1 || String(m && m.senderName || '').toLowerCase().indexOf(query) !== -1;
+      });
+      for (var j = 0; j < filteredMessages.length; j++) {
+        var msg = filteredMessages[j];
         var msgKey = makeReactionKey('chat:' + ((friend && friend.id) || ''), msg, j);
         var isMe = (msg.senderEmail || '').toLowerCase() === myEmail;
         var align = isMe ? 'flex-end' : 'flex-start';
@@ -1102,11 +1177,16 @@
         html += escapeHtml(msg.text || '');
         html += '<div style="font-size:10px;opacity:.6;margin-top:4px;display:flex;align-items:center;gap:3px;flex-wrap:wrap;justify-content:' + (isMe ? 'flex-end' : 'flex-start') + ';">';
         html += escapeHtml(msg.senderName || '') + renderRoleBadge(msg.senderRole) + ' &middot; ' + formatTime(msg.createdAt);
+        if (msg.editedAt) html += ' &middot; edited';
         html += renderMessageStatus(msg, isMe);
         html += '</div>';
         html += '<div style="margin-top:4px;display:flex;align-items:center;gap:4px;flex-wrap:wrap;justify-content:' + (isMe ? 'flex-end' : 'flex-start') + ';">';
         html += renderReactionChips(msgKey);
         html += '<span style="opacity:.75;display:inline-flex;align-items:center;">' + renderReactionPicker(msgKey) + '</span>';
+        if (isMe && msg.id) {
+          html += '<button type="button" data-friends-chat-edit="' + escapeHtml(msg.id) + '" data-friends-chat-edit-text="' + escapeHtml(msg.text || '') + '" style="border:none;background:transparent;cursor:pointer;font-size:11px;opacity:.7;">Edit</button>';
+          html += '<button type="button" data-friends-chat-delete="' + escapeHtml(msg.id) + '" style="border:none;background:transparent;cursor:pointer;font-size:11px;opacity:.7;">Delete</button>';
+        }
         html += '</div>';
         html += '</div></div>';
       }
@@ -1115,9 +1195,14 @@
 
     /* Input area */
     html += '<div style="display:flex;gap:8px;padding:12px 16px;border-top:1px solid;' + (theme.dark ? 'border-color:#2d2d44;background:#1e1e2e;' : 'border-color:#e5e7eb;background:#f9fafb;') + '">';
-    html += '<input data-friends-chat-input type="text" placeholder="Type a message…" value="' + escapeHtml(friendsState.chatText) + '" ';
+    html += '<input data-friends-chat-input type="text" placeholder="' + (friendsState.chatEditingId ? 'Edit your message…' : 'Type a message…') + '" value="' + escapeHtml(friendsState.chatText) + '" ';
     html += 'style="flex:1;border-radius:12px;border:1px solid;padding:10px 14px;font-size:13px;outline:none;' + theme.inputBg + '" />';
-    html += '<button data-friends-chat-send class="stepper-google-cta" style="background:#4f46e5;color:#fff;padding:10px 16px;border-radius:12px;font-weight:800;font-size:13px;white-space:nowrap;">Send</button>';
+    if (friendsState.chatEditingId) {
+      html += '<button data-friends-chat-cancel-edit class="stepper-google-cta" style="background:#6b7280;color:#fff;padding:10px 12px;border-radius:12px;font-weight:800;font-size:12px;white-space:nowrap;">Cancel</button>';
+      html += '<button data-friends-chat-send class="stepper-google-cta" style="background:#4f46e5;color:#fff;padding:10px 16px;border-radius:12px;font-weight:800;font-size:13px;white-space:nowrap;">Save</button>';
+    } else {
+      html += '<button data-friends-chat-send class="stepper-google-cta" style="background:#4f46e5;color:#fff;padding:10px 16px;border-radius:12px;font-weight:800;font-size:13px;white-space:nowrap;">Send</button>';
+    }
     html += '</div>';
 
     html += '</div>';
@@ -1524,6 +1609,9 @@
       stopChatPolling();
       friendsState.chatFriend = null;
       friendsState.chatMessages = [];
+      friendsState.chatSearch = '';
+      friendsState.chatEditingId = '';
+      friendsState.chatText = '';
       renderFriendsPage();
     });
 
@@ -1531,11 +1619,36 @@
     var chatSend = page.querySelector('[data-friends-chat-send]');
     var chatInput = page.querySelector('[data-friends-chat-input]');
     if (chatSend && chatInput) {
-      chatSend.addEventListener('click', function () { sendChatMessage(chatInput.value); });
-      chatInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') sendChatMessage(chatInput.value); });
+      chatSend.addEventListener('click', function () {
+        if (friendsState.chatEditingId) editChatMessage(friendsState.chatEditingId, chatInput.value);
+        else sendChatMessage(chatInput.value);
+      });
+      chatInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+          if (friendsState.chatEditingId) editChatMessage(friendsState.chatEditingId, chatInput.value);
+          else sendChatMessage(chatInput.value);
+        }
+      });
       chatInput.addEventListener('input', function () { friendsState.chatText = chatInput.value; });
       if (friendsState.chatFriend) setTimeout(function () { chatInput.focus(); }, 100);
     }
+    var cancelEditBtn = page.querySelector('[data-friends-chat-cancel-edit]');
+    if (cancelEditBtn) cancelEditBtn.addEventListener('click', function () { cancelEditChatMessage(); });
+    var chatSearch = page.querySelector('[data-friends-chat-search]');
+    if (chatSearch) chatSearch.addEventListener('input', function () {
+      friendsState.chatSearch = chatSearch.value;
+      renderFriendsPage();
+    });
+    page.querySelectorAll('[data-friends-chat-edit]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        beginEditChatMessage(btn.getAttribute('data-friends-chat-edit'), btn.getAttribute('data-friends-chat-edit-text'));
+      });
+    });
+    page.querySelectorAll('[data-friends-chat-delete]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        if (confirm('Delete this message?')) deleteChatMessage(btn.getAttribute('data-friends-chat-delete'));
+      });
+    });
 
     page.querySelectorAll('[data-friends-react]').forEach(function (btn) {
       btn.addEventListener('click', function (e) {

@@ -2289,6 +2289,56 @@ app.post("/api/friends/chat", requireGoogleUser, async (req, res) => {
   res.json({ ok: true, messages });
 });
 
+app.post("/api/friends/chat/edit", requireGoogleUser, async (req, res) => {
+  const db = await readDb();
+  const key = userKeyFromClaims(req.stepperClaims);
+  const email = normalizeEmail(req.stepperUser?.email);
+  const friendId = String(req.body?.friendId || "").trim();
+  const messageId = String(req.body?.messageId || "").trim();
+  const text = String(req.body?.text || "").trim();
+  if (!friendId) return res.status(400).json({ ok: false, error: "Missing friendId." });
+  if (!messageId) return res.status(400).json({ ok: false, error: "Missing messageId." });
+  if (!text) return res.status(400).json({ ok: false, error: "Message text is required." });
+  if (!Array.isArray(db.friends)) db.friends = [];
+  const friendship = db.friends.find(f => f && f.id === friendId && f.status === "accepted" && (f.fromKey === key || f.toEmail === email));
+  if (!friendship) return res.status(403).json({ ok: false, error: "Not friends." });
+  if (!Array.isArray(db.friendChat)) db.friendChat = [];
+  const message = db.friendChat.find(m => m && m.friendshipId === friendId && m.id === messageId);
+  if (!message) return res.status(404).json({ ok: false, error: "Message not found." });
+  if (normalizeEmail(message.senderEmail) !== email) return res.status(403).json({ ok: false, error: "You can only edit your own messages." });
+  message.text = text.slice(0, 4000);
+  message.editedAt = new Date().toISOString();
+  await writeDb(db);
+  const messages = db.friendChat
+    .filter(m => m && m.friendshipId === friendId)
+    .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+  res.json({ ok: true, messages });
+});
+
+app.post("/api/friends/chat/delete", requireGoogleUser, async (req, res) => {
+  const db = await readDb();
+  const key = userKeyFromClaims(req.stepperClaims);
+  const email = normalizeEmail(req.stepperUser?.email);
+  const friendId = String(req.body?.friendId || "").trim();
+  const messageId = String(req.body?.messageId || "").trim();
+  if (!friendId) return res.status(400).json({ ok: false, error: "Missing friendId." });
+  if (!messageId) return res.status(400).json({ ok: false, error: "Missing messageId." });
+  if (!Array.isArray(db.friends)) db.friends = [];
+  const friendship = db.friends.find(f => f && f.id === friendId && f.status === "accepted" && (f.fromKey === key || f.toEmail === email));
+  if (!friendship) return res.status(403).json({ ok: false, error: "Not friends." });
+  if (!Array.isArray(db.friendChat)) db.friendChat = [];
+  const index = db.friendChat.findIndex(m => m && m.friendshipId === friendId && m.id === messageId);
+  if (index === -1) return res.status(404).json({ ok: false, error: "Message not found." });
+  const message = db.friendChat[index];
+  if (normalizeEmail(message?.senderEmail) !== email) return res.status(403).json({ ok: false, error: "You can only delete your own messages." });
+  db.friendChat.splice(index, 1);
+  await writeDb(db);
+  const messages = db.friendChat
+    .filter(m => m && m.friendshipId === friendId)
+    .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+  res.json({ ok: true, messages });
+});
+
 /* ── Display Name endpoints ── */
 
 app.get("/api/user/display-name", requireGoogleUser, async (req, res) => {
