@@ -29,6 +29,7 @@
   var BLOCKED_KEY = 'stepper_friends_blocked_v1';
   var FAVORITES_KEY = 'stepper_friends_favorites_v1';
   var GROUPS_KEY = 'stepper_friends_groups_v1';
+  var REACTIONS_KEY = 'stepper_friends_message_reactions_v1';
   var BUILDER_DATA_KEY = 'linedance_builder_data_v13';
 
   /* ── Local state ── */
@@ -83,6 +84,8 @@
   function saveFavorites(list) { try { localStorage.setItem(FAVORITES_KEY, JSON.stringify(list || [])); } catch (e) { /* quota */ } }
   function loadGroups() { try { return JSON.parse(localStorage.getItem(GROUPS_KEY) || '[]'); } catch (e) { return []; } }
   function saveGroups(list) { try { localStorage.setItem(GROUPS_KEY, JSON.stringify(list || [])); } catch (e) { /* quota */ } }
+  function loadReactions() { try { return JSON.parse(localStorage.getItem(REACTIONS_KEY) || '{}'); } catch (e) { return {}; } }
+  function saveReactions(map) { try { localStorage.setItem(REACTIONS_KEY, JSON.stringify(map || {})); } catch (e) { /* quota */ } }
 
   /* Load persisted blocked/favorites/groups into state */
   friendsState.blockedFriends = loadBlocked();
@@ -116,6 +119,54 @@
     var el = document.createElement('span');
     el.textContent = String(text || '');
     return el.innerHTML;
+  }
+
+  function makeReactionKey(scope, msg, fallbackIndex) {
+    var id = (msg && (msg.id || msg._id || msg.messageId)) || '';
+    var sender = (msg && (msg.senderEmail || msg.senderName)) || '';
+    var stamp = (msg && (msg.createdAt || msg.timestamp)) || '';
+    var text = (msg && msg.text) || '';
+    return [
+      String(scope || 'chat'),
+      String(id || fallbackIndex || ''),
+      String(sender),
+      String(stamp),
+      String(text).slice(0, 64)
+    ].join('|');
+  }
+
+  function renderReactionChips(msgKey) {
+    var reactions = loadReactions();
+    var map = reactions[msgKey] || {};
+    var parts = [];
+    for (var emoji in map) {
+      if (!Object.prototype.hasOwnProperty.call(map, emoji)) continue;
+      if (!map[emoji]) continue;
+      parts.push('<button type="button" data-friends-react="' + escapeHtml(msgKey) + '" data-friends-emoji="' + escapeHtml(emoji) + '" style="border:none;background:' + 'rgba(99,102,241,.12);' + 'cursor:pointer;padding:2px 7px;border-radius:999px;font-size:11px;font-weight:700;line-height:1.35;">' + emoji + ' ' + map[emoji] + '</button>');
+    }
+    return parts.join('');
+  }
+
+  function renderReactionPicker(msgKey) {
+    var emojis = ['👍', '❤️', '😂', '🔥', '👏'];
+    var out = '';
+    for (var i = 0; i < emojis.length; i++) {
+      out += '<button type="button" data-friends-react="' + escapeHtml(msgKey) + '" data-friends-emoji="' + escapeHtml(emojis[i]) + '" style="border:none;background:transparent;cursor:pointer;padding:2px 4px;border-radius:7px;font-size:12px;opacity:.85;">' + emojis[i] + '</button>';
+    }
+    return out;
+  }
+
+  function addReaction(msgKey, emoji) {
+    if (!msgKey || !emoji) return;
+    var reactions = loadReactions();
+    if (!reactions[msgKey]) reactions[msgKey] = {};
+    var current = Number(reactions[msgKey][emoji] || 0);
+    if (current > 0) reactions[msgKey][emoji] = 0;
+    else reactions[msgKey][emoji] = 1;
+    if (!reactions[msgKey][emoji]) delete reactions[msgKey][emoji];
+    if (!Object.keys(reactions[msgKey]).length) delete reactions[msgKey];
+    saveReactions(reactions);
+    renderFriendsPage();
   }
 
   /* ── Session helper ── */
@@ -986,6 +1037,7 @@
     } else {
       for (var j = 0; j < friendsState.chatMessages.length; j++) {
         var msg = friendsState.chatMessages[j];
+        var msgKey = makeReactionKey('chat:' + ((friend && friend.id) || ''), msg, j);
         var isMe = (msg.senderEmail || '').toLowerCase() === myEmail;
         var align = isMe ? 'flex-end' : 'flex-start';
         var bubbleBg = isMe ? 'background:#4f46e5;color:#fff;' : (theme.dark ? 'background:#2d2d44;color:#e5e7eb;' : 'background:#f0f0f0;color:#1f2937;');
@@ -995,6 +1047,10 @@
         html += '<div style="font-size:10px;opacity:.6;margin-top:4px;display:flex;align-items:center;gap:3px;flex-wrap:wrap;justify-content:' + (isMe ? 'flex-end' : 'flex-start') + ';">';
         html += escapeHtml(msg.senderName || '') + renderRoleBadge(msg.senderRole) + ' &middot; ' + formatTime(msg.createdAt);
         html += renderMessageStatus(msg, isMe);
+        html += '</div>';
+        html += '<div style="margin-top:4px;display:flex;align-items:center;gap:4px;flex-wrap:wrap;justify-content:' + (isMe ? 'flex-end' : 'flex-start') + ';">';
+        html += renderReactionChips(msgKey);
+        html += '<span style="opacity:.75;display:inline-flex;align-items:center;">' + renderReactionPicker(msgKey) + '</span>';
         html += '</div>';
         html += '</div></div>';
       }
@@ -1411,6 +1467,14 @@
       chatInput.addEventListener('input', function () { friendsState.chatText = chatInput.value; });
       if (friendsState.chatFriend) setTimeout(function () { chatInput.focus(); }, 100);
     }
+
+    page.querySelectorAll('[data-friends-react]').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        addReaction(btn.getAttribute('data-friends-react'), btn.getAttribute('data-friends-emoji'));
+      });
+    });
 
     /* Profile overlay close */
     page.querySelectorAll('[data-friends-profile-close]').forEach(function (el) {
