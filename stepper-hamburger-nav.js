@@ -41,6 +41,10 @@
   function safeClick(el) {
     if (!el) return false;
     try {
+      if (typeof PointerEvent === 'function') {
+        el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerType: 'touch' }));
+        el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, pointerType: 'touch' }));
+      }
       el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
     } catch (e) { /* ignore */ }
     if (typeof el.click === 'function') el.click();
@@ -50,8 +54,6 @@
   function safeClickWithRetry(resolveFn, tries, delayMs) {
     var maxTries = Math.max(1, Number(tries || 24));
     var wait = Math.max(40, Number(delayMs || 180));
-    var maxTries = Math.max(1, Number(tries || 8));
-    var wait = Math.max(40, Number(delayMs || 130));
     var attempt = 0;
     function run() {
       attempt++;
@@ -284,6 +286,7 @@
       '#' + HAMBURGER_ID + '.shn-open { animation: none; }',
       '#' + HAMBURGER_ID + ':hover { transform: scale(1.08); }',
       '#' + HAMBURGER_ID + ':active { transform: scale(0.93); }',
+      'html.stepper-focus-mode #' + HAMBURGER_ID + ' { opacity: 1 !important; pointer-events: auto !important; }',
       '@keyframes shn-pulse {',
       '  0%, 100% { box-shadow: 0 0 0 0 var(--shn-accent-glow); }',
       '  50% { box-shadow: 0 0 0 8px transparent; }',
@@ -568,14 +571,43 @@
   /* ── Tab-strip hiding ───────────────────────────────────────────────── */
 
   function hideTabStrip() {
-    if (document.getElementById(TABSTRIP_HIDE)) return;
+    var candidates = [];
     var buildBtn = buttonByText('Build');
-    if (!buildBtn) return;
-    var parent = buildBtn.parentElement;
-    if (!parent) return;
+    if (buildBtn && buildBtn.parentElement) candidates.push(buildBtn.parentElement);
+    var knownIds = [
+      'stepper-saved-dances-tab',
+      'stepper-google-signin-tab',
+      'stepper-google-subscription-tab',
+      'stepper-google-admin-tab',
+      'stepper-friends-tab',
+      'stepper-glossary-tab',
+      'stepper-pdf-tab',
+      'stepper-settings-tab',
+      'stepper-music-tab',
+      'stepper-templates-tab',
+      'stepper-notifications-tab'
+    ];
+    for (var k = 0; k < knownIds.length; k++) {
+      var tab = document.getElementById(knownIds[k]);
+      if (tab && tab.parentElement) candidates.push(tab.parentElement);
+    }
+    for (var c = 0; c < candidates.length; c++) {
+      if (candidates[c]) candidates[c].setAttribute('data-stepper-tabstrip', 'true');
+    }
 
-    parent.setAttribute('data-stepper-tabstrip', 'true');
-
+    if (!document.getElementById(TABSTRIP_HIDE)) {
+      var s = document.createElement('style');
+      s.id = TABSTRIP_HIDE;
+      s.textContent =
+        '[data-stepper-tabstrip="true"], .nav-tabs {\n' +
+        '  position: absolute !important;\n' +
+        '  width: 1px !important; height: 1px !important;\n' +
+        '  overflow: hidden !important; clip: rect(0,0,0,0) !important;\n' +
+        '  white-space: nowrap !important; border: 0 !important;\n' +
+        '  padding: 0 !important; margin: -1px !important;\n' +
+        '}';
+      document.head.appendChild(s);
+    }
     var s = document.createElement('style');
     s.id = TABSTRIP_HIDE;
     s.textContent =
@@ -1042,6 +1074,14 @@
     window.addEventListener('storage', function () {
       if (!document.getElementById(TABSTRIP_HIDE)) hideTabStrip();
     });
+
+    var settleTicks = 0;
+    var settleTimer = setInterval(function () {
+      settleTicks++;
+      hideTabStrip();
+      renderHamburger();
+      if (settleTicks > 30) clearInterval(settleTimer);
+    }, 250);
   }
 
   if (document.readyState === 'loading') {
