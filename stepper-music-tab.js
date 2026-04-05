@@ -32,7 +32,8 @@
     audioVolume: 1,
     audioLoop: false,
     audioAnalyzing: false,
-    studioOpen: false
+    studioOpen: false,
+    studioFullPageOpen: false
   };
   var _audioAnalysisBuffer = null;
 
@@ -659,6 +660,54 @@
     doc.close();
   }
 
+  function renderStudioFullPage(theme) {
+    var p = loadStudioProject();
+    var html = '';
+    html += '<div class="rounded-3xl border overflow-hidden ' + theme.shell + '" style="min-height:78vh;">';
+    html += '<div class="' + theme.panel + '" style="padding:12px 14px;border-bottom:1px solid;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">';
+    html += '<div style="font-weight:900;">🎛 Step-By-Stepper Studio — Full Page</div>';
+    html += '<div style="display:flex;gap:8px;flex-wrap:wrap;">';
+    html += '<button data-music-studio-back style="padding:8px 12px;border:none;border-radius:8px;cursor:pointer;' + theme.btnSecondary + '">Back to Music Tools</button>';
+    html += '<button data-music-studio-save style="padding:8px 12px;border:none;border-radius:8px;cursor:pointer;' + theme.btnPrimary + '">Save Worksheet</button>';
+    html += '</div></div>';
+    html += '<div style="display:grid;grid-template-columns:320px 1fr;min-height:68vh;">';
+    html += '<aside style="border-right:1px solid ' + (theme.dark ? '#2d3748' : '#d1d5db') + ';padding:12px;' + (theme.dark ? 'background:#0f172a;' : 'background:#f8fafc;') + '">';
+    html += '<div style="display:grid;gap:8px;">';
+    html += '<input data-studio-field="title" value="' + escapeHtml(p.title || '') + '" placeholder="Dance Title" style="padding:8px 10px;border:1px solid;border-radius:8px;' + theme.inputBg + '">';
+    html += '<input data-studio-field="artist" value="' + escapeHtml(p.artist || '') + '" placeholder="Artist" style="padding:8px 10px;border:1px solid;border-radius:8px;' + theme.inputBg + '">';
+    html += '<input data-studio-field="bpm" value="' + escapeHtml(p.bpm || '') + '" placeholder="BPM" style="padding:8px 10px;border:1px solid;border-radius:8px;' + theme.inputBg + '">';
+    html += '<input data-studio-field="level" value="' + escapeHtml(p.level || '') + '" placeholder="Level" style="padding:8px 10px;border:1px solid;border-radius:8px;' + theme.inputBg + '">';
+    html += '<input data-studio-field="counts" value="' + escapeHtml(p.counts || '') + '" placeholder="Counts" style="padding:8px 10px;border:1px solid;border-radius:8px;' + theme.inputBg + '">';
+    html += '<input data-studio-field="walls" value="' + escapeHtml(p.walls || '') + '" placeholder="Walls" style="padding:8px 10px;border:1px solid;border-radius:8px;' + theme.inputBg + '">';
+    html += '<input data-studio-field="introCounts" value="' + escapeHtml(p.introCounts || '') + '" placeholder="Intro Counts" style="padding:8px 10px;border:1px solid;border-radius:8px;' + theme.inputBg + '">';
+    html += '<textarea data-studio-field="tagsRestarts" rows="3" placeholder="Tags / Restarts" style="padding:8px 10px;border:1px solid;border-radius:8px;' + theme.inputBg + '">' + escapeHtml(p.tagsRestarts || '') + '</textarea>';
+    html += '<textarea data-studio-field="notes" rows="4" placeholder="Cue Notes" style="padding:8px 10px;border:1px solid;border-radius:8px;' + theme.inputBg + '">' + escapeHtml(p.notes || '') + '</textarea>';
+    html += '</div></aside>';
+    html += '<main style="padding:12px;' + (theme.dark ? 'background:#111827;' : 'background:#ffffff;') + '">';
+    html += '<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">';
+    html += '<button data-studio-region-add style="padding:7px 10px;border:none;border-radius:8px;cursor:pointer;' + theme.btnPrimary + '">Add Region</button>';
+    html += '<button data-studio-region-split style="padding:7px 10px;border:none;border-radius:8px;cursor:pointer;' + theme.btnSecondary + '">Split</button>';
+    html += '<button data-studio-region-delete style="padding:7px 10px;border:none;border-radius:8px;cursor:pointer;' + theme.btnSecondary + '">Delete</button>';
+    html += '<button data-studio-region-join style="padding:7px 10px;border:none;border-radius:8px;cursor:pointer;' + theme.btnSecondary + '">Join Next</button>';
+    html += '</div>';
+    html += '<div style="height:320px;border:1px solid ' + (theme.dark ? '#374151' : '#cbd5e1') + ';border-radius:10px;position:relative;overflow:hidden;' + (theme.dark ? 'background:#0b1220;' : 'background:#f8fafc;') + '">';
+    var maxPos = 64;
+    for (var i = 0; i < (p.regions || []).length; i++) {
+      var rg = p.regions[i];
+      maxPos = Math.max(maxPos, Number(rg.start || 0) + Number(rg.len || 0));
+    }
+    for (var r = 0; r < (p.regions || []).length; r++) {
+      var region = p.regions[r];
+      var left = (Number(region.start || 0) / maxPos) * 100;
+      var width = Math.max(6, (Number(region.len || 0) / maxPos) * 100);
+      html += '<button data-studio-region-select="' + escapeHtml(region.id) + '" style="position:absolute;left:' + left + '%;top:52px;width:' + width + '%;height:54px;border-radius:8px;border:1px solid ' + (p.selectedRegionId === region.id ? '#f59e0b' : '#818cf8') + ';background:' + (p.selectedRegionId === region.id ? 'rgba(245,158,11,.28)' : 'rgba(99,102,241,.25)') + ';color:' + (theme.dark ? '#fff' : '#1f2937') + ';font-size:12px;cursor:pointer;">' + escapeHtml(region.label || 'Region') + ' (' + Number(region.len || 0) + ')</button>';
+    }
+    html += '</div>';
+    html += '<div class="' + theme.subtle + '" style="font-size:12px;margin-top:10px;">Everything in Studio autosaves, survives reload, and updates this worksheet.</div>';
+    html += '</main></div></div>';
+    return html;
+  }
+
   function renderAudioTools(theme) {
     var html = '';
     var effectiveBpm = musicState.audioDetectedBpm ? Math.round(musicState.audioDetectedBpm * musicState.audioCountFeel) : 0;
@@ -719,7 +768,7 @@
       html += '</div>';
       html += '<div style="margin-top:12px;padding:12px;border-radius:12px;border:1px solid;' + (theme.dark ? 'background:rgba(79,70,229,.1);border-color:#3730a3;color:#c7d2fe;' : 'background:#eef2ff;border-color:#c7d2fe;color:#312e81;') + '">';
       html += '<div style="font-size:12px;font-weight:800;margin-bottom:8px;">🎛 Studio Mode</div>';
-      html += '<button data-music-go-studio style="padding:10px 16px;border:none;border-radius:10px;cursor:pointer;font-size:13px;font-weight:800;' + (premium ? theme.btnPrimary : 'background:#9ca3af;color:#fff;') + '">' + (premium ? 'Open Full Studio (New Tab)' : 'Studio (Premium)') + '</button>';
+      html += '<button data-music-go-studio style="padding:10px 16px;border:none;border-radius:10px;cursor:pointer;font-size:13px;font-weight:800;' + (premium ? theme.btnPrimary : 'background:#9ca3af;color:#fff;') + '">' + (premium ? 'Open Full Studio' : 'Studio (Premium)') + '</button>';
       if (!premium) html += '<div style="font-size:11px;margin-top:6px;opacity:.9;">Upgrade to Premium to unlock the full edit studio.</div>';
       html += '</div>';
     }
@@ -765,6 +814,11 @@
     var theme = themeClasses();
 
     var html = '';
+    if (musicState.studioFullPageOpen) {
+      page.innerHTML = renderStudioFullPage(theme);
+      attachMusicListeners(page);
+      return;
+    }
     html += '<div class="rounded-3xl border shadow-sm overflow-hidden ' + theme.shell + '" style="transition:all .3s ease;">';
 
     // Header
@@ -796,6 +850,93 @@
 
   /* ── Event Wiring ────────────────────────────────────────────────────── */
   function attachMusicListeners(page) {
+    var studioBackBtn = page.querySelector('[data-music-studio-back]');
+    if (studioBackBtn) studioBackBtn.addEventListener('click', function () {
+      musicState.studioFullPageOpen = false;
+      renderMusicPage();
+    });
+    var studioSaveBtn = page.querySelector('[data-music-studio-save]');
+    if (studioSaveBtn) studioSaveBtn.addEventListener('click', function () {
+      var p = loadStudioProject();
+      page.querySelectorAll('[data-studio-field]').forEach(function (el) {
+        var k = el.getAttribute('data-studio-field');
+        if (k) p[k] = el.value;
+      });
+      saveStudioProject(p);
+      var data = loadBuilderData();
+      if (!data.meta) data.meta = {};
+      data.meta.music = p.title || data.meta.music || '';
+      data.meta.artist = p.artist || data.meta.artist || '';
+      data.meta.bpm = p.bpm || data.meta.bpm || '';
+      saveBuilderData(data);
+      _toast('Studio worksheet saved.');
+    });
+    page.querySelectorAll('[data-studio-field]').forEach(function (el) {
+      el.addEventListener('input', function () {
+        var p = loadStudioProject();
+        var k = el.getAttribute('data-studio-field');
+        if (k) p[k] = el.value;
+        saveStudioProject(p);
+      });
+    });
+    page.querySelectorAll('[data-studio-region-select]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = btn.getAttribute('data-studio-region-select');
+        var p = loadStudioProject();
+        p.selectedRegionId = id || '';
+        saveStudioProject(p);
+        renderMusicPage();
+      });
+    });
+    var addRegion = page.querySelector('[data-studio-region-add]');
+    if (addRegion) addRegion.addEventListener('click', function () {
+      var p = loadStudioProject();
+      var end = 0;
+      (p.regions || []).forEach(function (rg) { end = Math.max(end, Number(rg.start || 0) + Number(rg.len || 0)); });
+      var id = 'r' + Date.now();
+      p.regions.push({ id: id, label: 'New Section', start: end, len: 16 });
+      p.selectedRegionId = id;
+      saveStudioProject(p);
+      renderMusicPage();
+    });
+    var splitRegion = page.querySelector('[data-studio-region-split]');
+    if (splitRegion) splitRegion.addEventListener('click', function () {
+      var p = loadStudioProject();
+      var idx = (p.regions || []).findIndex(function (rg) { return rg.id === p.selectedRegionId; });
+      if (idx < 0) return;
+      var rg = p.regions[idx];
+      if (Number(rg.len || 0) < 2) return;
+      var firstLen = Math.max(1, Math.floor(Number(rg.len || 0) / 2));
+      var secondLen = Math.max(1, Number(rg.len || 0) - firstLen);
+      rg.len = firstLen;
+      var newId = 'r' + (Date.now() + 1);
+      p.regions.splice(idx + 1, 0, { id: newId, label: (rg.label || 'Section') + ' B', start: Number(rg.start || 0) + firstLen, len: secondLen });
+      p.selectedRegionId = newId;
+      saveStudioProject(p);
+      renderMusicPage();
+    });
+    var delRegion = page.querySelector('[data-studio-region-delete]');
+    if (delRegion) delRegion.addEventListener('click', function () {
+      var p = loadStudioProject();
+      var idx = (p.regions || []).findIndex(function (rg) { return rg.id === p.selectedRegionId; });
+      if (idx < 0) return;
+      p.regions.splice(idx, 1);
+      p.selectedRegionId = (p.regions[0] && p.regions[0].id) || '';
+      saveStudioProject(p);
+      renderMusicPage();
+    });
+    var joinRegion = page.querySelector('[data-studio-region-join]');
+    if (joinRegion) joinRegion.addEventListener('click', function () {
+      var p = loadStudioProject();
+      var idx = (p.regions || []).findIndex(function (rg) { return rg.id === p.selectedRegionId; });
+      if (idx < 0 || idx >= p.regions.length - 1) return;
+      p.regions[idx].len = Number(p.regions[idx].len || 0) + Number(p.regions[idx + 1].len || 0);
+      p.regions[idx].label = String(p.regions[idx].label || 'Section') + ' + ' + String(p.regions[idx + 1].label || '');
+      p.regions.splice(idx + 1, 1);
+      saveStudioProject(p);
+      renderMusicPage();
+    });
+
     // Save music info
     var saveBtn = page.querySelector('[data-music-save]');
     if (saveBtn) {
@@ -1026,7 +1167,8 @@
         _toast('Studio mode is Premium only.');
         return;
       }
-      openStudioInNewTab();
+      musicState.studioFullPageOpen = true;
+      renderMusicPage();
     });
     page.querySelectorAll('[data-music-studio-close],[data-music-studio-close-btn]').forEach(function (el) {
       el.addEventListener('click', function () {
