@@ -56,6 +56,8 @@
     activeGroupChat: null,
     groupChatMessages: [],
     groupChatText: '',
+    groupChatSearch: '',
+    groupChatEditingId: '',
     groupChatLoading: false,
     showingProfile: null,
     invitingToDance: null,
@@ -433,9 +435,18 @@
       apiFetch('/api/friends/chat?friendId=' + encodeURIComponent(friendId), { headers: authHeaders() })
         .then(function (data) {
           if (data && Array.isArray(data.messages)) {
-            friendsState.chatMessages = data.messages;
-            renderFriendsPage();
-            scrollChatToBottom();
+            var current = friendsState.chatMessages || [];
+            var incoming = data.messages || [];
+            var changed = current.length !== incoming.length;
+            if (!changed && current.length && incoming.length) {
+              changed = String(current[current.length - 1].id || '') !== String(incoming[incoming.length - 1].id || '') ||
+                String(current[current.length - 1].editedAt || '') !== String(incoming[incoming.length - 1].editedAt || '');
+            }
+            if (changed) {
+              friendsState.chatMessages = incoming;
+              renderFriendsPage();
+              scrollChatToBottom();
+            }
           }
         })
         .catch(function () { /* silent poll failure */ });
@@ -648,9 +659,17 @@
       apiFetch('/api/staff-chat', { headers: authHeaders() })
         .then(function (data) {
           if (data && Array.isArray(data.messages)) {
-            friendsState.staffChatMessages = data.messages;
-            renderFriendsPage();
-            scrollChatToBottom();
+            var curr = friendsState.staffChatMessages || [];
+            var next = data.messages || [];
+            var changed = curr.length !== next.length;
+            if (!changed && curr.length && next.length) {
+              changed = String(curr[curr.length - 1].id || '') !== String(next[next.length - 1].id || '');
+            }
+            if (changed) {
+              friendsState.staffChatMessages = next;
+              renderFriendsPage();
+              scrollChatToBottom();
+            }
           }
         })
         .catch(function () { /* silent poll failure */ });
@@ -769,6 +788,8 @@
     friendsState.activeGroupChat = group;
     friendsState.groupChatMessages = group.messages || [];
     friendsState.groupChatText = '';
+    friendsState.groupChatSearch = '';
+    friendsState.groupChatEditingId = '';
     friendsState.activeView = 'groupchat';
     renderFriendsPage();
   }
@@ -791,6 +812,42 @@
     saveGroups(friendsState.groupChats);
     renderFriendsPage();
     scrollChatToBottom();
+  }
+  function beginEditGroupMessage(messageId, currentText) {
+    friendsState.groupChatEditingId = String(messageId || '');
+    friendsState.groupChatText = String(currentText || '');
+    renderFriendsPage();
+  }
+  function cancelEditGroupMessage() {
+    friendsState.groupChatEditingId = '';
+    friendsState.groupChatText = '';
+    renderFriendsPage();
+  }
+  function editGroupMessage(messageId, text) {
+    if (!friendsState.activeGroupChat || !messageId) return;
+    var trimmed = String(text || '').trim();
+    if (!trimmed) return;
+    var msgs = friendsState.activeGroupChat.messages || [];
+    for (var i = 0; i < msgs.length; i++) {
+      if (msgs[i] && msgs[i].id === messageId) {
+        msgs[i].text = trimmed;
+        msgs[i].editedAt = new Date().toISOString();
+        break;
+      }
+    }
+    friendsState.groupChatMessages = msgs;
+    friendsState.groupChatEditingId = '';
+    friendsState.groupChatText = '';
+    saveGroups(friendsState.groupChats);
+    renderFriendsPage();
+    scrollChatToBottom();
+  }
+  function deleteGroupMessage(messageId) {
+    if (!friendsState.activeGroupChat || !messageId) return;
+    friendsState.activeGroupChat.messages = (friendsState.activeGroupChat.messages || []).filter(function (m) { return m && m.id !== messageId; });
+    friendsState.groupChatMessages = friendsState.activeGroupChat.messages;
+    saveGroups(friendsState.groupChats);
+    renderFriendsPage();
   }
   function deleteGroupChat(groupId) {
     friendsState.groupChats = friendsState.groupChats.filter(function (g) { return g.id !== groupId; });
@@ -1068,6 +1125,9 @@
     /* Actions */
     html += '<div style="display:flex;align-items:center;gap:6px;">';
     html += '<span style="width:8px;height:8px;border-radius:999px;background:#22c55e;display:inline-block;" title="Connected"></span>';
+    if (Number(friend.unreadCount || 0) > 0) {
+      html += '<span style="min-width:18px;height:18px;border-radius:999px;background:#ef4444;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:900;padding:0 5px;" title="Unread messages">' + escapeHtml(String(friend.unreadCount)) + '</span>';
+    }
     html += '<button data-friends-invite-dance="' + escapeHtml(friend.id || '') + '" title="Invite to dance" style="background:none;border:none;cursor:pointer;font-size:14px;opacity:.5;transition:opacity .2s;">&#x1F57A;</button>';
     html += '<button data-friends-chat-open="' + escapeHtml(friend.id || '') + '" title="Chat" style="background:none;border:none;cursor:pointer;font-size:16px;opacity:.5;transition:opacity .2s;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button>';
     html += '<button data-friends-remove="' + escapeHtml(friend.id || friend.email || '') + '" title="Remove friend" style="background:none;border:none;cursor:pointer;font-size:16px;opacity:.4;transition:opacity .2s;">' + _ic.close + '</button>';
@@ -1164,7 +1224,9 @@
           var displayEmail = escapeHtml(f.email || f.toEmail || f.fromEmail || '');
           html += '<button data-friends-chat-start="' + escapeHtml(f.id || '') + '" style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:14px;border:1px solid;cursor:pointer;text-align:left;transition:all .2s ease;' + theme.cardBg + '">';
           html += '<div style="width:36px;height:36px;border-radius:999px;background:#4f46e5;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:15px;flex-shrink:0;">' + displayName.charAt(0).toUpperCase() + '</div>';
-          html += '<div style="flex:1;min-width:0;"><div style="font-weight:800;font-size:13px;">' + displayName + '</div>';
+          html += '<div style="flex:1;min-width:0;"><div style="display:flex;align-items:center;gap:6px;font-weight:800;font-size:13px;">' + displayName;
+          if (Number(f.unreadCount || 0) > 0) html += '<span style="width:8px;height:8px;border-radius:999px;background:#ef4444;display:inline-block;" title="Unread messages"></span>';
+          html += '</div>';
           html += '<div class="' + theme.subtle + '" style="font-size:11px;">' + displayEmail + '</div></div>';
           html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;opacity:.4;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
           html += '</button>';
@@ -1333,9 +1395,16 @@
     html += '<div class="' + theme.subtle + '" style="font-size:11px;">' + group.members.length + ' member' + (group.members.length !== 1 ? 's' : '') + '</div></div>';
     html += '</div>';
 
+    html += '<div style="padding:8px 14px;border-bottom:1px solid;' + (theme.dark ? 'border-color:#2d2d44;background:#171726;' : 'border-color:#e5e7eb;background:#fcfcff;') + '">';
+    html += '<input data-friends-group-search type="text" placeholder="Search group messages..." value="' + escapeHtml(friendsState.groupChatSearch) + '" style="width:100%;border-radius:10px;border:1px solid;padding:8px 12px;font-size:12px;outline:none;' + theme.inputBg + '" />';
+    html += '</div>';
+
     /* Messages */
     html += '<div data-friends-chat-messages style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:8px;">';
-    var msgs = friendsState.groupChatMessages;
+    var query = String(friendsState.groupChatSearch || '').trim().toLowerCase();
+    var msgs = !query ? friendsState.groupChatMessages : friendsState.groupChatMessages.filter(function (m) {
+      return String(m && m.text || '').toLowerCase().indexOf(query) !== -1 || String(m && m.senderName || '').toLowerCase().indexOf(query) !== -1;
+    });
     if (!msgs.length) {
       html += '<div style="text-align:center;padding:40px 16px;opacity:.5;font-size:13px;">No messages yet. Say hello to the group!</div>';
     } else {
@@ -1349,7 +1418,17 @@
         html += escapeHtml(msg.text || '');
         html += '<div style="font-size:10px;opacity:.6;margin-top:4px;display:flex;align-items:center;gap:3px;flex-wrap:wrap;justify-content:' + (isMe ? 'flex-end' : 'flex-start') + ';">';
         html += escapeHtml(msg.senderName || '') + renderRoleBadge(msg.senderRole || msg.role) + ' &middot; ' + formatTime(msg.createdAt);
+        if (msg.editedAt) html += ' &middot; edited';
         html += renderMessageStatus(msg, isMe);
+        html += '</div>';
+        var gMsgKey = makeReactionKey('group:' + (group && group.id || ''), msg, i);
+        html += '<div style="margin-top:4px;display:flex;align-items:center;gap:4px;flex-wrap:wrap;justify-content:' + (isMe ? 'flex-end' : 'flex-start') + ';">';
+        html += renderReactionChips(gMsgKey);
+        html += '<span style="opacity:.75;display:inline-flex;align-items:center;">' + renderReactionPicker(gMsgKey) + '</span>';
+        if (isMe && msg.id) {
+          html += '<button type="button" data-friends-group-edit="' + escapeHtml(msg.id) + '" data-friends-group-edit-text="' + escapeHtml(msg.text || '') + '" style="border:none;background:transparent;cursor:pointer;font-size:11px;opacity:.7;">Edit</button>';
+          html += '<button type="button" data-friends-group-delete-msg="' + escapeHtml(msg.id) + '" style="border:none;background:transparent;cursor:pointer;font-size:11px;opacity:.7;">Delete</button>';
+        }
         html += '</div>';
         html += '</div></div>';
       }
@@ -1358,9 +1437,14 @@
 
     /* Input */
     html += '<div style="display:flex;gap:8px;padding:12px 16px;border-top:1px solid;' + (theme.dark ? 'border-color:#2d2d44;background:#1e1e2e;' : 'border-color:#e5e7eb;background:#f9fafb;') + '">';
-    html += '<input data-friends-group-input type="text" placeholder="Type a message…" value="' + escapeHtml(friendsState.groupChatText) + '" ';
+    html += '<input data-friends-group-input type="text" placeholder="' + (friendsState.groupChatEditingId ? 'Edit your message…' : 'Type a message…') + '" value="' + escapeHtml(friendsState.groupChatText) + '" ';
     html += 'style="flex:1;border-radius:12px;border:1px solid;padding:10px 14px;font-size:13px;outline:none;' + theme.inputBg + '" />';
-    html += '<button data-friends-group-send class="stepper-google-cta" style="background:#4f46e5;color:#fff;padding:10px 16px;border-radius:12px;font-weight:800;font-size:13px;white-space:nowrap;">Send</button>';
+    if (friendsState.groupChatEditingId) {
+      html += '<button data-friends-group-cancel-edit class="stepper-google-cta" style="background:#6b7280;color:#fff;padding:10px 12px;border-radius:12px;font-weight:800;font-size:12px;white-space:nowrap;">Cancel</button>';
+      html += '<button data-friends-group-send class="stepper-google-cta" style="background:#4f46e5;color:#fff;padding:10px 16px;border-radius:12px;font-weight:800;font-size:13px;white-space:nowrap;">Save</button>';
+    } else {
+      html += '<button data-friends-group-send class="stepper-google-cta" style="background:#4f46e5;color:#fff;padding:10px 16px;border-radius:12px;font-weight:800;font-size:13px;white-space:nowrap;">Send</button>';
+    }
     html += '</div>';
 
     html += '</div>';
@@ -1791,17 +1875,45 @@
     var groupSend = page.querySelector('[data-friends-group-send]');
     var groupInput = page.querySelector('[data-friends-group-input]');
     if (groupSend && groupInput) {
-      groupSend.addEventListener('click', function () { sendGroupMessage(groupInput.value); });
-      groupInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') sendGroupMessage(groupInput.value); });
+      groupSend.addEventListener('click', function () {
+        if (friendsState.groupChatEditingId) editGroupMessage(friendsState.groupChatEditingId, groupInput.value);
+        else sendGroupMessage(groupInput.value);
+      });
+      groupInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+          if (friendsState.groupChatEditingId) editGroupMessage(friendsState.groupChatEditingId, groupInput.value);
+          else sendGroupMessage(groupInput.value);
+        }
+      });
       groupInput.addEventListener('input', function () { friendsState.groupChatText = groupInput.value; });
       if (friendsState.activeGroupChat) setTimeout(function () { groupInput.focus(); }, 100);
     }
+    var groupCancelEdit = page.querySelector('[data-friends-group-cancel-edit]');
+    if (groupCancelEdit) groupCancelEdit.addEventListener('click', function () { cancelEditGroupMessage(); });
+    var groupSearch = page.querySelector('[data-friends-group-search]');
+    if (groupSearch) groupSearch.addEventListener('input', function () {
+      friendsState.groupChatSearch = groupSearch.value;
+      renderFriendsPage();
+    });
+    page.querySelectorAll('[data-friends-group-edit]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        beginEditGroupMessage(btn.getAttribute('data-friends-group-edit'), btn.getAttribute('data-friends-group-edit-text'));
+      });
+    });
+    page.querySelectorAll('[data-friends-group-delete-msg]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        if (confirm('Delete this message?')) deleteGroupMessage(btn.getAttribute('data-friends-group-delete-msg'));
+      });
+    });
 
     /* Group chat - back */
     var groupBack = page.querySelector('[data-friends-group-back]');
     if (groupBack) groupBack.addEventListener('click', function () {
       friendsState.activeGroupChat = null;
       friendsState.groupChatMessages = [];
+      friendsState.groupChatSearch = '';
+      friendsState.groupChatEditingId = '';
+      friendsState.groupChatText = '';
       friendsState.activeView = 'groups';
       renderFriendsPage();
     });

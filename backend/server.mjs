@@ -2156,6 +2156,15 @@ app.get("/api/friends/list", requireGoogleUser, async (req, res) => {
   if (autoLinked) await writeDb(db);
   const email = normalizeEmail(req.stepperUser?.email);
   const list = Array.isArray(db.friends) ? db.friends : [];
+  const unreadByFriendshipId = {};
+  if (Array.isArray(db.friendChat)) {
+    for (const msg of db.friendChat) {
+      if (!msg || !msg.friendshipId) continue;
+      if (normalizeEmail(msg.senderEmail) === email) continue;
+      if (String(msg.status || '').trim().toLowerCase() === 'read') continue;
+      unreadByFriendshipId[msg.friendshipId] = (unreadByFriendshipId[msg.friendshipId] || 0) + 1;
+    }
+  }
   const lookupDisplayName = (userKey, userEmail) => {
     if (userKey && db.users[userKey]?.displayName) return db.users[userKey].displayName;
     const normalized = normalizeEmail(userEmail);
@@ -2176,7 +2185,8 @@ app.get("/api/friends/list", requireGoogleUser, async (req, res) => {
       fromDisplayName: lookupDisplayName(f.fromKey, f.fromEmail),
       toDisplayName: lookupDisplayName("", f.toEmail),
       fromRole: lookupRole(f.fromKey, f.fromEmail),
-      toRole: lookupRole("", f.toEmail)
+      toRole: lookupRole("", f.toEmail),
+      unreadCount: Number(unreadByFriendshipId[f.id] || 0)
     });
   });
   res.json({ ok: true, items });
