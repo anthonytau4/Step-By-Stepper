@@ -166,6 +166,23 @@
     return String(mins).padStart(2, '0') + ':' + String(secs).padStart(2, '0');
   }
 
+  function formatSongArtistLine(song, artist) {
+    var s = String(song || '').trim();
+    var a = String(artist || '').trim();
+    if (s && a) return s + ' - ' + a;
+    return s || a || '';
+  }
+
+  function splitSongArtistLine(text) {
+    var raw = String(text || '').trim();
+    if (!raw) return { song: '', artist: '' };
+    var parts = raw.split(/\s[-–—]\s/);
+    if (parts.length >= 2) {
+      return { song: String(parts[0] || '').trim(), artist: String(parts.slice(1).join(' - ') || '').trim() };
+    }
+    return { song: raw, artist: '' };
+  }
+
   function normalizeDetectedBpm(bpm) {
     var value = Number(bpm || 0);
     if (!value || !isFinite(value)) return 0;
@@ -388,6 +405,7 @@
     var musicTitle = (data.meta && data.meta.music) || '';
     var artist = (data.meta && data.meta.artist) || '';
     var bpm = (data.meta && data.meta.bpm) || '';
+    var musicTitleLine = formatSongArtistLine(musicTitle, artist);
 
     var html = '';
     html += '<div class="music-card rounded-2xl border p-5 ' + theme.panel + '" style="margin-bottom:20px;">';
@@ -400,8 +418,8 @@
 
     // Song Title
     html += '<div>';
-    html += '<label style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;" class="' + theme.subtle + '">Song Title</label>';
-    html += '<input data-music-field="music" type="text" value="' + escapeHtml(musicTitle) + '" placeholder="Enter song title…" ';
+    html += '<label style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;" class="' + theme.subtle + '">Song Title - Artist</label>';
+    html += '<input data-music-field="music" type="text" value="' + escapeHtml(musicTitleLine) + '" placeholder="Song name - Artist name" ';
     html += 'style="width:100%;margin-top:4px;padding:10px 14px;border-radius:10px;border:1px solid;font-size:14px;' + theme.inputBg + '" />';
     html += '</div>';
 
@@ -967,8 +985,13 @@
         var artistInput = page.querySelector('[data-music-field="artist"]');
         var bpmInput = page.querySelector('[data-music-field="bpm"]');
 
-        if (titleInput) data.meta.music = titleInput.value.trim();
-        if (artistInput) data.meta.artist = artistInput.value.trim();
+        var songValue = titleInput ? titleInput.value.trim() : '';
+        var artistValue = artistInput ? artistInput.value.trim() : '';
+        var split = splitSongArtistLine(songValue);
+        if (!artistValue && split.artist) artistValue = split.artist;
+        if (split.song) songValue = split.song;
+        data.meta.music = formatSongArtistLine(songValue, artistValue);
+        data.meta.artist = artistValue;
         if (bpmInput) data.meta.bpm = bpmInput.value.trim();
 
         saveBuilderData(data);
@@ -1040,12 +1063,18 @@
           var parsedFromName = parseTitleArtistFromFilename(file.name || '');
           var data = loadBuilderData();
           if (!data.meta) data.meta = {};
+          var importSong = '';
+          var importArtist = '';
           if (parsed.title || parsed.artist) {
-            if (parsed.title) data.meta.music = parsed.title;
-            if (parsed.artist) data.meta.artist = parsed.artist;
+            importSong = parsed.title || '';
+            importArtist = parsed.artist || '';
           } else {
-            if (parsedFromName.title) data.meta.music = parsedFromName.title;
-            if (parsedFromName.artist) data.meta.artist = parsedFromName.artist;
+            importSong = parsedFromName.title || '';
+            importArtist = parsedFromName.artist || '';
+          }
+          if (importSong || importArtist) {
+            data.meta.music = formatSongArtistLine(importSong, importArtist);
+            data.meta.artist = importArtist;
           }
           saveBuilderData(data);
           var proj = loadStudioProject();
