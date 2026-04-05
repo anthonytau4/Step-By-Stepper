@@ -691,15 +691,26 @@
   function renderStudioFullPage(theme) {
     var p = loadStudioProject();
     var html = '';
-    html += '<div class="rounded-3xl border overflow-hidden ' + theme.shell + '" style="min-height:78vh;">';
-    html += '<div class="' + theme.panel + '" style="padding:12px 14px;border-bottom:1px solid;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">';
-    html += '<div style="font-weight:900;">🎛 Step-By-Stepper Studio — Full Page</div>';
-    html += '<div style="display:flex;gap:8px;flex-wrap:wrap;">';
+    html += '<style>';
+    html += '.studio-full-shell{min-height:78vh;max-width:100%;overflow:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;}';
+    html += '.studio-full-header{padding:12px 14px;border-bottom:1px solid;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}';
+    html += '.studio-full-title{font-weight:900;max-width:100%;overflow-wrap:anywhere;}';
+    html += '.studio-full-header-actions{display:flex;gap:8px;flex-wrap:wrap;}';
+    html += '.studio-full-layout{display:grid;grid-template-columns:320px minmax(760px,1fr);min-height:68vh;min-width:1080px;}';
+    html += '.studio-full-main{min-width:760px;}';
+    html += '.studio-full-mixer{margin-top:10px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;}';
+    html += '.studio-full-header-actions{width:100%;}';
+    html += '.studio-full-header-actions button{flex:1 1 160px;}';
+    html += '</style>';
+    html += '<div class="studio-full-shell rounded-3xl border ' + theme.shell + '">';
+    html += '<div class="studio-full-header ' + theme.panel + '">';
+    html += '<div class="studio-full-title">🎛 Step-By-Stepper Studio — Full Page</div>';
+    html += '<div class="studio-full-header-actions">';
     html += '<button data-music-studio-back style="padding:8px 12px;border:none;border-radius:8px;cursor:pointer;' + theme.btnSecondary + '">Back to Music Tools</button>';
     html += '<button data-music-studio-save style="padding:8px 12px;border:none;border-radius:8px;cursor:pointer;' + theme.btnPrimary + '">Save Worksheet</button>';
     html += '</div></div>';
-    html += '<div style="display:grid;grid-template-columns:320px 1fr;min-height:68vh;">';
-    html += '<aside style="border-right:1px solid ' + (theme.dark ? '#2d3748' : '#d1d5db') + ';padding:12px;' + (theme.dark ? 'background:#0f172a;' : 'background:#f8fafc;') + '">';
+    html += '<div class="studio-full-layout">';
+    html += '<aside class="studio-full-aside" style="border-right:1px solid ' + (theme.dark ? '#2d3748' : '#d1d5db') + ';padding:12px;' + (theme.dark ? 'background:#0f172a;' : 'background:#f8fafc;') + '">';
     html += '<div style="display:grid;gap:8px;">';
     html += '<input data-studio-field="title" value="' + escapeHtml(p.title || '') + '" placeholder="Dance Title" style="padding:8px 10px;border:1px solid;border-radius:8px;' + theme.inputBg + '">';
     html += '<input data-studio-field="artist" value="' + escapeHtml(p.artist || '') + '" placeholder="Artist" style="padding:8px 10px;border:1px solid;border-radius:8px;' + theme.inputBg + '">';
@@ -711,7 +722,7 @@
     html += '<textarea data-studio-field="tagsRestarts" rows="3" placeholder="Tags / Restarts" style="padding:8px 10px;border:1px solid;border-radius:8px;' + theme.inputBg + '">' + escapeHtml(p.tagsRestarts || '') + '</textarea>';
     html += '<textarea data-studio-field="notes" rows="4" placeholder="Cue Notes" style="padding:8px 10px;border:1px solid;border-radius:8px;' + theme.inputBg + '">' + escapeHtml(p.notes || '') + '</textarea>';
     html += '</div></aside>';
-    html += '<main style="padding:12px;' + (theme.dark ? 'background:#111827;' : 'background:#ffffff;') + '">';
+    html += '<main class="studio-full-main" style="padding:12px;' + (theme.dark ? 'background:#111827;' : 'background:#ffffff;') + '">';
     html += '<div style="border:1px solid ' + (theme.dark ? '#374151' : '#cbd5e1') + ';border-radius:10px;padding:10px;margin-bottom:10px;' + (theme.dark ? 'background:#0f172a;' : 'background:#f8fafc;') + '">';
     html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">';
     html += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><button data-music-transport-rewind style="padding:7px 10px;border:none;border-radius:8px;cursor:pointer;' + theme.btnSecondary + '">⏮</button><button data-music-transport-play style="padding:7px 12px;border:none;border-radius:8px;cursor:pointer;' + theme.btnPrimary + '">▶</button><button data-music-transport-pause style="padding:7px 12px;border:none;border-radius:8px;cursor:pointer;' + theme.btnSecondary + '">⏸</button><button data-music-metro-from-start style="padding:7px 12px;border:none;border-radius:8px;cursor:pointer;' + theme.btnPrimary + '">▶ + Metro</button></div>';
@@ -762,7 +773,7 @@
       html += '<button data-studio-region-select="' + escapeHtml(region.id) + '" style="position:absolute;left:' + left + '%;top:52px;width:' + width + '%;height:54px;border-radius:8px;border:1px solid ' + (p.selectedRegionId === region.id ? '#f59e0b' : '#818cf8') + ';background:' + (p.selectedRegionId === region.id ? 'rgba(245,158,11,.28)' : 'rgba(99,102,241,.25)') + ';color:' + (theme.dark ? '#fff' : '#1f2937') + ';font-size:12px;cursor:grab;">' + escapeHtml(region.label || 'Region') + ' (' + Number(region.len || 0) + ')</button>';
     }
     html += '</div>';
-    html += '<div style="margin-top:10px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;">';
+    html += '<div class="studio-full-mixer">';
     html += '<div style="padding:8px;border:1px solid ' + (theme.dark ? '#374151' : '#cbd5e1') + ';border-radius:8px;' + (theme.dark ? 'background:#111827;' : 'background:#f8fafc;') + '"><div style="font-size:11px;font-weight:800;">DRUMS</div><div class="' + theme.subtle + '" style="font-size:11px;">Mute · Solo · Pan · Comp</div></div>';
     html += '<div style="padding:8px;border:1px solid ' + (theme.dark ? '#374151' : '#cbd5e1') + ';border-radius:8px;' + (theme.dark ? 'background:#111827;' : 'background:#f8fafc;') + '"><div style="font-size:11px;font-weight:800;">MUSIC TRACK</div><div class="' + theme.subtle + '" style="font-size:11px;">EQ · Volume · Reverb</div></div>';
     html += '<div style="padding:8px;border:1px solid ' + (theme.dark ? '#374151' : '#cbd5e1') + ';border-radius:8px;' + (theme.dark ? 'background:#111827;' : 'background:#f8fafc;') + '"><div style="font-size:11px;font-weight:800;">CUES / COUNTS</div><div class="' + theme.subtle + '" style="font-size:11px;">Markers · Automation · Notes</div></div>';
