@@ -33,7 +33,8 @@
     audioLoop: false,
     audioAnalyzing: false,
     studioOpen: false,
-    studioFullPageOpen: false
+    studioFullPageOpen: false,
+    tempoRampTimer: null
   };
   var _audioAnalysisBuffer = null;
 
@@ -181,6 +182,29 @@
       return { song: String(parts[0] || '').trim(), artist: String(parts.slice(1).join(' - ') || '').trim() };
     }
     return { song: raw, artist: '' };
+  }
+
+  function stopTempoRamp() {
+    if (musicState.tempoRampTimer) {
+      clearInterval(musicState.tempoRampTimer);
+      musicState.tempoRampTimer = null;
+    }
+  }
+
+  function startTempoRamp(player, fromRate, toRate, seconds) {
+    if (!player) return;
+    stopTempoRamp();
+    var start = Math.max(0.5, Math.min(2.5, Number(fromRate || 1)));
+    var end = Math.max(0.5, Math.min(2.5, Number(toRate || 1)));
+    var durMs = Math.max(250, Number(seconds || 0) * 1000);
+    var startedAt = Date.now();
+    player.playbackRate = start;
+    musicState.tempoRampTimer = setInterval(function () {
+      var elapsed = Date.now() - startedAt;
+      var t = Math.min(1, elapsed / durMs);
+      player.playbackRate = start + (end - start) * t;
+      if (t >= 1) stopTempoRamp();
+    }, 50);
   }
 
   function normalizeDetectedBpm(bpm) {
@@ -673,6 +697,17 @@
     html += '</div>';
     if (musicState.audioUrl) html += '<audio data-music-audio-player preload="metadata" style="display:none;" src="' + escapeHtml(musicState.audioUrl) + '"></audio>';
     html += '<div style="display:grid;grid-template-columns:1fr auto auto;gap:8px;margin-top:10px;align-items:center;"><input data-music-scrub type="range" min="0" max="' + Math.max(1, Number((musicState.audioDuration || 1).toFixed(2))) + '" step="0.01" value="' + Math.max(0, Number((musicState.audioCurrentTime || 0).toFixed(2))) + '"><input data-music-volume type="range" min="0" max="1" step="0.01" value="' + Number(musicState.audioVolume || 1).toFixed(2) + '"><label style="font-size:12px;display:flex;gap:6px;align-items:center;" class="' + theme.subtle + '"><span>Loop</span><input data-music-loop type="checkbox" ' + (musicState.audioLoop ? 'checked' : '') + '></label></div>';
+    html += '<div style="margin-top:10px;padding-top:10px;border-top:1px dashed ' + (theme.dark ? '#334155' : '#cbd5e1') + ';display:flex;align-items:center;gap:8px;flex-wrap:wrap;">';
+    html += '<span class="' + theme.subtle + '" style="font-size:11px;font-weight:700;">FUN TOOL · Tempo Ramp</span>';
+    html += '<input data-studio-ramp-from type="number" step="0.05" min="0.5" max="2.5" value="1.00" style="width:74px;padding:6px 8px;border:1px solid;border-radius:8px;' + theme.inputBg + '">';
+    html += '<span class="' + theme.subtle + '" style="font-size:11px;">to</span>';
+    html += '<input data-studio-ramp-to type="number" step="0.05" min="0.5" max="2.5" value="1.35" style="width:74px;padding:6px 8px;border:1px solid;border-radius:8px;' + theme.inputBg + '">';
+    html += '<span class="' + theme.subtle + '" style="font-size:11px;">over</span>';
+    html += '<input data-studio-ramp-seconds type="number" step="0.5" min="1" value="12" style="width:74px;padding:6px 8px;border:1px solid;border-radius:8px;' + theme.inputBg + '">';
+    html += '<span class="' + theme.subtle + '" style="font-size:11px;">sec</span>';
+    html += '<button data-studio-ramp-start style="padding:6px 10px;border:none;border-radius:8px;cursor:pointer;' + theme.btnPrimary + '">Accelerate</button>';
+    html += '<button data-studio-ramp-stop style="padding:6px 10px;border:none;border-radius:8px;cursor:pointer;' + theme.btnSecondary + '">Stop Ramp</button>';
+    html += '</div>';
     html += '</div>';
     html += '<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">';
     html += '<button data-studio-region-add style="padding:7px 10px;border:none;border-radius:8px;cursor:pointer;' + theme.btnPrimary + '">Add Region</button>';
@@ -1047,6 +1082,7 @@
         if (musicState.audioUrl) {
           try { URL.revokeObjectURL(musicState.audioUrl); } catch (e) { /* ignore */ }
         }
+        stopTempoRamp();
         musicState.audioUrl = URL.createObjectURL(file);
         musicState.audioName = file.name || 'Imported audio';
         musicState.audioDuration = 0;
@@ -1174,6 +1210,25 @@
       musicState.audioLoop = !!loopToggle.checked;
       var p = page.querySelector('[data-music-audio-player]');
       if (p) p.loop = musicState.audioLoop;
+    });
+    var rampStart = page.querySelector('[data-studio-ramp-start]');
+    if (rampStart) rampStart.addEventListener('click', function () {
+      var p = page.querySelector('[data-music-audio-player]');
+      if (!p) { _toast('Import audio first.'); return; }
+      var fromEl = page.querySelector('[data-studio-ramp-from]');
+      var toEl = page.querySelector('[data-studio-ramp-to]');
+      var secEl = page.querySelector('[data-studio-ramp-seconds]');
+      var from = fromEl ? Number(fromEl.value || 1) : 1;
+      var to = toEl ? Number(toEl.value || 1.25) : 1.25;
+      var seconds = secEl ? Number(secEl.value || 8) : 8;
+      if (p.paused) p.play().catch(function () { /* ignore */ });
+      startTempoRamp(p, from, to, seconds);
+      _toast('Tempo ramp started: ' + from.toFixed(2) + '× → ' + to.toFixed(2) + '×');
+    });
+    var rampStop = page.querySelector('[data-studio-ramp-stop]');
+    if (rampStop) rampStop.addEventListener('click', function () {
+      stopTempoRamp();
+      _toast('Tempo ramp stopped.');
     });
     var startOffset = page.querySelector('[data-music-start-offset]');
     if (startOffset) {
