@@ -34,7 +34,8 @@
     audioAnalyzing: false,
     studioOpen: false,
     studioFullPageOpen: false,
-    tempoRampTimer: null
+    tempoRampTimer: null,
+    tempoRampConfig: null
   };
   var _audioAnalysisBuffer = null;
 
@@ -189,22 +190,35 @@
       clearInterval(musicState.tempoRampTimer);
       musicState.tempoRampTimer = null;
     }
+    musicState.tempoRampConfig = null;
   }
 
-  function startTempoRamp(player, fromRate, toRate, seconds) {
+  function _tempoRampDurationSeconds(player, cfg) {
+    if (!cfg) return 0;
+    if (cfg.fullSong) return Math.max(0.01, Number(player.duration || musicState.audioDuration || 0));
+    return Math.max(0.01, Number(cfg.seconds || 0));
+  }
+
+  function applyTempoRampForPlayerTime(player) {
+    var cfg = musicState.tempoRampConfig;
+    if (!player || !cfg) return;
+    var dur = _tempoRampDurationSeconds(player, cfg);
+    var t = Math.max(0, Math.min(1, Number(player.currentTime || 0) / dur));
+    player.playbackRate = cfg.from + (cfg.to - cfg.from) * t;
+  }
+
+  function startTempoRamp(player, fromRate, toRate, seconds, fullSong) {
     if (!player) return;
     stopTempoRamp();
     var start = Math.max(0.5, Math.min(2.5, Number(fromRate || 1)));
     var end = Math.max(0.5, Math.min(2.5, Number(toRate || 1)));
-    var durMs = Math.max(250, Number(seconds || 0) * 1000);
-    var startedAt = Date.now();
-    player.playbackRate = start;
-    musicState.tempoRampTimer = setInterval(function () {
-      var elapsed = Date.now() - startedAt;
-      var t = Math.min(1, elapsed / durMs);
-      player.playbackRate = start + (end - start) * t;
-      if (t >= 1) stopTempoRamp();
-    }, 50);
+    musicState.tempoRampConfig = {
+      from: start,
+      to: end,
+      seconds: Math.max(1, Number(seconds || 1)),
+      fullSong: !!fullSong
+    };
+    applyTempoRampForPlayerTime(player);
   }
 
   function normalizeDetectedBpm(bpm) {
@@ -705,6 +719,7 @@
     html += '<span class="' + theme.subtle + '" style="font-size:11px;">over</span>';
     html += '<input data-studio-ramp-seconds type="number" step="0.5" min="1" value="12" style="width:74px;padding:6px 8px;border:1px solid;border-radius:8px;' + theme.inputBg + '">';
     html += '<span class="' + theme.subtle + '" style="font-size:11px;">sec</span>';
+    html += '<label class="' + theme.subtle + '" style="font-size:11px;display:flex;gap:5px;align-items:center;"><input data-studio-ramp-full type="checkbox"> to full song</label>';
     html += '<button data-studio-ramp-start style="padding:6px 10px;border:none;border-radius:8px;cursor:pointer;' + theme.btnPrimary + '">Accelerate</button>';
     html += '<button data-studio-ramp-stop style="padding:6px 10px;border:none;border-radius:8px;cursor:pointer;' + theme.btnSecondary + '">Stop Ramp</button>';
     html += '</div>';
@@ -1142,6 +1157,7 @@
       });
       player.addEventListener('timeupdate', function () {
         musicState.audioCurrentTime = Number(player.currentTime || 0);
+        applyTempoRampForPlayerTime(player);
         var scrubEl = page.querySelector('[data-music-scrub]');
         if (scrubEl && !scrubEl.matches(':active')) scrubEl.value = String(musicState.audioCurrentTime);
         var timeEl = page.querySelector('[data-music-time]');
@@ -1155,6 +1171,7 @@
       playBtn.addEventListener('click', function () {
         var p = page.querySelector('[data-music-audio-player]');
         if (!p) return;
+        applyTempoRampForPlayerTime(p);
         p.play().catch(function () { _toast('Could not play audio yet.'); });
       });
     });
@@ -1171,6 +1188,7 @@
         if (!p) return;
         p.currentTime = 0;
         musicState.audioCurrentTime = 0;
+        applyTempoRampForPlayerTime(p);
       });
     });
     var backBtn = page.querySelector('[data-music-transport-back]');
@@ -1179,6 +1197,7 @@
       if (!p) return;
       p.currentTime = Math.max(0, Number(p.currentTime || 0) - 5);
       musicState.audioCurrentTime = Number(p.currentTime || 0);
+      applyTempoRampForPlayerTime(p);
     });
     var forwardBtn = page.querySelector('[data-music-transport-forward]');
     if (forwardBtn) forwardBtn.addEventListener('click', function () {
@@ -1187,6 +1206,7 @@
       var maxT = Number(p.duration || musicState.audioDuration || 0);
       p.currentTime = Math.min(maxT || Number(p.currentTime || 0) + 5, Number(p.currentTime || 0) + 5);
       musicState.audioCurrentTime = Number(p.currentTime || 0);
+      applyTempoRampForPlayerTime(p);
     });
     var scrub = page.querySelector('[data-music-scrub]');
     if (scrub) scrub.addEventListener('input', function () {
@@ -1195,6 +1215,7 @@
       var t = Math.max(0, Number(scrub.value || 0));
       p.currentTime = t;
       musicState.audioCurrentTime = t;
+      applyTempoRampForPlayerTime(p);
       var timeEl = page.querySelector('[data-music-time]');
       if (timeEl) timeEl.textContent = formatTime(t) + ' / ' + formatTime(musicState.audioDuration || p.duration || 0);
     });
@@ -1218,16 +1239,20 @@
       var fromEl = page.querySelector('[data-studio-ramp-from]');
       var toEl = page.querySelector('[data-studio-ramp-to]');
       var secEl = page.querySelector('[data-studio-ramp-seconds]');
+      var fullEl = page.querySelector('[data-studio-ramp-full]');
       var from = fromEl ? Number(fromEl.value || 1) : 1;
       var to = toEl ? Number(toEl.value || 1.25) : 1.25;
       var seconds = secEl ? Number(secEl.value || 8) : 8;
+      var fullSong = !!(fullEl && fullEl.checked);
       if (p.paused) p.play().catch(function () { /* ignore */ });
-      startTempoRamp(p, from, to, seconds);
-      _toast('Tempo ramp started: ' + from.toFixed(2) + '× → ' + to.toFixed(2) + '×');
+      startTempoRamp(p, from, to, seconds, fullSong);
+      _toast('Tempo ramp started: ' + from.toFixed(2) + '× → ' + to.toFixed(2) + '×' + (fullSong ? ' across full song' : (' over ' + seconds + 's')));
     });
     var rampStop = page.querySelector('[data-studio-ramp-stop]');
     if (rampStop) rampStop.addEventListener('click', function () {
       stopTempoRamp();
+      var p = page.querySelector('[data-music-audio-player]');
+      if (p) p.playbackRate = 1;
       _toast('Tempo ramp stopped.');
     });
     var startOffset = page.querySelector('[data-music-start-offset]');
@@ -1244,6 +1269,7 @@
         p.playbackRate = 1;
         p.currentTime = Math.max(0, Number(musicState.audioStartOffset || 0));
         musicState.audioCurrentTime = Number(p.currentTime || 0);
+        applyTempoRampForPlayerTime(p);
         p.play().catch(function () { _toast('Could not play audio yet.'); });
       });
     });
@@ -1259,6 +1285,7 @@
         p.playbackRate = 1;
         p.currentTime = Math.max(0, Number(musicState.audioStartOffset || 0));
         musicState.audioCurrentTime = Number(p.currentTime || 0);
+        applyTempoRampForPlayerTime(p);
         p.play().catch(function () { _toast('Could not start audio.'); });
       }
       var counts = Math.round((effective / 60) * Number(musicState.audioStartOffset || 0));
