@@ -107,6 +107,46 @@
     return value;
   }
 
+  function _readSynchsafeInt(b1, b2, b3, b4) {
+    return ((b1 & 0x7f) << 21) | ((b2 & 0x7f) << 14) | ((b3 & 0x7f) << 7) | (b4 & 0x7f);
+  }
+
+  function parseId3Metadata(arrayBuffer) {
+    try {
+      var bytes = new Uint8Array(arrayBuffer || new ArrayBuffer(0));
+      if (bytes.length < 10) return { title: '', artist: '' };
+      if (String.fromCharCode(bytes[0], bytes[1], bytes[2]) !== 'ID3') return { title: '', artist: '' };
+      var tagSize = _readSynchsafeInt(bytes[6], bytes[7], bytes[8], bytes[9]);
+      var end = Math.min(bytes.length, 10 + tagSize);
+      var offset = 10;
+      var out = { title: '', artist: '' };
+      while (offset + 10 <= end) {
+        var id = String.fromCharCode(bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]);
+        var size = (bytes[offset + 4] << 24) | (bytes[offset + 5] << 16) | (bytes[offset + 6] << 8) | bytes[offset + 7];
+        if (!id.replace(/\u0000/g, '').trim() || size <= 0 || offset + 10 + size > end) break;
+        if (id === 'TIT2' || id === 'TPE1') {
+          var raw = bytes.slice(offset + 10, offset + 10 + size);
+          var encoding = raw[0];
+          var textBytes = raw.slice(1);
+          var text = '';
+          try {
+            if (encoding === 1 || encoding === 2) text = new TextDecoder('utf-16').decode(textBytes);
+            else text = new TextDecoder('latin1').decode(textBytes);
+          } catch (e) {
+            text = '';
+          }
+          text = String(text || '').replace(/\u0000/g, '').trim();
+          if (id === 'TIT2' && text) out.title = text;
+          if (id === 'TPE1' && text) out.artist = text;
+        }
+        offset += 10 + size;
+      }
+      return out;
+    } catch (e) {
+      return { title: '', artist: '' };
+    }
+  }
+
   function estimateBpmFromAudioBuffer(audioBuffer) {
     if (!audioBuffer) return 0;
     var sampleRate = audioBuffer.sampleRate || 44100;
@@ -633,6 +673,12 @@
         var reader = new FileReader();
         reader.onload = function () {
           _audioAnalysisBuffer = reader.result;
+          var parsed = parseId3Metadata(reader.result);
+          var data = loadBuilderData();
+          if (!data.meta) data.meta = {};
+          if (parsed.title) data.meta.music = parsed.title;
+          if (parsed.artist) data.meta.artist = parsed.artist;
+          saveBuilderData(data);
           detectBpmFromImportedAudio();
         };
         reader.readAsArrayBuffer(file);
@@ -647,8 +693,11 @@
     if (player) {
       player.playbackRate = Number(musicState.audioPlaybackRate || 1);
       player.addEventListener('loadedmetadata', function () {
-        musicState.audioDuration = Number(player.duration || 0);
-        renderMusicPage();
+        var nextDuration = Number(player.duration || 0);
+        if (Math.abs((musicState.audioDuration || 0) - nextDuration) > 0.05) {
+          musicState.audioDuration = nextDuration;
+          renderMusicPage();
+        }
       });
     }
     var startOffset = page.querySelector('[data-music-start-offset]');
