@@ -624,42 +624,6 @@
     return html;
   }
 
-  function openStudioInNewTab() {
-    var builderData = loadBuilderData();
-    var project = loadStudioProject();
-    if (!project.title) project.title = (builderData.meta && builderData.meta.music) || '';
-    if (!project.artist) project.artist = (builderData.meta && builderData.meta.artist) || '';
-    if (!project.bpm) project.bpm = (builderData.meta && builderData.meta.bpm) || String(musicState.audioDetectedBpm || '');
-    saveStudioProject(project);
-
-    var win = window.open('', '_blank', 'noopener,noreferrer');
-    if (!win) {
-      _toast('Popup blocked. Please allow popups for Studio.');
-      return;
-    }
-    var doc = win.document;
-    var html = '<!doctype html><html><head><meta charset="utf-8"><title>Step-By-Stepper Studio</title>';
-    html += '<meta name="viewport" content="width=device-width,initial-scale=1">';
-    html += '<style>body{margin:0;font-family:Inter,Arial,sans-serif;background:#0b1020;color:#e5e7eb}*{box-sizing:border-box}.top{padding:12px 16px;border-bottom:1px solid #273244;background:#131b2f;display:flex;gap:8px;align-items:center;justify-content:space-between}.grid{display:grid;grid-template-columns:330px 1fr;min-height:calc(100vh - 56px)}.left{border-right:1px solid #273244;padding:14px;background:#101728;overflow:auto}.right{padding:14px;overflow:auto}.card{border:1px solid #273244;border-radius:12px;background:#111a2d;padding:10px;margin-bottom:10px}.label{font-size:11px;opacity:.8;margin-bottom:4px}.in{width:100%;padding:8px 10px;background:#0f172a;border:1px solid #334155;color:#e5e7eb;border-radius:8px}.timeline{position:relative;height:280px;border:1px solid #334155;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,#0f172a,#111827)}.region{position:absolute;top:40px;height:48px;border-radius:8px;border:1px solid #818cf8;background:rgba(99,102,241,.25);padding:6px 8px;cursor:pointer}.region.sel{outline:2px solid #f59e0b}.btn{padding:8px 12px;border:0;border-radius:8px;cursor:pointer;background:#4f46e5;color:#fff;font-weight:700}.btn2{padding:8px 10px;border:1px solid #334155;border-radius:8px;cursor:pointer;background:#1f2937;color:#e5e7eb}.chips{display:flex;flex-wrap:wrap;gap:6px}.chip{font-size:11px;padding:4px 7px;border-radius:999px;background:#1e293b;border:1px solid #334155}.row{display:flex;gap:8px;flex-wrap:wrap}.small{font-size:11px;opacity:.8}</style>';
-    html += '</head><body>';
-    html += '<div class="top"><div><strong>🎛 Step-By-Stepper Studio</strong> <span class="small">Autosaves to your worksheet</span></div><div class="row"><button id="split" class="btn2">Split Selected</button><button id="delete" class="btn2">Delete</button><button id="join" class="btn2">Join Next</button><button id="add" class="btn">Add Region</button></div></div>';
-    html += '<div class="grid"><aside class="left">';
-    html += '<div class="card"><div class="label">Dance Title</div><input id="title" class="in"></div>';
-    html += '<div class="card"><div class="label">Artist</div><input id="artist" class="in"></div>';
-    html += '<div class="row"><div class="card" style="flex:1"><div class="label">BPM</div><input id="bpm" class="in"></div><div class="card" style="flex:1"><div class="label">Level</div><input id="level" class="in" placeholder="Beginner/Int/Adv"></div></div>';
-    html += '<div class="row"><div class="card" style="flex:1"><div class="label">Counts</div><input id="counts" class="in" placeholder="32"></div><div class="card" style="flex:1"><div class="label">Walls</div><input id="walls" class="in" placeholder="4"></div></div>';
-    html += '<div class="card"><div class="label">Intro Counts</div><input id="introCounts" class="in" placeholder="16"></div>';
-    html += '<div class="card"><div class="label">Tags / Restarts</div><textarea id="tagsRestarts" class="in" rows="3" placeholder="Tag after wall 3..."></textarea></div>';
-    html += '<div class="card"><div class="label">Cue Notes / Stepsheet Notes</div><textarea id="notes" class="in" rows="5" placeholder="Section-by-section cues..."></textarea></div>';
-    html += '<div class="card"><div style="font-weight:800;margin-bottom:6px;">Pro Stepsheet Checklist</div><div class="chips"><span class="chip">Title</span><span class="chip">Choreographer</span><span class="chip">Level</span><span class="chip">Counts/Walls</span><span class="chip">Music + BPM</span><span class="chip">Intro</span><span class="chip">Tags</span><span class="chip">Restarts</span><span class="chip">Section Cues</span></div></div>';
-    html += '</aside><main class="right"><div class="card"><div style="font-weight:800;margin-bottom:8px;">Arrangement Timeline</div><div id="timeline" class="timeline"></div><div class="small" style="margin-top:8px;">Click a region to select. Split/Delete/Join are saved instantly and survive reloads.</div></div><div class="card"><div style="font-weight:800;margin-bottom:6px;">Sections</div><div id="sections" class="chips"></div></div></main></div>';
-    html += '<script>(function(){var KEY="' + STUDIO_PROJECT_KEY + '";function def(){return ' + JSON.stringify(defaultStudioProject()) + ';}function load(){try{var r=JSON.parse(localStorage.getItem(KEY)||"null");if(!r||typeof r!=="object")return def();var d=def();Object.assign(d,r);if(!Array.isArray(d.regions)||!d.regions.length)d.regions=def().regions;if(!Array.isArray(d.sections))d.sections=def().sections;return d;}catch(e){return def();}}function save(p){localStorage.setItem(KEY,JSON.stringify(p||def()));}var p=load();var ids=["title","artist","bpm","level","counts","walls","introCounts","tagsRestarts","notes"];ids.forEach(function(id){var el=document.getElementById(id);el.value=p[id]||"";el.addEventListener("input",function(){p[id]=el.value;save(p);});});function renderSections(){var root=document.getElementById("sections");root.innerHTML="";(p.sections||[]).forEach(function(s){var el=document.createElement("span");el.className="chip";el.textContent=s;root.appendChild(el);});}function renderTimeline(){var t=document.getElementById("timeline");t.innerHTML="";var max=0;(p.regions||[]).forEach(function(r){max=Math.max(max,Number(r.start||0)+Number(r.len||0));});max=Math.max(max,64);(p.regions||[]).forEach(function(r){var el=document.createElement("div");el.className="region"+(p.selectedRegionId===r.id?" sel":"");el.style.left=((Number(r.start||0)/max)*100)+"%";el.style.width=Math.max(6,(Number(r.len||0)/max)*100)+"%";el.textContent=r.label+" ("+r.len+")";el.addEventListener("click",function(){p.selectedRegionId=r.id;save(p);renderTimeline();});t.appendChild(el);});}function selectedIdx(){return (p.regions||[]).findIndex(function(r){return r.id===p.selectedRegionId;});}document.getElementById("add").addEventListener("click",function(){var id="r"+Date.now();var end=0;(p.regions||[]).forEach(function(r){end=Math.max(end,Number(r.start||0)+Number(r.len||0));});p.regions.push({id:id,label:"New Section",start:end,len:16});p.selectedRegionId=id;save(p);renderTimeline();});document.getElementById("split").addEventListener("click",function(){var i=selectedIdx();if(i<0)return;var r=p.regions[i];if(Number(r.len||0)<2)return;var half=Math.max(1,Math.floor(Number(r.len||0)/2));r.len=half;var n={id:"r"+Date.now(),label:r.label+" B",start:Number(r.start||0)+half,len:Math.max(1,Number(r.len||0))};p.regions.splice(i+1,0,n);p.selectedRegionId=n.id;save(p);renderTimeline();});document.getElementById("delete").addEventListener("click",function(){var i=selectedIdx();if(i<0)return;p.regions.splice(i,1);p.selectedRegionId=(p.regions[0]&&p.regions[0].id)||"";save(p);renderTimeline();});document.getElementById("join").addEventListener("click",function(){var i=selectedIdx();if(i<0||i>=p.regions.length-1)return;var r=p.regions[i],n=p.regions[i+1];r.len=Number(r.len||0)+Number(n.len||0);r.label=r.label+" + "+n.label;p.regions.splice(i+1,1);save(p);renderTimeline();});window.addEventListener("storage",function(e){if(e.key===KEY){p=load();ids.forEach(function(id){var el=document.getElementById(id);if(el&&el.value!==String(p[id]||""))el.value=p[id]||"";});renderSections();renderTimeline();}});renderSections();renderTimeline();})();</script>';
-    html += '</body></html>';
-    doc.open();
-    doc.write(html);
-    doc.close();
-  }
-
   function renderStudioFullPage(theme) {
     var p = loadStudioProject();
     var html = '';
@@ -757,7 +721,7 @@
       html += '</div>';
       html += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">';
       html += '<button data-music-play-trim style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnPrimary + '">Play from Trim</button>';
-      html += '<button data-music-metro-from-start style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnPrimary + '">Metronome from Start Spot</button>';
+      html += '<button data-music-metro-from-start style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnPrimary + '">Play + Metronome from Start Spot</button>';
       html += '<button data-music-half style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnSecondary + '">½ Counts</button>';
       html += '<button data-music-normal style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnSecondary + '">1× Counts</button>';
       html += '<button data-music-double style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnSecondary + '">2× Counts</button>';
@@ -1150,6 +1114,13 @@
       if (!effective) {
         _toast('Detect BPM first.');
         return;
+      }
+      var p = page.querySelector('[data-music-audio-player]');
+      if (p) {
+        p.playbackRate = 1;
+        p.currentTime = Math.max(0, Number(musicState.audioStartOffset || 0));
+        musicState.audioCurrentTime = Number(p.currentTime || 0);
+        p.play().catch(function () { _toast('Could not start audio.'); });
       }
       var counts = Math.round((effective / 60) * Number(musicState.audioStartOffset || 0));
       startMetronome(effective, counts);
