@@ -205,6 +205,74 @@ function isPremiumUser(bucket, profile = null) {
   return !!membership.isPremium;
 }
 
+function isStaffRole(value) {
+  const role = String(value || '').trim().toLowerCase();
+  return role === 'admin' || role === 'moderator';
+}
+
+function collectStaffEmails(db) {
+  const emails = new Set();
+  if (adminEmail) emails.add(adminEmail);
+  for (const row of Array.isArray(db?.adminRegistry) ? db.adminRegistry : []) {
+    const email = normalizeEmail(row?.email);
+    if (email) emails.add(email);
+  }
+  for (const row of Array.isArray(db?.moderatorRegistry) ? db.moderatorRegistry : []) {
+    const email = normalizeEmail(row?.email);
+    if (email) emails.add(email);
+  }
+  for (const bucket of Object.values(db?.users || {})) {
+    if (!bucket || typeof bucket !== 'object') continue;
+    const email = normalizeEmail(bucket?.profile?.email);
+    if (!email) continue;
+    if (isStaffRole(bucket.role) || isAdminProfile(bucket.profile, db)) emails.add(email);
+  }
+  return Array.from(emails);
+}
+
+function ensureStaffAutoFriends(db, key, profile) {
+  const ownEmail = normalizeEmail(profile?.email);
+  if (!ownEmail) return false;
+  const bucket = db?.users?.[key];
+  const isStaff = isStaffRole(bucket?.role) || isAdminProfile(profile, db);
+  if (!isStaff) return false;
+  if (!Array.isArray(db.friends)) db.friends = [];
+  const ownName = String(bucket?.displayName || profile?.name || ownEmail).trim();
+  const staffEmails = collectStaffEmails(db);
+  let changed = false;
+  for (const staffEmail of staffEmails) {
+    if (!staffEmail || staffEmail === ownEmail) continue;
+    const existing = db.friends.find((item) =>
+      item &&
+      ((item.fromKey === key && normalizeEmail(item.toEmail) === staffEmail) ||
+        (normalizeEmail(item.fromEmail) === staffEmail && normalizeEmail(item.toEmail) === ownEmail))
+    );
+    if (existing) {
+      if (String(existing.status || '').trim().toLowerCase() !== 'accepted') {
+        existing.status = 'accepted';
+        existing.updatedAt = new Date().toISOString();
+        changed = true;
+      }
+      continue;
+    }
+    db.friends.push({
+      id: `friend-staff-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      fromKey: key,
+      fromEmail: ownEmail,
+      fromName: ownName,
+      toEmail: staffEmail,
+      toName: '',
+      status: 'accepted',
+      autoLinked: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    changed = true;
+  }
+  if (changed) db.friends = db.friends.slice(-10000);
+  return changed;
+}
+
 function clearExpiredSuspension(bucket) {
   if (!bucket || typeof bucket !== 'object') return null;
   const suspension = bucket.suspension && typeof bucket.suspension === 'object' ? bucket.suspension : null;
@@ -2083,20 +2151,42 @@ app.post("/api/friends/add", requireGoogleUser, async (req, res) => {
 app.get("/api/friends/list", requireGoogleUser, async (req, res) => {
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);
+  touchUser(db, req.stepperUser, key);
+  const autoLinked = ensureStaffAutoFriends(db, key, req.stepperUser);
+  if (autoLinked) await writeDb(db);
   const email = normalizeEmail(req.stepperUser?.email);
   const list = Array.isArray(db.friends) ? db.friends : [];
+  const unreadByFriendshipId = {};
+  if (Array.isArray(db.friendChat)) {
+    for (const msg of db.friendChat) {
+      if (!msg || !msg.friendshipId) continue;
+      if (normalizeEmail(msg.senderEmail) === email) continue;
+      if (String(msg.status || '').trim().toLowerCase() === 'read') continue;
+      unreadByFriendshipId[msg.friendshipId] = (unreadByFriendshipId[msg.friendshipId] || 0) + 1;
+    }
+  }
   const lookupDisplayName = (userKey, userEmail) => {
     if (userKey && db.users[userKey]?.displayName) return db.users[userKey].displayName;
     const normalized = normalizeEmail(userEmail);
     const found = Object.values(db.users || {}).find(b => normalizeEmail(b?.profile?.email) === normalized);
     return found?.displayName || "";
   };
+  const lookupRole = (userKey, userEmail) => {
+    if (userKey && db.users[userKey]) return getRoleForBucket(db.users[userKey], db.users[userKey]?.profile || null);
+    const normalized = normalizeEmail(userEmail);
+    const found = Object.values(db.users || {}).find(b => normalizeEmail(b?.profile?.email) === normalized);
+    if (!found) return normalized === adminEmail ? 'admin' : 'member';
+    return getRoleForBucket(found, found?.profile || null);
+  };
   const items = list.filter(f => f && (f.fromKey === key || f.toEmail === email)).map(f => {
     const isSender = f.fromKey === key;
     return Object.assign({}, f, {
       direction: isSender ? "sent" : "received",
       fromDisplayName: lookupDisplayName(f.fromKey, f.fromEmail),
-      toDisplayName: lookupDisplayName("", f.toEmail)
+      toDisplayName: lookupDisplayName("", f.toEmail),
+      fromRole: lookupRole(f.fromKey, f.fromEmail),
+      toRole: lookupRole("", f.toEmail),
+      unreadCount: Number(unreadByFriendshipId[f.id] || 0)
     });
   });
   res.json({ ok: true, items });
@@ -2211,6 +2301,56 @@ app.post("/api/friends/chat", requireGoogleUser, async (req, res) => {
   };
   db.friendChat.push(item);
   db.friendChat = db.friendChat.slice(-10000);
+  await writeDb(db);
+  const messages = db.friendChat
+    .filter(m => m && m.friendshipId === friendId)
+    .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+  res.json({ ok: true, messages });
+});
+
+app.post("/api/friends/chat/edit", requireGoogleUser, async (req, res) => {
+  const db = await readDb();
+  const key = userKeyFromClaims(req.stepperClaims);
+  const email = normalizeEmail(req.stepperUser?.email);
+  const friendId = String(req.body?.friendId || "").trim();
+  const messageId = String(req.body?.messageId || "").trim();
+  const text = String(req.body?.text || "").trim();
+  if (!friendId) return res.status(400).json({ ok: false, error: "Missing friendId." });
+  if (!messageId) return res.status(400).json({ ok: false, error: "Missing messageId." });
+  if (!text) return res.status(400).json({ ok: false, error: "Message text is required." });
+  if (!Array.isArray(db.friends)) db.friends = [];
+  const friendship = db.friends.find(f => f && f.id === friendId && f.status === "accepted" && (f.fromKey === key || f.toEmail === email));
+  if (!friendship) return res.status(403).json({ ok: false, error: "Not friends." });
+  if (!Array.isArray(db.friendChat)) db.friendChat = [];
+  const message = db.friendChat.find(m => m && m.friendshipId === friendId && m.id === messageId);
+  if (!message) return res.status(404).json({ ok: false, error: "Message not found." });
+  if (normalizeEmail(message.senderEmail) !== email) return res.status(403).json({ ok: false, error: "You can only edit your own messages." });
+  message.text = text.slice(0, 4000);
+  message.editedAt = new Date().toISOString();
+  await writeDb(db);
+  const messages = db.friendChat
+    .filter(m => m && m.friendshipId === friendId)
+    .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+  res.json({ ok: true, messages });
+});
+
+app.post("/api/friends/chat/delete", requireGoogleUser, async (req, res) => {
+  const db = await readDb();
+  const key = userKeyFromClaims(req.stepperClaims);
+  const email = normalizeEmail(req.stepperUser?.email);
+  const friendId = String(req.body?.friendId || "").trim();
+  const messageId = String(req.body?.messageId || "").trim();
+  if (!friendId) return res.status(400).json({ ok: false, error: "Missing friendId." });
+  if (!messageId) return res.status(400).json({ ok: false, error: "Missing messageId." });
+  if (!Array.isArray(db.friends)) db.friends = [];
+  const friendship = db.friends.find(f => f && f.id === friendId && f.status === "accepted" && (f.fromKey === key || f.toEmail === email));
+  if (!friendship) return res.status(403).json({ ok: false, error: "Not friends." });
+  if (!Array.isArray(db.friendChat)) db.friendChat = [];
+  const index = db.friendChat.findIndex(m => m && m.friendshipId === friendId && m.id === messageId);
+  if (index === -1) return res.status(404).json({ ok: false, error: "Message not found." });
+  const message = db.friendChat[index];
+  if (normalizeEmail(message?.senderEmail) !== email) return res.status(403).json({ ok: false, error: "You can only delete your own messages." });
+  db.friendChat.splice(index, 1);
   await writeDb(db);
   const messages = db.friendChat
     .filter(m => m && m.friendshipId === friendId)
