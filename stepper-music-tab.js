@@ -27,7 +27,8 @@
     audioDetectedBpm: 0,
     audioStartOffset: 0,
     audioPlaybackRate: 1,
-    audioAnalyzing: false
+    audioAnalyzing: false,
+    studioOpen: false
   };
   var _audioAnalysisBuffer = null;
 
@@ -48,6 +49,20 @@
   function loadBuilderData() {
     try { return JSON.parse(localStorage.getItem(BUILDER_DATA_KEY) || 'null') || {}; }
     catch (e) { return {}; }
+  }
+
+  function getSession() {
+    try { return JSON.parse(localStorage.getItem('stepper_google_auth_session_v2') || 'null'); }
+    catch (e) { return null; }
+  }
+
+  function isPremiumSession() {
+    var s = getSession() || {};
+    var role = String(s.role || s.userRole || '').toLowerCase();
+    if (role === 'admin' || role === 'moderator') return true;
+    if (s.isPremium === true) return true;
+    if (s.membership && s.membership.isPremium) return true;
+    return false;
   }
 
   function saveBuilderData(data) {
@@ -525,6 +540,10 @@
   function renderAudioTools(theme) {
     var html = '';
     var effectiveBpm = musicState.audioDetectedBpm ? Math.round(musicState.audioDetectedBpm * musicState.audioPlaybackRate) : 0;
+    var startCounts = effectiveBpm ? Math.round((effectiveBpm / 60) * Number(musicState.audioStartOffset || 0)) : 0;
+    var startEights = Math.floor(startCounts / 8);
+    var startRemainder = startCounts % 8;
+    var premium = isPremiumSession();
     html += '<div class="music-card rounded-2xl border p-5 ' + theme.panel + '" style="margin-bottom:20px;">';
     html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">';
     html += '<span style="font-size:20px;">🎧</span>';
@@ -546,13 +565,31 @@
       html += '</div>';
       html += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">';
       html += '<button data-music-play-trim style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnPrimary + '">Play from Trim</button>';
+      html += '<button data-music-metro-from-start style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnPrimary + '">Metronome from Start Spot</button>';
       html += '<button data-music-half style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnSecondary + '">½ Tempo</button>';
       html += '<button data-music-normal style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnSecondary + '">1× Tempo</button>';
       html += '<button data-music-double style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnSecondary + '">2× Tempo</button>';
       html += '</div>';
       html += '<div class="' + theme.subtle + '" style="font-size:12px;">Detected BPM: <strong>' + (musicState.audioDetectedBpm || '—') + '</strong> · Current Rate: <strong>' + musicState.audioPlaybackRate + '×</strong> · Effective BPM: <strong>' + (effectiveBpm || '—') + '</strong></div>';
+      html += '<div class="' + theme.subtle + '" style="font-size:12px;margin-top:4px;">Start dance after <strong>' + (startCounts || 0) + ' counts</strong>';
+      if (startCounts) html += ' (' + startEights + ' eight-counts' + (startRemainder ? (' + ' + startRemainder) : '') + ')';
+      html += '</div>';
+      html += '<div style="margin-top:12px;padding:12px;border-radius:12px;border:1px solid;' + (theme.dark ? 'background:rgba(79,70,229,.1);border-color:#3730a3;color:#c7d2fe;' : 'background:#eef2ff;border-color:#c7d2fe;color:#312e81;') + '">';
+      html += '<div style="font-size:12px;font-weight:800;margin-bottom:8px;">🎛 Studio Mode</div>';
+      html += '<button data-music-go-studio style="padding:10px 16px;border:none;border-radius:10px;cursor:pointer;font-size:13px;font-weight:800;' + (premium ? theme.btnPrimary : 'background:#9ca3af;color:#fff;') + '">' + (premium ? 'Go to Studio' : 'Go to Studio (Premium)') + '</button>';
+      if (!premium) html += '<div style="font-size:11px;margin-top:6px;opacity:.9;">Upgrade to Premium to unlock the full edit studio.</div>';
+      html += '</div>';
     }
     html += '</div>';
+    if (musicState.studioOpen && premium) {
+      html += '<div data-music-studio-close style="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99998;display:flex;align-items:center;justify-content:center;padding:20px;">';
+      html += '<div style="width:min(980px,96vw);max-height:92vh;overflow:auto;border-radius:24px;padding:20px;border:1px solid;' + theme.cardBg + 'background:' + (theme.dark ? '#090b18;' : '#ffffff;') + '">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px;"><h3 style="margin:0;font-size:22px;font-weight:900;">Studio</h3><button data-music-studio-close-btn style="padding:8px 12px;border:none;border-radius:10px;cursor:pointer;' + theme.btnSecondary + '">Close</button></div>';
+      html += '<div style="display:grid;grid-template-columns:1.2fr .8fr;gap:14px;">';
+      html += '<div style="padding:14px;border:1px solid;border-radius:16px;' + theme.cardBg + '"><div style="font-weight:800;margin-bottom:8px;">Waveform & Timeline</div><div style="height:160px;border-radius:12px;background:linear-gradient(90deg,#312e81,#4f46e5,#9333ea);opacity:.35;"></div><div class="' + theme.subtle + '" style="font-size:12px;margin-top:8px;">Trim start: ' + Number(musicState.audioStartOffset || 0).toFixed(1) + 's · Effective BPM: ' + (effectiveBpm || '—') + '</div></div>';
+      html += '<div style="padding:14px;border:1px solid;border-radius:16px;' + theme.cardBg + '"><div style="font-weight:800;margin-bottom:8px;">Dance Start Math</div><div style="font-size:14px;">Start after <strong>' + (startCounts || 0) + ' counts</strong></div><div class="' + theme.subtle + '" style="font-size:12px;margin-top:6px;">(Playback rate aware: 0.5× halves counts, 2× doubles counts).</div></div>';
+      html += '</div></div></div>';
+    }
     return html;
   }
 
@@ -715,12 +752,38 @@
       p.currentTime = Math.max(0, Number(musicState.audioStartOffset || 0));
       p.play().catch(function () { _toast('Could not play audio yet.'); });
     });
+    var metroFromStart = page.querySelector('[data-music-metro-from-start]');
+    if (metroFromStart) metroFromStart.addEventListener('click', function () {
+      var effective = musicState.audioDetectedBpm ? Math.round(musicState.audioDetectedBpm * musicState.audioPlaybackRate) : 0;
+      if (!effective) {
+        _toast('Detect BPM first.');
+        return;
+      }
+      var counts = Math.round((effective / 60) * Number(musicState.audioStartOffset || 0));
+      startMetronome(effective, counts);
+      renderMusicPage();
+    });
     var halfBtn = page.querySelector('[data-music-half]');
     if (halfBtn) halfBtn.addEventListener('click', function () { musicState.audioPlaybackRate = 0.5; renderMusicPage(); });
     var normalBtn = page.querySelector('[data-music-normal]');
     if (normalBtn) normalBtn.addEventListener('click', function () { musicState.audioPlaybackRate = 1; renderMusicPage(); });
     var doubleBtn = page.querySelector('[data-music-double]');
     if (doubleBtn) doubleBtn.addEventListener('click', function () { musicState.audioPlaybackRate = 2; renderMusicPage(); });
+    var goStudio = page.querySelector('[data-music-go-studio]');
+    if (goStudio) goStudio.addEventListener('click', function () {
+      if (!isPremiumSession()) {
+        _toast('Studio mode is Premium only.');
+        return;
+      }
+      musicState.studioOpen = true;
+      renderMusicPage();
+    });
+    page.querySelectorAll('[data-music-studio-close],[data-music-studio-close-btn]').forEach(function (el) {
+      el.addEventListener('click', function () {
+        musicState.studioOpen = false;
+        renderMusicPage();
+      });
+    });
 
     // Tap reset
     var tapResetBtn = page.querySelector('[data-tap-reset]');
@@ -824,11 +887,11 @@
   /* ── Metronome Engine ────────────────────────────────────────────────── */
   var _beatIndex = 0;
 
-  function startMetronome(bpm) {
+  function startMetronome(bpm, startCounts) {
     stopMetronome();
     musicState.metronomeBPM = bpm;
     musicState.metronomeRunning = true;
-    _beatIndex = 0;
+    _beatIndex = Math.max(0, Number(startCounts || 0));
 
     var intervalMs = 60000 / bpm;
 
@@ -858,7 +921,8 @@
       }
 
       if (statusEl) {
-        statusEl.textContent = 'Beat ' + ((_beatIndex % 4) + 1) + ' of 4 — ' + bpm + ' BPM';
+        var pre = Number(startCounts || 0);
+        statusEl.textContent = 'Beat ' + ((_beatIndex % 4) + 1) + ' of 4 — ' + bpm + ' BPM' + (pre ? (' · start after ' + pre + ' counts') : '');
       }
 
       _beatIndex++;
