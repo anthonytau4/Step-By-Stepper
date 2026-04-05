@@ -200,6 +200,20 @@
     return true;
   }
 
+  function goToRoute(routeName, replace){
+    if (!ROUTES[routeName]) return false;
+    reflectRouteState(routeName);
+    setCanonicalPath(routeName, !!replace);
+    if (routeName === 'editor') {
+      const build = getRouteButton('editor');
+      if (!build) return false;
+      applyingRoute = true;
+      try { build.click(); } finally { window.setTimeout(() => { applyingRoute = false; }, 50); }
+      return true;
+    }
+    return clickRoute(routeName);
+  }
+
   function applyInitialRoute(replace){
     const routeName = currentRouteFromPath() || 'editor';
     reflectRouteState(routeName);
@@ -242,6 +256,16 @@
       if ((build && tries > 2) || tries > 40) window.clearInterval(timer);
     }, 250);
   }
+
+  window.__stepperRoutePaths = {
+    go: function(routeName, opts){
+      return goToRoute(routeName, !!(opts && opts.replace));
+    },
+    paths: Object.assign({}, ROUTES),
+    current: function(){
+      return currentRouteFromPath() || 'editor';
+    }
+  };
 
   window.addEventListener('popstate', () => {
     const routeName = currentRouteFromPath() || 'editor';
