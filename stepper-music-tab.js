@@ -207,8 +207,16 @@
     player.playbackRate = cfg.from + (cfg.to - cfg.from) * t;
   }
 
+  function ensureSpeedChangeWithoutPitchShift(player) {
+    if (!player) return;
+    try { player.preservesPitch = true; } catch (e) { /* ignore */ }
+    try { player.mozPreservesPitch = true; } catch (e2) { /* ignore */ }
+    try { player.webkitPreservesPitch = true; } catch (e3) { /* ignore */ }
+  }
+
   function startTempoRamp(player, fromRate, toRate, seconds, fullSong) {
     if (!player) return;
+    ensureSpeedChangeWithoutPitchShift(player);
     stopTempoRamp();
     var start = Math.max(0.5, Math.min(2.5, Number(fromRate || 1)));
     var end = Math.max(0.5, Math.min(2.5, Number(toRate || 1)));
@@ -1145,6 +1153,7 @@
 
     var player = page.querySelector('[data-music-audio-player]');
     if (player) {
+      ensureSpeedChangeWithoutPitchShift(player);
       player.playbackRate = 1;
       player.volume = Math.max(0, Math.min(1, Number(musicState.audioVolume || 1)));
       player.loop = !!musicState.audioLoop;
