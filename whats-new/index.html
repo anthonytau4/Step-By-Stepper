@@ -79,6 +79,7 @@
     .stepper-static-startup__chip{padding:8px 12px;font-size:12px;}
     .stepper-static-startup__actions{margin-top:16px;}
     .stepper-static-startup__button{min-width:0;width:100%;max-width:320px;padding:14px 20px;}
+    .stepper-static-startup__download{width:100%;max-width:320px;}
     .stepper-static-startup__sub{font-size:12px;}
     .stepper-static-startup__stage{min-height:min(36vh,300px);max-height:42vh;order:-1;}
     .stepper-static-startup__stage::before{width:min(78vw,360px);height:min(78vw,360px);}
@@ -286,6 +287,7 @@ body { background-color: inherit; color: inherit; }
               </div>
               <div class="stepper-static-startup__actions">
                 <button type="button" class="stepper-static-startup__button">Enter Step by Stepper</button>
+                <button type="button" class="stepper-static-startup__download" data-stepper-download-updated-mp3>Download updated MP3</button>
                 <span class="stepper-static-startup__sub">Music and logo intro start when you tap.</span>
               </div>
             </div>
@@ -2723,6 +2725,59 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   window.__stepperStaticStartupInstalled = true;
   const STARTUP_MIN_MS = 3600;
   const STARTUP_FADE_MS = 340;
+  const STARTUP_PLAYBACK_RATE_KEY = 'stepper_startup_playback_rate_v1';
+  const STARTUP_ADDITIONS_KEY = 'stepper_startup_additions_v1';
+
+  function readJsonMaybe(key){
+    try {
+      const raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function getStartupPlaybackRate(){
+    const raw = Number(localStorage.getItem(STARTUP_PLAYBACK_RATE_KEY));
+    if (!Number.isFinite(raw) || raw <= 0) return 1;
+    return Math.max(0.5, Math.min(3, raw));
+  }
+
+  function hasStartupAdditions(){
+    const data = readJsonMaybe(STARTUP_ADDITIONS_KEY);
+    if (Array.isArray(data)) return data.length > 0;
+    if (!data || typeof data !== 'object') return false;
+    if (Array.isArray(data.items)) return data.items.length > 0;
+    if (typeof data.enabled === 'boolean') return data.enabled;
+    return Object.keys(data).length > 0;
+  }
+
+  function buildDownloadCandidates(playbackRate, additionsEnabled){
+    const accelerated = playbackRate > 1.01;
+    if (accelerated && additionsEnabled) {
+      return [
+        './startup-song-accelerated-with-additions.mp3',
+        './startup-song-with-additions-accelerated.mp3',
+        './startup-song-accelerated.mp3',
+        './startup-song-with-additions.mp3',
+        './startup-song.mp3'
+      ];
+    }
+    if (accelerated) return ['./startup-song-accelerated.mp3', './startup-song.mp3'];
+    if (additionsEnabled) return ['./startup-song-with-additions.mp3', './startup-song.mp3'];
+    return ['./startup-song.mp3'];
+  }
+
+  async function resolveFirstAvailableAudio(candidates){
+    for (const src of candidates) {
+      try {
+        const response = await fetch(src, { method: 'HEAD', cache: 'no-store' });
+        if (response.ok) return src;
+      } catch {}
+    }
+    return candidates[candidates.length - 1] || './startup-song.mp3';
+  }
+
   function buildStartupAudio(){
     if (window.createAudioElement) {
       const audio = window.createAudioElement(['./startup-song.mp3','./startup-song.m4a']);
@@ -2741,11 +2796,34 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     });
     return audio;
   }
+
   function init(){
     const splash = document.getElementById('stepper-static-startup');
     if (!splash) return;
     const button = splash.querySelector('.stepper-static-startup__button');
+    const downloadButton = splash.querySelector('[data-stepper-download-updated-mp3]');
+    const playbackRate = getStartupPlaybackRate();
+    const additionsEnabled = hasStartupAdditions();
     const audio = buildStartupAudio();
+    audio.playbackRate = playbackRate;
+
+    if (downloadButton) {
+      downloadButton.addEventListener('click', async () => {
+        const candidates = buildDownloadCandidates(playbackRate, additionsEnabled);
+        const href = await resolveFirstAvailableAudio(candidates);
+        const accelerated = playbackRate > 1.01;
+        const additionsTag = additionsEnabled ? '-with-additions' : '';
+        const speedTag = accelerated ? '-accelerated' : '';
+        const filename = `startup-song${additionsTag}${speedTag}.mp3`;
+        const link = document.createElement('a');
+        link.href = href;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      });
+    }
+
     let started = false;
     let leaving = false;
     let fallbackTimer = null;
@@ -4383,6 +4461,59 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   window.__stepperStaticStartupInstalled = true;
   const STARTUP_MIN_MS = 3600;
   const STARTUP_FADE_MS = 340;
+  const STARTUP_PLAYBACK_RATE_KEY = 'stepper_startup_playback_rate_v1';
+  const STARTUP_ADDITIONS_KEY = 'stepper_startup_additions_v1';
+
+  function readJsonMaybe(key){
+    try {
+      const raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function getStartupPlaybackRate(){
+    const raw = Number(localStorage.getItem(STARTUP_PLAYBACK_RATE_KEY));
+    if (!Number.isFinite(raw) || raw <= 0) return 1;
+    return Math.max(0.5, Math.min(3, raw));
+  }
+
+  function hasStartupAdditions(){
+    const data = readJsonMaybe(STARTUP_ADDITIONS_KEY);
+    if (Array.isArray(data)) return data.length > 0;
+    if (!data || typeof data !== 'object') return false;
+    if (Array.isArray(data.items)) return data.items.length > 0;
+    if (typeof data.enabled === 'boolean') return data.enabled;
+    return Object.keys(data).length > 0;
+  }
+
+  function buildDownloadCandidates(playbackRate, additionsEnabled){
+    const accelerated = playbackRate > 1.01;
+    if (accelerated && additionsEnabled) {
+      return [
+        './startup-song-accelerated-with-additions.mp3',
+        './startup-song-with-additions-accelerated.mp3',
+        './startup-song-accelerated.mp3',
+        './startup-song-with-additions.mp3',
+        './startup-song.mp3'
+      ];
+    }
+    if (accelerated) return ['./startup-song-accelerated.mp3', './startup-song.mp3'];
+    if (additionsEnabled) return ['./startup-song-with-additions.mp3', './startup-song.mp3'];
+    return ['./startup-song.mp3'];
+  }
+
+  async function resolveFirstAvailableAudio(candidates){
+    for (const src of candidates) {
+      try {
+        const response = await fetch(src, { method: 'HEAD', cache: 'no-store' });
+        if (response.ok) return src;
+      } catch {}
+    }
+    return candidates[candidates.length - 1] || './startup-song.mp3';
+  }
+
   function buildStartupAudio(){
     if (window.createAudioElement) {
       const audio = window.createAudioElement(['./startup-song.mp3','./startup-song.m4a']);
@@ -4401,11 +4532,34 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     });
     return audio;
   }
+
   function init(){
     const splash = document.getElementById('stepper-static-startup');
     if (!splash) return;
     const button = splash.querySelector('.stepper-static-startup__button');
+    const downloadButton = splash.querySelector('[data-stepper-download-updated-mp3]');
+    const playbackRate = getStartupPlaybackRate();
+    const additionsEnabled = hasStartupAdditions();
     const audio = buildStartupAudio();
+    audio.playbackRate = playbackRate;
+
+    if (downloadButton) {
+      downloadButton.addEventListener('click', async () => {
+        const candidates = buildDownloadCandidates(playbackRate, additionsEnabled);
+        const href = await resolveFirstAvailableAudio(candidates);
+        const accelerated = playbackRate > 1.01;
+        const additionsTag = additionsEnabled ? '-with-additions' : '';
+        const speedTag = accelerated ? '-accelerated' : '';
+        const filename = `startup-song${additionsTag}${speedTag}.mp3`;
+        const link = document.createElement('a');
+        link.href = href;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      });
+    }
+
     let started = false;
     let leaving = false;
     let fallbackTimer = null;
