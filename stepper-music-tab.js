@@ -558,7 +558,25 @@
       html += '<div class="' + theme.subtle + '" style="font-size:12px;margin-bottom:8px;">Loaded: <strong>' + escapeHtml(musicState.audioName) + '</strong> · ' + (musicState.audioDuration ? musicState.audioDuration.toFixed(1) + 's' : '—') + '</div>';
     }
     if (musicState.audioUrl) {
-      html += '<audio data-music-audio-player controls preload="metadata" style="width:100%;margin-bottom:10px;" src="' + escapeHtml(musicState.audioUrl) + '"></audio>';
+      html += '<audio data-music-audio-player preload="metadata" style="display:none;" src="' + escapeHtml(musicState.audioUrl) + '"></audio>';
+      html += '<div style="margin-bottom:10px;border:1px solid;border-radius:14px;overflow:hidden;' + theme.cardBg + '">';
+      html += '<div style="padding:10px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px;' + (theme.dark ? 'background:#131728;border-bottom:1px solid #2d2d44;' : 'background:#f8fafc;border-bottom:1px solid #e5e7eb;') + '">';
+      html += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">';
+      html += '<button data-music-transport-rewind style="padding:7px 10px;border:none;border-radius:9px;cursor:pointer;' + theme.btnSecondary + '">⏮</button>';
+      html += '<button data-music-transport-play style="padding:7px 12px;border:none;border-radius:9px;cursor:pointer;' + theme.btnPrimary + '">▶</button>';
+      html += '<button data-music-transport-pause style="padding:7px 12px;border:none;border-radius:9px;cursor:pointer;' + theme.btnSecondary + '">⏸</button>';
+      html += '<button data-music-play-trim style="padding:7px 12px;border:none;border-radius:9px;cursor:pointer;' + theme.btnPrimary + '">Play from Trim</button>';
+      html += '</div>';
+      html += '<div style="font-size:12px;font-weight:700;" class="' + theme.subtle + '"><span data-music-time>00:00 / --:--</span></div>';
+      html += '</div>';
+      html += '<div style="padding:10px 12px;">';
+      html += '<input data-music-scrub type="range" min="0" max="' + Math.max(1, Math.round(musicState.audioDuration || 1)) + '" step="0.01" value="0" style="width:100%;">';
+      html += '<div style="margin-top:10px;height:64px;border-radius:10px;' + (theme.dark ? 'background:#0f172a;' : 'background:#e2e8f0;') + ';display:flex;align-items:center;gap:2px;padding:8px;overflow:hidden;">';
+      for (var w = 0; w < 140; w++) {
+        var h = 8 + Math.round((Math.sin(w * 0.18) * 0.5 + Math.random() * 0.5 + 0.4) * 36);
+        html += '<span style="display:inline-block;width:3px;height:' + h + 'px;border-radius:2px;background:' + (theme.dark ? '#38bdf8' : '#334155') + ';opacity:.7;"></span>';
+      }
+      html += '</div></div></div>';
       html += '<div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;margin-bottom:10px;">';
       html += '<label class="' + theme.subtle + '" style="font-size:12px;">Start Trim Offset (seconds):</label>';
       html += '<input data-music-start-offset type="number" min="0" step="0.1" value="' + escapeHtml(String(musicState.audioStartOffset || 0)) + '" style="width:120px;padding:8px 10px;border:1px solid;border-radius:10px;' + theme.inputBg + '" />';
@@ -583,12 +601,27 @@
     html += '</div>';
     if (musicState.studioOpen && premium) {
       html += '<div data-music-studio-close style="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99998;display:flex;align-items:center;justify-content:center;padding:20px;">';
-      html += '<div style="width:min(980px,96vw);max-height:92vh;overflow:auto;border-radius:24px;padding:20px;border:1px solid;' + theme.cardBg + 'background:' + (theme.dark ? '#090b18;' : '#ffffff;') + '">';
-      html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px;"><h3 style="margin:0;font-size:22px;font-weight:900;">Studio</h3><button data-music-studio-close-btn style="padding:8px 12px;border:none;border-radius:10px;cursor:pointer;' + theme.btnSecondary + '">Close</button></div>';
-      html += '<div style="display:grid;grid-template-columns:1.2fr .8fr;gap:14px;">';
-      html += '<div style="padding:14px;border:1px solid;border-radius:16px;' + theme.cardBg + '"><div style="font-weight:800;margin-bottom:8px;">Waveform & Timeline</div><div style="height:160px;border-radius:12px;background:linear-gradient(90deg,#312e81,#4f46e5,#9333ea);opacity:.35;"></div><div class="' + theme.subtle + '" style="font-size:12px;margin-top:8px;">Trim start: ' + Number(musicState.audioStartOffset || 0).toFixed(1) + 's · Effective BPM: ' + (effectiveBpm || '—') + '</div></div>';
-      html += '<div style="padding:14px;border:1px solid;border-radius:16px;' + theme.cardBg + '"><div style="font-weight:800;margin-bottom:8px;">Dance Start Math</div><div style="font-size:14px;">Start after <strong>' + (startCounts || 0) + ' counts</strong></div><div class="' + theme.subtle + '" style="font-size:12px;margin-top:6px;">(Playback rate aware: 0.5× halves counts, 2× doubles counts).</div></div>';
+      html += '<div style="width:min(1400px,98vw);max-height:94vh;overflow:auto;border-radius:22px;border:1px solid;' + (theme.dark ? 'background:#101218;border-color:#2a2f3b;color:#e5e7eb;' : 'background:#f5f6f8;border-color:#d1d5db;color:#111827;') + '">';
+      html += '<div style="padding:10px 14px;border-bottom:1px solid;' + (theme.dark ? 'border-color:#2a2f3b;background:#181b24;' : 'border-color:#d1d5db;background:#eceff3;') + ';display:flex;justify-content:space-between;align-items:center;"><div style="font-weight:900;letter-spacing:.04em;">🎛 STEP BY STEPPER STUDIO</div><button data-music-studio-close-btn style="padding:7px 12px;border:none;border-radius:9px;cursor:pointer;' + theme.btnSecondary + '">Close</button></div>';
+      html += '<div style="padding:12px;border-bottom:1px solid;' + (theme.dark ? 'border-color:#2a2f3b;background:#1f2430;' : 'border-color:#d1d5db;background:#e5e7eb;') + ';display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">';
+      html += '<div style="display:flex;gap:8px;"><button data-music-transport-rewind style="padding:7px 10px;border:none;border-radius:8px;' + theme.btnSecondary + '">⏮</button><button data-music-transport-play style="padding:7px 12px;border:none;border-radius:8px;' + theme.btnPrimary + '">▶</button><button data-music-transport-pause style="padding:7px 12px;border:none;border-radius:8px;' + theme.btnSecondary + '">⏸</button></div>';
+      html += '<div style="font-size:12px;font-weight:800;">TRANSPORT · BPM ' + (effectiveBpm || '—') + ' · Start After ' + (startCounts || 0) + ' Counts</div>';
+      html += '</div>';
+      html += '<div style="display:grid;grid-template-columns:300px 360px 1fr;gap:0;min-height:520px;">';
+      html += '<div style="border-right:1px solid ' + (theme.dark ? '#2a2f3b' : '#d1d5db') + ';padding:14px;background:' + (theme.dark ? '#171a22' : '#f0f2f6') + ';"><div style="font-size:13px;font-weight:800;margin-bottom:10px;">CONTENT LIBRARY</div><div style="height:420px;border:1px solid ' + (theme.dark ? '#2a2f3b' : '#cbd5e1') + ';border-radius:10px;padding:10px;overflow:auto;"><div style="opacity:.8;font-size:12px;">Imported: ' + escapeHtml(musicState.audioName || 'No file') + '</div><div style="margin-top:12px;font-size:12px;">Trim Start: ' + Number(musicState.audioStartOffset || 0).toFixed(1) + 's</div></div></div>';
+      html += '<div style="border-right:1px solid ' + (theme.dark ? '#2a2f3b' : '#d1d5db') + ';padding:14px;background:' + (theme.dark ? '#1c202b' : '#e9edf2') + ';"><div style="font-size:13px;font-weight:800;margin-bottom:10px;">TRACK PANEL</div><div style="height:420px;border:1px solid ' + (theme.dark ? '#2a2f3b' : '#cbd5e1') + ';border-radius:10px;padding:10px;"><div style="font-size:12px;">Audio 1</div><div style="margin-top:10px;height:8px;border-radius:999px;background:' + (theme.dark ? '#374151' : '#cbd5e1') + ';"><div style="width:55%;height:8px;border-radius:999px;background:#22c55e;"></div></div></div></div>';
+      html += '<div style="padding:14px;background:' + (theme.dark ? '#141821' : '#f8fafc') + ';"><div style="font-size:13px;font-weight:800;margin-bottom:10px;">TIMELINE</div><div style="height:420px;border:1px solid ' + (theme.dark ? '#2a2f3b' : '#cbd5e1') + ';border-radius:10px;position:relative;overflow:hidden;">';
+      html += '<div style="position:absolute;inset:0;background:repeating-linear-gradient(90deg,transparent 0,transparent 48px,' + (theme.dark ? '#2f3442' : '#dbe2ea') + ' 49px,' + (theme.dark ? '#2f3442' : '#dbe2ea') + ' 50px);"></div>';
+      html += '<div style="position:absolute;left:0;top:0;bottom:0;width:' + Math.max(2, Math.round((Number(musicState.audioStartOffset || 0) * 12))) + 'px;background:rgba(234,88,12,.35);"></div>';
+      html += '<div style="position:absolute;left:0;right:0;bottom:0;height:100px;padding:10px;display:flex;gap:2px;align-items:flex-end;">';
+      for (var s = 0; s < 120; s++) {
+        var sh = 8 + Math.round((Math.sin(s * 0.2) * 0.5 + Math.random() * 0.5 + 0.4) * 58);
+        html += '<span style="width:4px;height:' + sh + 'px;border-radius:2px;background:' + (theme.dark ? '#fbbf24' : '#f59e0b') + ';opacity:.85;"></span>';
+      }
       html += '</div></div></div>';
+      html += '</div>';
+      html += '<div style="padding:12px;border-top:1px solid ' + (theme.dark ? '#2a2f3b' : '#d1d5db') + ';font-size:12px;' + (theme.dark ? 'background:#181b24;' : 'background:#eceff3;') + '">SMART CONTROL EDITORS · Playback rate-aware count math (½ tempo halves start counts, 2× doubles start counts).</div>';
+      html += '</div></div>';
     }
     return html;
   }
