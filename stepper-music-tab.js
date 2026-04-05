@@ -662,17 +662,28 @@
     html += '<button data-studio-region-delete style="padding:7px 10px;border:none;border-radius:8px;cursor:pointer;' + theme.btnSecondary + '">Delete</button>';
     html += '<button data-studio-region-join style="padding:7px 10px;border:none;border-radius:8px;cursor:pointer;' + theme.btnSecondary + '">Join Next</button>';
     html += '</div>';
-    html += '<div style="height:320px;border:1px solid ' + (theme.dark ? '#374151' : '#cbd5e1') + ';border-radius:10px;position:relative;overflow:hidden;' + (theme.dark ? 'background:#0b1220;' : 'background:#f8fafc;') + '">';
+    html += '<div data-studio-timeline style="height:320px;border:1px solid ' + (theme.dark ? '#374151' : '#cbd5e1') + ';border-radius:10px;position:relative;overflow:hidden;' + (theme.dark ? 'background:#0b1220;' : 'background:#f8fafc;') + '">';
     var maxPos = 64;
     for (var i = 0; i < (p.regions || []).length; i++) {
       var rg = p.regions[i];
       maxPos = Math.max(maxPos, Number(rg.start || 0) + Number(rg.len || 0));
     }
+    for (var tick = 0; tick <= maxPos; tick += 8) {
+      var tLeft = (tick / maxPos) * 100;
+      html += '<div style="position:absolute;left:' + tLeft + '%;top:0;bottom:0;width:1px;background:' + (theme.dark ? 'rgba(148,163,184,.18)' : 'rgba(148,163,184,.28)') + ';"></div>';
+      html += '<div class="' + theme.subtle + '" style="position:absolute;left:' + tLeft + '%;top:4px;font-size:10px;transform:translateX(-50%);">' + tick + '</div>';
+    }
+    var introCounts = Math.max(0, Number(p.introCounts || 0));
+    if (introCounts > 0) {
+      var introLeft = Math.min(100, (introCounts / maxPos) * 100);
+      html += '<div style="position:absolute;left:' + introLeft + '%;top:0;bottom:0;width:2px;background:#f59e0b;"></div>';
+      html += '<div style="position:absolute;left:' + introLeft + '%;top:18px;transform:translateX(-50%);font-size:10px;background:#f59e0b;color:#111827;padding:1px 5px;border-radius:999px;">INTRO</div>';
+    }
     for (var r = 0; r < (p.regions || []).length; r++) {
       var region = p.regions[r];
       var left = (Number(region.start || 0) / maxPos) * 100;
       var width = Math.max(6, (Number(region.len || 0) / maxPos) * 100);
-      html += '<button data-studio-region-select="' + escapeHtml(region.id) + '" style="position:absolute;left:' + left + '%;top:52px;width:' + width + '%;height:54px;border-radius:8px;border:1px solid ' + (p.selectedRegionId === region.id ? '#f59e0b' : '#818cf8') + ';background:' + (p.selectedRegionId === region.id ? 'rgba(245,158,11,.28)' : 'rgba(99,102,241,.25)') + ';color:' + (theme.dark ? '#fff' : '#1f2937') + ';font-size:12px;cursor:pointer;">' + escapeHtml(region.label || 'Region') + ' (' + Number(region.len || 0) + ')</button>';
+      html += '<button data-studio-region-select="' + escapeHtml(region.id) + '" style="position:absolute;left:' + left + '%;top:52px;width:' + width + '%;height:54px;border-radius:8px;border:1px solid ' + (p.selectedRegionId === region.id ? '#f59e0b' : '#818cf8') + ';background:' + (p.selectedRegionId === region.id ? 'rgba(245,158,11,.28)' : 'rgba(99,102,241,.25)') + ';color:' + (theme.dark ? '#fff' : '#1f2937') + ';font-size:12px;cursor:grab;">' + escapeHtml(region.label || 'Region') + ' (' + Number(region.len || 0) + ')</button>';
     }
     html += '</div>';
     html += '<div style="margin-top:10px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;">';
@@ -854,6 +865,7 @@
         var k = el.getAttribute('data-studio-field');
         if (k) p[k] = el.value;
         saveStudioProject(p);
+        if (k === 'introCounts') renderMusicPage();
       });
     });
     page.querySelectorAll('[data-studio-region-select]').forEach(function (btn) {
@@ -863,6 +875,36 @@
         p.selectedRegionId = id || '';
         saveStudioProject(p);
         renderMusicPage();
+      });
+      btn.addEventListener('mousedown', function (ev) {
+        if (ev.button !== 0) return;
+        ev.preventDefault();
+        var id = btn.getAttribute('data-studio-region-select');
+        var timeline = page.querySelector('[data-studio-timeline]');
+        if (!id || !timeline) return;
+        var rect = timeline.getBoundingClientRect();
+        var project = loadStudioProject();
+        var maxPos = 64;
+        (project.regions || []).forEach(function (rg) { maxPos = Math.max(maxPos, Number(rg.start || 0) + Number(rg.len || 0)); });
+        var idx = project.regions.findIndex(function (rg) { return rg.id === id; });
+        if (idx < 0) return;
+        var startX = ev.clientX;
+        var originalStart = Number(project.regions[idx].start || 0);
+        function onMove(moveEv) {
+          var dx = moveEv.clientX - startX;
+          var deltaCounts = Math.round((dx / rect.width) * maxPos);
+          var nextStart = Math.max(0, originalStart + deltaCounts);
+          project.regions[idx].start = nextStart;
+          project.selectedRegionId = id;
+          saveStudioProject(project);
+          renderMusicPage();
+        }
+        function onUp() {
+          window.removeEventListener('mousemove', onMove);
+          window.removeEventListener('mouseup', onUp);
+        }
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
       });
     });
     var addRegion = page.querySelector('[data-studio-region-add]');
