@@ -172,6 +172,38 @@
     }
   }
 
+  function parseTitleArtistFromFilename(fileName) {
+    var base = String(fileName || '')
+      .replace(/\.[a-z0-9]{2,6}$/i, '')
+      .replace(/[_]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!base) return { title: '', artist: '' };
+    var stripped = base
+      .replace(/\[[^\]]+\]/g, ' ')
+      .replace(/\([^)]+\)/g, ' ')
+      .replace(/\b(official|audio|video|lyric|lyrics|hq|hd|remaster(ed)?|clean|explicit|version|edit)\b/ig, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    var splitters = [' - ', ' – ', ' — ', ' | ', ' by '];
+    for (var i = 0; i < splitters.length; i++) {
+      var sep = splitters[i];
+      var idx = stripped.toLowerCase().indexOf(sep.trim().toLowerCase());
+      if (idx > 0) {
+        var parts = stripped.split(new RegExp(sep.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
+        if (parts.length >= 2) {
+          var left = String(parts[0] || '').trim();
+          var right = String(parts.slice(1).join(' ') || '').trim();
+          if (left && right) {
+            // Most file naming conventions are "Artist - Song"
+            return { artist: left, title: right };
+          }
+        }
+      }
+    }
+    return { title: stripped, artist: '' };
+  }
+
   function estimateBpmFromAudioBuffer(audioBuffer) {
     if (!audioBuffer) return 0;
     var sampleRate = audioBuffer.sampleRate || 44100;
@@ -633,6 +665,11 @@
       }
       html += '</div></div></div>';
       html += '</div>';
+      html += '<div style="padding:14px;border-top:1px solid ' + (theme.dark ? '#2a2f3b' : '#d1d5db') + ';display:grid;grid-template-columns:repeat(3,minmax(220px,1fr));gap:10px;' + (theme.dark ? 'background:#121722;' : 'background:#f1f5f9;') + '">';
+      html += '<div style="border:1px solid ' + (theme.dark ? '#2a2f3b' : '#cbd5e1') + ';border-radius:10px;padding:10px;"><div style="font-size:12px;font-weight:800;margin-bottom:6px;">Basic Audio Editing</div><div style="font-size:11px;opacity:.9;">Split at Playhead (⌘T) · Trim/Resize Regions · Delete Sections · Drag to Rearrange · Join Clips</div></div>';
+      html += '<div style="border:1px solid ' + (theme.dark ? '#2a2f3b' : '#cbd5e1') + ';border-radius:10px;padding:10px;"><div style="font-size:12px;font-weight:800;margin-bottom:6px;">Advanced Edit & Mix</div><div style="font-size:11px;opacity:.9;">Flex Time · Pitch Correction · Automation Lanes (Vol/Pan/FX) · Visual EQ · Compression · Reverb/Delay · AU Plugins</div></div>';
+      html += '<div style="border:1px solid ' + (theme.dark ? '#2a2f3b' : '#cbd5e1') + ';border-radius:10px;padding:10px;"><div style="font-size:12px;font-weight:800;margin-bottom:6px;">MIDI/Arrangement/Global</div><div style="font-size:11px;opacity:.9;">Piano Roll · Quantize · Velocity · Drummer Track · Arrangement Markers (Intro/Verse/Chorus) · Tempo/Key/Transpose · Fade Out</div></div>';
+      html += '</div>';
       html += '<div style="padding:12px;border-top:1px solid ' + (theme.dark ? '#2a2f3b' : '#d1d5db') + ';font-size:12px;' + (theme.dark ? 'background:#181b24;' : 'background:#eceff3;') + '">SMART CONTROL EDITORS · Count-feel math (½ counts halves start counts, 2× counts doubles start counts) while song playback stays full speed.</div>';
       html += '</div></div>';
     }
@@ -760,10 +797,16 @@
         reader.onload = function () {
           _audioAnalysisBuffer = reader.result;
           var parsed = parseId3Metadata(reader.result);
+          var parsedFromName = parseTitleArtistFromFilename(file.name || '');
           var data = loadBuilderData();
           if (!data.meta) data.meta = {};
-          if (parsed.title) data.meta.music = parsed.title;
-          if (parsed.artist) data.meta.artist = parsed.artist;
+          if (parsed.title || parsed.artist) {
+            if (parsed.title) data.meta.music = parsed.title;
+            if (parsed.artist) data.meta.artist = parsed.artist;
+          } else {
+            if (parsedFromName.title) data.meta.music = parsedFromName.title;
+            if (parsedFromName.artist) data.meta.artist = parsedFromName.artist;
+          }
           saveBuilderData(data);
           detectBpmFromImportedAudio();
         };
