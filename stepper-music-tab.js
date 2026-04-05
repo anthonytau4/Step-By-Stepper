@@ -648,6 +648,14 @@
     html += '<textarea data-studio-field="notes" rows="4" placeholder="Cue Notes" style="padding:8px 10px;border:1px solid;border-radius:8px;' + theme.inputBg + '">' + escapeHtml(p.notes || '') + '</textarea>';
     html += '</div></aside>';
     html += '<main style="padding:12px;' + (theme.dark ? 'background:#111827;' : 'background:#ffffff;') + '">';
+    html += '<div style="border:1px solid ' + (theme.dark ? '#374151' : '#cbd5e1') + ';border-radius:10px;padding:10px;margin-bottom:10px;' + (theme.dark ? 'background:#0f172a;' : 'background:#f8fafc;') + '">';
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">';
+    html += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><button data-music-transport-rewind style="padding:7px 10px;border:none;border-radius:8px;cursor:pointer;' + theme.btnSecondary + '">⏮</button><button data-music-transport-play style="padding:7px 12px;border:none;border-radius:8px;cursor:pointer;' + theme.btnPrimary + '">▶</button><button data-music-transport-pause style="padding:7px 12px;border:none;border-radius:8px;cursor:pointer;' + theme.btnSecondary + '">⏸</button><button data-music-metro-from-start style="padding:7px 12px;border:none;border-radius:8px;cursor:pointer;' + theme.btnPrimary + '">▶ + Metro</button></div>';
+    html += '<div class="' + theme.subtle + '" style="font-size:12px;font-weight:700;"><span data-music-time>' + formatTime(musicState.audioCurrentTime) + ' / ' + formatTime(musicState.audioDuration) + '</span></div>';
+    html += '</div>';
+    if (musicState.audioUrl) html += '<audio data-music-audio-player preload="metadata" style="display:none;" src="' + escapeHtml(musicState.audioUrl) + '"></audio>';
+    html += '<div style="display:grid;grid-template-columns:1fr auto auto;gap:8px;margin-top:10px;align-items:center;"><input data-music-scrub type="range" min="0" max="' + Math.max(1, Number((musicState.audioDuration || 1).toFixed(2))) + '" step="0.01" value="' + Math.max(0, Number((musicState.audioCurrentTime || 0).toFixed(2))) + '"><input data-music-volume type="range" min="0" max="1" step="0.01" value="' + Number(musicState.audioVolume || 1).toFixed(2) + '"><label style="font-size:12px;display:flex;gap:6px;align-items:center;" class="' + theme.subtle + '"><span>Loop</span><input data-music-loop type="checkbox" ' + (musicState.audioLoop ? 'checked' : '') + '></label></div>';
+    html += '</div>';
     html += '<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">';
     html += '<button data-studio-region-add style="padding:7px 10px;border:none;border-radius:8px;cursor:pointer;' + theme.btnPrimary + '">Add Region</button>';
     html += '<button data-studio-region-split style="padding:7px 10px;border:none;border-radius:8px;cursor:pointer;' + theme.btnSecondary + '">Split</button>';
@@ -667,7 +675,12 @@
       html += '<button data-studio-region-select="' + escapeHtml(region.id) + '" style="position:absolute;left:' + left + '%;top:52px;width:' + width + '%;height:54px;border-radius:8px;border:1px solid ' + (p.selectedRegionId === region.id ? '#f59e0b' : '#818cf8') + ';background:' + (p.selectedRegionId === region.id ? 'rgba(245,158,11,.28)' : 'rgba(99,102,241,.25)') + ';color:' + (theme.dark ? '#fff' : '#1f2937') + ';font-size:12px;cursor:pointer;">' + escapeHtml(region.label || 'Region') + ' (' + Number(region.len || 0) + ')</button>';
     }
     html += '</div>';
-    html += '<div class="' + theme.subtle + '" style="font-size:12px;margin-top:10px;">Everything in Studio autosaves, survives reload, and updates this worksheet.</div>';
+    html += '<div style="margin-top:10px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;">';
+    html += '<div style="padding:8px;border:1px solid ' + (theme.dark ? '#374151' : '#cbd5e1') + ';border-radius:8px;' + (theme.dark ? 'background:#111827;' : 'background:#f8fafc;') + '"><div style="font-size:11px;font-weight:800;">DRUMS</div><div class="' + theme.subtle + '" style="font-size:11px;">Mute · Solo · Pan · Comp</div></div>';
+    html += '<div style="padding:8px;border:1px solid ' + (theme.dark ? '#374151' : '#cbd5e1') + ';border-radius:8px;' + (theme.dark ? 'background:#111827;' : 'background:#f8fafc;') + '"><div style="font-size:11px;font-weight:800;">MUSIC TRACK</div><div class="' + theme.subtle + '" style="font-size:11px;">EQ · Volume · Reverb</div></div>';
+    html += '<div style="padding:8px;border:1px solid ' + (theme.dark ? '#374151' : '#cbd5e1') + ';border-radius:8px;' + (theme.dark ? 'background:#111827;' : 'background:#f8fafc;') + '"><div style="font-size:11px;font-weight:800;">CUES / COUNTS</div><div class="' + theme.subtle + '" style="font-size:11px;">Markers · Automation · Notes</div></div>';
+    html += '</div>';
+    html += '<div class="' + theme.subtle + '" style="font-size:12px;margin-top:10px;">GarageBand-style layout: transport, tracks, timeline, and mixer cards. Everything autosaves.</div>';
     html += '</main></div></div>';
     return html;
   }
