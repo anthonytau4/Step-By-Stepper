@@ -20,8 +20,16 @@
     metronomeBPM: 0,
     metronomeRunning: false,
     metronomeInterval: null,
-    metronomeBeat: false
+    metronomeBeat: false,
+    audioUrl: '',
+    audioName: '',
+    audioDuration: 0,
+    audioDetectedBpm: 0,
+    audioStartOffset: 0,
+    audioPlaybackRate: 1,
+    audioAnalyzing: false
   };
+  var _audioAnalysisBuffer = null;
 
   /* ── Helpers ─────────────────────────────────────────────────────────── */
   function isDarkMode() {
@@ -89,6 +97,96 @@
     document.body.appendChild(t);
     setTimeout(function () { t.style.opacity = '0'; t.style.transition = 'opacity .3s'; }, 2200);
     setTimeout(function () { t.remove(); }, 2600);
+  }
+
+  function normalizeDetectedBpm(bpm) {
+    var value = Number(bpm || 0);
+    if (!value || !isFinite(value)) return 0;
+    while (value < 70) value *= 2;
+    while (value > 190) value /= 2;
+    return value;
+  }
+
+  function estimateBpmFromAudioBuffer(audioBuffer) {
+    if (!audioBuffer) return 0;
+    var sampleRate = audioBuffer.sampleRate || 44100;
+    var channels = Math.max(1, audioBuffer.numberOfChannels || 1);
+    var length = Math.min(audioBuffer.length || 0, Math.floor(sampleRate * 90)); // analyze first 90s
+    if (!length) return 0;
+
+    var mono = new Float32Array(length);
+    for (var c = 0; c < channels; c++) {
+      var data = audioBuffer.getChannelData(c);
+      for (var i = 0; i < length; i++) mono[i] += data[i] / channels;
+    }
+
+    var frameSize = 1024;
+    var hop = 512;
+    var envLength = Math.max(1, Math.floor((length - frameSize) / hop));
+    var envelope = new Float32Array(envLength);
+    var eIdx = 0;
+    for (var start = 0; start + frameSize < length && eIdx < envLength; start += hop) {
+      var sum = 0;
+      for (var j = 0; j < frameSize; j++) {
+        var v = mono[start + j];
+        sum += v * v;
+      }
+      envelope[eIdx++] = Math.sqrt(sum / frameSize);
+    }
+    var frameRate = sampleRate / hop;
+    var minLag = Math.floor(frameRate * 60 / 200); // 200 bpm
+    var maxLag = Math.floor(frameRate * 60 / 60);  // 60 bpm
+    if (maxLag <= minLag) return 0;
+
+    var bestLag = 0;
+    var bestCorr = -Infinity;
+    for (var lag = minLag; lag <= maxLag; lag++) {
+      var corr = 0;
+      for (var k = 0; k + lag < eIdx; k++) corr += envelope[k] * envelope[k + lag];
+      if (corr > bestCorr) {
+        bestCorr = corr;
+        bestLag = lag;
+      }
+    }
+    if (!bestLag) return 0;
+    var bpm = 60 * frameRate / bestLag;
+    return normalizeDetectedBpm(bpm);
+  }
+
+  function detectBpmFromImportedAudio() {
+    if (!_audioAnalysisBuffer) {
+      _toast('Import an MP3 first.');
+      return;
+    }
+    musicState.audioAnalyzing = true;
+    renderMusicPage();
+    var AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) {
+      musicState.audioAnalyzing = false;
+      renderMusicPage();
+      _toast('BPM analysis needs Web Audio support.');
+      return;
+    }
+    var ctx = new AudioCtx();
+    ctx.decodeAudioData(_audioAnalysisBuffer.slice(0)).then(function (decoded) {
+      var bpm = estimateBpmFromAudioBuffer(decoded);
+      musicState.audioDetectedBpm = bpm ? Math.round(bpm) : 0;
+      musicState.audioAnalyzing = false;
+      try { ctx.close(); } catch (e) { /* ignore */ }
+      if (musicState.audioDetectedBpm) {
+        var data = loadBuilderData();
+        if (!data.meta) data.meta = {};
+        data.meta.bpm = String(musicState.audioDetectedBpm);
+        saveBuilderData(data);
+      }
+      renderMusicPage();
+      _toast(musicState.audioDetectedBpm ? ('Detected ~' + musicState.audioDetectedBpm + ' BPM') : 'Could not detect BPM clearly.');
+    }).catch(function () {
+      musicState.audioAnalyzing = false;
+      try { ctx.close(); } catch (e) { /* ignore */ }
+      renderMusicPage();
+      _toast('Could not decode this audio file.');
+    });
   }
 
   /* ── Style injection ─────────────────────────────────────────────────── */
@@ -384,6 +482,40 @@
     return html;
   }
 
+  function renderAudioTools(theme) {
+    var html = '';
+    var effectiveBpm = musicState.audioDetectedBpm ? Math.round(musicState.audioDetectedBpm * musicState.audioPlaybackRate) : 0;
+    html += '<div class="music-card rounded-2xl border p-5 ' + theme.panel + '" style="margin-bottom:20px;">';
+    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">';
+    html += '<span style="font-size:20px;">🎧</span>';
+    html += '<h3 style="font-size:16px;font-weight:800;margin:0;">MP3 Import, BPM & Tempo Tools</h3>';
+    html += '</div>';
+    html += '<p class="' + theme.subtle + '" style="font-size:13px;margin:0 0 14px;">Import an MP3, auto-detect BPM, trim silence at the beginning, and half/double playback tempo.</p>';
+    html += '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">';
+    html += '<input data-music-audio-file type="file" accept="audio/mpeg,audio/mp3,audio/*" />';
+    html += '<button data-music-detect-bpm style="padding:8px 14px;border-radius:10px;border:none;font-size:12px;font-weight:700;cursor:pointer;' + theme.btnPrimary + '">' + (musicState.audioAnalyzing ? 'Analyzing…' : 'Detect BPM') + '</button>';
+    html += '</div>';
+    if (musicState.audioName) {
+      html += '<div class="' + theme.subtle + '" style="font-size:12px;margin-bottom:8px;">Loaded: <strong>' + escapeHtml(musicState.audioName) + '</strong> · ' + (musicState.audioDuration ? musicState.audioDuration.toFixed(1) + 's' : '—') + '</div>';
+    }
+    if (musicState.audioUrl) {
+      html += '<audio data-music-audio-player controls preload="metadata" style="width:100%;margin-bottom:10px;" src="' + escapeHtml(musicState.audioUrl) + '"></audio>';
+      html += '<div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;margin-bottom:10px;">';
+      html += '<label class="' + theme.subtle + '" style="font-size:12px;">Start Trim Offset (seconds):</label>';
+      html += '<input data-music-start-offset type="number" min="0" step="0.1" value="' + escapeHtml(String(musicState.audioStartOffset || 0)) + '" style="width:120px;padding:8px 10px;border:1px solid;border-radius:10px;' + theme.inputBg + '" />';
+      html += '</div>';
+      html += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">';
+      html += '<button data-music-play-trim style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnPrimary + '">Play from Trim</button>';
+      html += '<button data-music-half style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnSecondary + '">½ Tempo</button>';
+      html += '<button data-music-normal style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnSecondary + '">1× Tempo</button>';
+      html += '<button data-music-double style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnSecondary + '">2× Tempo</button>';
+      html += '</div>';
+      html += '<div class="' + theme.subtle + '" style="font-size:12px;">Detected BPM: <strong>' + (musicState.audioDetectedBpm || '—') + '</strong> · Current Rate: <strong>' + musicState.audioPlaybackRate + '×</strong> · Effective BPM: <strong>' + (effectiveBpm || '—') + '</strong></div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
   /* ── Main Render ─────────────────────────────────────────────────────── */
   function renderMusicPage() {
     var page = document.getElementById(PAGE_ID);
@@ -410,6 +542,7 @@
     html += '<div class="p-5 sm:p-6">';
     html += renderMusicInfo(theme);
     html += renderTapTempo(theme);
+    html += renderAudioTools(theme);
     html += renderCountCalc(theme);
     html += renderMetronome(theme);
     html += renderBpmGuide(theme);
@@ -482,6 +615,63 @@
         renderMusicPage();
       });
     }
+
+    var fileInput = page.querySelector('[data-music-audio-file]');
+    if (fileInput) {
+      fileInput.addEventListener('change', function () {
+        var file = fileInput.files && fileInput.files[0];
+        if (!file) return;
+        if (musicState.audioUrl) {
+          try { URL.revokeObjectURL(musicState.audioUrl); } catch (e) { /* ignore */ }
+        }
+        musicState.audioUrl = URL.createObjectURL(file);
+        musicState.audioName = file.name || 'Imported audio';
+        musicState.audioDuration = 0;
+        musicState.audioDetectedBpm = 0;
+        musicState.audioStartOffset = 0;
+        musicState.audioPlaybackRate = 1;
+        var reader = new FileReader();
+        reader.onload = function () {
+          _audioAnalysisBuffer = reader.result;
+          detectBpmFromImportedAudio();
+        };
+        reader.readAsArrayBuffer(file);
+        renderMusicPage();
+      });
+    }
+
+    var detectBtn = page.querySelector('[data-music-detect-bpm]');
+    if (detectBtn) detectBtn.addEventListener('click', function () { detectBpmFromImportedAudio(); });
+
+    var player = page.querySelector('[data-music-audio-player]');
+    if (player) {
+      player.playbackRate = Number(musicState.audioPlaybackRate || 1);
+      player.addEventListener('loadedmetadata', function () {
+        musicState.audioDuration = Number(player.duration || 0);
+        renderMusicPage();
+      });
+    }
+    var startOffset = page.querySelector('[data-music-start-offset]');
+    if (startOffset) {
+      startOffset.addEventListener('change', function () {
+        var n = Math.max(0, Number(startOffset.value || 0));
+        musicState.audioStartOffset = n;
+      });
+    }
+    var playTrim = page.querySelector('[data-music-play-trim]');
+    if (playTrim) playTrim.addEventListener('click', function () {
+      var p = page.querySelector('[data-music-audio-player]');
+      if (!p) return;
+      p.playbackRate = Number(musicState.audioPlaybackRate || 1);
+      p.currentTime = Math.max(0, Number(musicState.audioStartOffset || 0));
+      p.play().catch(function () { _toast('Could not play audio yet.'); });
+    });
+    var halfBtn = page.querySelector('[data-music-half]');
+    if (halfBtn) halfBtn.addEventListener('click', function () { musicState.audioPlaybackRate = 0.5; renderMusicPage(); });
+    var normalBtn = page.querySelector('[data-music-normal]');
+    if (normalBtn) normalBtn.addEventListener('click', function () { musicState.audioPlaybackRate = 1; renderMusicPage(); });
+    var doubleBtn = page.querySelector('[data-music-double]');
+    if (doubleBtn) doubleBtn.addEventListener('click', function () { musicState.audioPlaybackRate = 2; renderMusicPage(); });
 
     // Tap reset
     var tapResetBtn = page.querySelector('[data-tap-reset]');
