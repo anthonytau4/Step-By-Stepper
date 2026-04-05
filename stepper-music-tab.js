@@ -24,9 +24,12 @@
     audioUrl: '',
     audioName: '',
     audioDuration: 0,
+    audioCurrentTime: 0,
     audioDetectedBpm: 0,
     audioStartOffset: 0,
-    audioPlaybackRate: 1,
+    audioCountFeel: 1,
+    audioVolume: 1,
+    audioLoop: false,
     audioAnalyzing: false,
     studioOpen: false
   };
@@ -112,6 +115,13 @@
     document.body.appendChild(t);
     setTimeout(function () { t.style.opacity = '0'; t.style.transition = 'opacity .3s'; }, 2200);
     setTimeout(function () { t.remove(); }, 2600);
+  }
+
+  function formatTime(seconds) {
+    var total = Math.max(0, Number(seconds || 0));
+    var mins = Math.floor(total / 60);
+    var secs = Math.floor(total % 60);
+    return String(mins).padStart(2, '0') + ':' + String(secs).padStart(2, '0');
   }
 
   function normalizeDetectedBpm(bpm) {
@@ -539,7 +549,7 @@
 
   function renderAudioTools(theme) {
     var html = '';
-    var effectiveBpm = musicState.audioDetectedBpm ? Math.round(musicState.audioDetectedBpm * musicState.audioPlaybackRate) : 0;
+    var effectiveBpm = musicState.audioDetectedBpm ? Math.round(musicState.audioDetectedBpm * musicState.audioCountFeel) : 0;
     var startCounts = effectiveBpm ? Math.round((effectiveBpm / 60) * Number(musicState.audioStartOffset || 0)) : 0;
     var startEights = Math.floor(startCounts / 8);
     var startRemainder = startCounts % 8;
@@ -549,7 +559,7 @@
     html += '<span style="font-size:20px;">🎧</span>';
     html += '<h3 style="font-size:16px;font-weight:800;margin:0;">MP3 Import, BPM & Tempo Tools</h3>';
     html += '</div>';
-    html += '<p class="' + theme.subtle + '" style="font-size:13px;margin:0 0 14px;">Import an MP3, auto-detect BPM, trim silence at the beginning, and half/double playback tempo.</p>';
+    html += '<p class="' + theme.subtle + '" style="font-size:13px;margin:0 0 14px;">Import an MP3, auto-detect BPM, trim silence at the beginning, and switch count feel without slowing the song.</p>';
     html += '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">';
     html += '<input data-music-audio-file type="file" accept="audio/mpeg,audio/mp3,audio/*" />';
     html += '<button data-music-detect-bpm style="padding:8px 14px;border-radius:10px;border:none;font-size:12px;font-weight:700;cursor:pointer;' + theme.btnPrimary + '">' + (musicState.audioAnalyzing ? 'Analyzing…' : 'Detect BPM') + '</button>';
@@ -559,18 +569,21 @@
     }
     if (musicState.audioUrl) {
       html += '<audio data-music-audio-player preload="metadata" style="display:none;" src="' + escapeHtml(musicState.audioUrl) + '"></audio>';
-      html += '<div style="margin-bottom:10px;border:1px solid;border-radius:14px;overflow:hidden;' + theme.cardBg + '">';
-      html += '<div style="padding:10px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px;' + (theme.dark ? 'background:#131728;border-bottom:1px solid #2d2d44;' : 'background:#f8fafc;border-bottom:1px solid #e5e7eb;') + '">';
+      html += '<div style="margin-bottom:10px;border:1px solid;border-radius:14px;overflow:hidden;box-shadow:0 10px 30px rgba(79,70,229,.18);' + theme.cardBg + '">';
+      html += '<div style="padding:10px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px;' + (theme.dark ? 'background:linear-gradient(90deg,#131728,#1f1c3a);border-bottom:1px solid #2d2d44;' : 'background:linear-gradient(90deg,#eef2ff,#f8fafc);border-bottom:1px solid #e5e7eb;') + '">';
       html += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">';
       html += '<button data-music-transport-rewind style="padding:7px 10px;border:none;border-radius:9px;cursor:pointer;' + theme.btnSecondary + '">⏮</button>';
+      html += '<button data-music-transport-back style="padding:7px 10px;border:none;border-radius:9px;cursor:pointer;' + theme.btnSecondary + '">-5s</button>';
       html += '<button data-music-transport-play style="padding:7px 12px;border:none;border-radius:9px;cursor:pointer;' + theme.btnPrimary + '">▶</button>';
       html += '<button data-music-transport-pause style="padding:7px 12px;border:none;border-radius:9px;cursor:pointer;' + theme.btnSecondary + '">⏸</button>';
+      html += '<button data-music-transport-forward style="padding:7px 10px;border:none;border-radius:9px;cursor:pointer;' + theme.btnSecondary + '">+5s</button>';
       html += '<button data-music-play-trim style="padding:7px 12px;border:none;border-radius:9px;cursor:pointer;' + theme.btnPrimary + '">Play from Trim</button>';
       html += '</div>';
-      html += '<div style="font-size:12px;font-weight:700;" class="' + theme.subtle + '"><span data-music-time>00:00 / --:--</span></div>';
+      html += '<div style="display:flex;align-items:center;gap:10px;"><label style="display:flex;align-items:center;gap:6px;font-size:11px;" class="' + theme.subtle + '"><span>Loop</span><input data-music-loop type="checkbox" ' + (musicState.audioLoop ? 'checked' : '') + ' /></label><span style="font-size:12px;font-weight:700;" class="' + theme.subtle + '"><span data-music-time>' + formatTime(musicState.audioCurrentTime) + ' / ' + formatTime(musicState.audioDuration) + '</span></span></div>';
       html += '</div>';
       html += '<div style="padding:10px 12px;">';
-      html += '<input data-music-scrub type="range" min="0" max="' + Math.max(1, Math.round(musicState.audioDuration || 1)) + '" step="0.01" value="0" style="width:100%;">';
+      html += '<input data-music-scrub type="range" min="0" max="' + Math.max(1, Number((musicState.audioDuration || 1).toFixed(2))) + '" step="0.01" value="' + Math.max(0, Number((musicState.audioCurrentTime || 0).toFixed(2))) + '" style="width:100%;">';
+      html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;gap:10px;"><label class="' + theme.subtle + '" style="font-size:11px;">Volume</label><input data-music-volume type="range" min="0" max="1" step="0.01" value="' + Number(musicState.audioVolume || 1).toFixed(2) + '" style="flex:1;"></div>';
       html += '<div style="margin-top:10px;height:64px;border-radius:10px;' + (theme.dark ? 'background:#0f172a;' : 'background:#e2e8f0;') + ';display:flex;align-items:center;gap:2px;padding:8px;overflow:hidden;">';
       for (var w = 0; w < 140; w++) {
         var h = 8 + Math.round((Math.sin(w * 0.18) * 0.5 + Math.random() * 0.5 + 0.4) * 36);
@@ -584,11 +597,11 @@
       html += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">';
       html += '<button data-music-play-trim style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnPrimary + '">Play from Trim</button>';
       html += '<button data-music-metro-from-start style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnPrimary + '">Metronome from Start Spot</button>';
-      html += '<button data-music-half style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnSecondary + '">½ Tempo</button>';
-      html += '<button data-music-normal style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnSecondary + '">1× Tempo</button>';
-      html += '<button data-music-double style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnSecondary + '">2× Tempo</button>';
+      html += '<button data-music-half style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnSecondary + '">½ Counts</button>';
+      html += '<button data-music-normal style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnSecondary + '">1× Counts</button>';
+      html += '<button data-music-double style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnSecondary + '">2× Counts</button>';
       html += '</div>';
-      html += '<div class="' + theme.subtle + '" style="font-size:12px;">Detected BPM: <strong>' + (musicState.audioDetectedBpm || '—') + '</strong> · Current Rate: <strong>' + musicState.audioPlaybackRate + '×</strong> · Effective BPM: <strong>' + (effectiveBpm || '—') + '</strong></div>';
+      html += '<div class="' + theme.subtle + '" style="font-size:12px;">Detected BPM: <strong>' + (musicState.audioDetectedBpm || '—') + '</strong> · Count Feel: <strong>' + musicState.audioCountFeel + '×</strong> · Effective Count BPM: <strong>' + (effectiveBpm || '—') + '</strong></div>';
       html += '<div class="' + theme.subtle + '" style="font-size:12px;margin-top:4px;">Start dance after <strong>' + (startCounts || 0) + ' counts</strong>';
       if (startCounts) html += ' (' + startEights + ' eight-counts' + (startRemainder ? (' + ' + startRemainder) : '') + ')';
       html += '</div>';
@@ -620,7 +633,7 @@
       }
       html += '</div></div></div>';
       html += '</div>';
-      html += '<div style="padding:12px;border-top:1px solid ' + (theme.dark ? '#2a2f3b' : '#d1d5db') + ';font-size:12px;' + (theme.dark ? 'background:#181b24;' : 'background:#eceff3;') + '">SMART CONTROL EDITORS · Playback rate-aware count math (½ tempo halves start counts, 2× doubles start counts).</div>';
+      html += '<div style="padding:12px;border-top:1px solid ' + (theme.dark ? '#2a2f3b' : '#d1d5db') + ';font-size:12px;' + (theme.dark ? 'background:#181b24;' : 'background:#eceff3;') + '">SMART CONTROL EDITORS · Count-feel math (½ counts halves start counts, 2× counts doubles start counts) while song playback stays full speed.</div>';
       html += '</div></div>';
     }
     return html;
@@ -737,9 +750,12 @@
         musicState.audioUrl = URL.createObjectURL(file);
         musicState.audioName = file.name || 'Imported audio';
         musicState.audioDuration = 0;
+        musicState.audioCurrentTime = 0;
         musicState.audioDetectedBpm = 0;
         musicState.audioStartOffset = 0;
-        musicState.audioPlaybackRate = 1;
+        musicState.audioCountFeel = 1;
+        musicState.audioVolume = 1;
+        musicState.audioLoop = false;
         var reader = new FileReader();
         reader.onload = function () {
           _audioAnalysisBuffer = reader.result;
@@ -761,7 +777,9 @@
 
     var player = page.querySelector('[data-music-audio-player]');
     if (player) {
-      player.playbackRate = Number(musicState.audioPlaybackRate || 1);
+      player.playbackRate = 1;
+      player.volume = Math.max(0, Math.min(1, Number(musicState.audioVolume || 1)));
+      player.loop = !!musicState.audioLoop;
       player.addEventListener('loadedmetadata', function () {
         var nextDuration = Number(player.duration || 0);
         if (Math.abs((musicState.audioDuration || 0) - nextDuration) > 0.05) {
@@ -769,7 +787,77 @@
           renderMusicPage();
         }
       });
+      player.addEventListener('timeupdate', function () {
+        musicState.audioCurrentTime = Number(player.currentTime || 0);
+        var scrubEl = page.querySelector('[data-music-scrub]');
+        if (scrubEl && !scrubEl.matches(':active')) scrubEl.value = String(musicState.audioCurrentTime);
+        var timeEl = page.querySelector('[data-music-time]');
+        if (timeEl) timeEl.textContent = formatTime(musicState.audioCurrentTime) + ' / ' + formatTime(musicState.audioDuration || player.duration || 0);
+      });
+      player.addEventListener('ended', function () {
+        musicState.audioCurrentTime = Number(player.currentTime || 0);
+      });
     }
+    page.querySelectorAll('[data-music-transport-play]').forEach(function (playBtn) {
+      playBtn.addEventListener('click', function () {
+        var p = page.querySelector('[data-music-audio-player]');
+        if (!p) return;
+        p.play().catch(function () { _toast('Could not play audio yet.'); });
+      });
+    });
+    page.querySelectorAll('[data-music-transport-pause]').forEach(function (pauseBtn) {
+      pauseBtn.addEventListener('click', function () {
+        var p = page.querySelector('[data-music-audio-player]');
+        if (!p) return;
+        p.pause();
+      });
+    });
+    page.querySelectorAll('[data-music-transport-rewind]').forEach(function (rewindBtn) {
+      rewindBtn.addEventListener('click', function () {
+        var p = page.querySelector('[data-music-audio-player]');
+        if (!p) return;
+        p.currentTime = 0;
+        musicState.audioCurrentTime = 0;
+      });
+    });
+    var backBtn = page.querySelector('[data-music-transport-back]');
+    if (backBtn) backBtn.addEventListener('click', function () {
+      var p = page.querySelector('[data-music-audio-player]');
+      if (!p) return;
+      p.currentTime = Math.max(0, Number(p.currentTime || 0) - 5);
+      musicState.audioCurrentTime = Number(p.currentTime || 0);
+    });
+    var forwardBtn = page.querySelector('[data-music-transport-forward]');
+    if (forwardBtn) forwardBtn.addEventListener('click', function () {
+      var p = page.querySelector('[data-music-audio-player]');
+      if (!p) return;
+      var maxT = Number(p.duration || musicState.audioDuration || 0);
+      p.currentTime = Math.min(maxT || Number(p.currentTime || 0) + 5, Number(p.currentTime || 0) + 5);
+      musicState.audioCurrentTime = Number(p.currentTime || 0);
+    });
+    var scrub = page.querySelector('[data-music-scrub]');
+    if (scrub) scrub.addEventListener('input', function () {
+      var p = page.querySelector('[data-music-audio-player]');
+      if (!p) return;
+      var t = Math.max(0, Number(scrub.value || 0));
+      p.currentTime = t;
+      musicState.audioCurrentTime = t;
+      var timeEl = page.querySelector('[data-music-time]');
+      if (timeEl) timeEl.textContent = formatTime(t) + ' / ' + formatTime(musicState.audioDuration || p.duration || 0);
+    });
+    var volume = page.querySelector('[data-music-volume]');
+    if (volume) volume.addEventListener('input', function () {
+      var p = page.querySelector('[data-music-audio-player]');
+      var v = Math.max(0, Math.min(1, Number(volume.value || 1)));
+      musicState.audioVolume = v;
+      if (p) p.volume = v;
+    });
+    var loopToggle = page.querySelector('[data-music-loop]');
+    if (loopToggle) loopToggle.addEventListener('change', function () {
+      musicState.audioLoop = !!loopToggle.checked;
+      var p = page.querySelector('[data-music-audio-player]');
+      if (p) p.loop = musicState.audioLoop;
+    });
     var startOffset = page.querySelector('[data-music-start-offset]');
     if (startOffset) {
       startOffset.addEventListener('change', function () {
@@ -777,17 +865,19 @@
         musicState.audioStartOffset = n;
       });
     }
-    var playTrim = page.querySelector('[data-music-play-trim]');
-    if (playTrim) playTrim.addEventListener('click', function () {
-      var p = page.querySelector('[data-music-audio-player]');
-      if (!p) return;
-      p.playbackRate = Number(musicState.audioPlaybackRate || 1);
-      p.currentTime = Math.max(0, Number(musicState.audioStartOffset || 0));
-      p.play().catch(function () { _toast('Could not play audio yet.'); });
+    page.querySelectorAll('[data-music-play-trim]').forEach(function (playTrim) {
+      playTrim.addEventListener('click', function () {
+        var p = page.querySelector('[data-music-audio-player]');
+        if (!p) return;
+        p.playbackRate = 1;
+        p.currentTime = Math.max(0, Number(musicState.audioStartOffset || 0));
+        musicState.audioCurrentTime = Number(p.currentTime || 0);
+        p.play().catch(function () { _toast('Could not play audio yet.'); });
+      });
     });
     var metroFromStart = page.querySelector('[data-music-metro-from-start]');
     if (metroFromStart) metroFromStart.addEventListener('click', function () {
-      var effective = musicState.audioDetectedBpm ? Math.round(musicState.audioDetectedBpm * musicState.audioPlaybackRate) : 0;
+      var effective = musicState.audioDetectedBpm ? Math.round(musicState.audioDetectedBpm * musicState.audioCountFeel) : 0;
       if (!effective) {
         _toast('Detect BPM first.');
         return;
@@ -797,11 +887,11 @@
       renderMusicPage();
     });
     var halfBtn = page.querySelector('[data-music-half]');
-    if (halfBtn) halfBtn.addEventListener('click', function () { musicState.audioPlaybackRate = 0.5; renderMusicPage(); });
+    if (halfBtn) halfBtn.addEventListener('click', function () { musicState.audioCountFeel = 0.5; renderMusicPage(); });
     var normalBtn = page.querySelector('[data-music-normal]');
-    if (normalBtn) normalBtn.addEventListener('click', function () { musicState.audioPlaybackRate = 1; renderMusicPage(); });
+    if (normalBtn) normalBtn.addEventListener('click', function () { musicState.audioCountFeel = 1; renderMusicPage(); });
     var doubleBtn = page.querySelector('[data-music-double]');
-    if (doubleBtn) doubleBtn.addEventListener('click', function () { musicState.audioPlaybackRate = 2; renderMusicPage(); });
+    if (doubleBtn) doubleBtn.addEventListener('click', function () { musicState.audioCountFeel = 2; renderMusicPage(); });
     var goStudio = page.querySelector('[data-music-go-studio]');
     if (goStudio) goStudio.addEventListener('click', function () {
       if (!isPremiumSession()) {
