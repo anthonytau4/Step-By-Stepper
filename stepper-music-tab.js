@@ -461,15 +461,45 @@
     var ctx = new AudioCtx();
     ctx.decodeAudioData(_audioAnalysisBuffer.slice(0)).then(function (decoded) {
       var offsetSeconds = Math.max(0, Number(musicState.audioStartOffset || 0));
-      var startSample = Math.max(0, Math.min(decoded.length, Math.floor(offsetSeconds * decoded.sampleRate)));
-      var outLength = Math.max(1, decoded.length - startSample);
       var channels = Math.max(1, decoded.numberOfChannels || 1);
-      var trimmed = ctx.createBuffer(channels, outLength, decoded.sampleRate);
-      for (var c = 0; c < channels; c++) {
-        var src = decoded.getChannelData(c).subarray(startSample, startSample + outLength);
-        trimmed.copyToChannel(src, c, 0);
+      var player = document.querySelector('[data-music-audio-player]');
+      var cfg = musicState.tempoRampConfig;
+      var baseRate = player ? Math.max(0.5, Math.min(2.5, Number(player.playbackRate || 1))) : 1;
+      var fromRate = cfg ? Math.max(0.5, Math.min(2.5, Number(cfg.from || baseRate || 1))) : baseRate;
+      var toRate = cfg ? Math.max(0.5, Math.min(2.5, Number(cfg.to || fromRate || 1))) : fromRate;
+
+      var sourceDuration = Math.max(0.01, Number(decoded.duration || 0) - offsetSeconds);
+      var avgRate = Math.max(0.5, (fromRate + toRate) / 2);
+      var estimatedOutSeconds = Math.max(0.2, sourceDuration / avgRate);
+      var offlineLen = Math.max(1, Math.ceil(decoded.sampleRate * estimatedOutSeconds));
+      var OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+      if (!OfflineCtx) {
+        _toast('Offline export is not supported in this browser.');
+        try { ctx.close(); } catch (e1) { /* ignore */ }
+        return;
       }
-      var blob = _arrayBufferToWaveBlob(trimmed, musicState.audioVolume || 1);
+      var offline = new OfflineCtx(channels, offlineLen, decoded.sampleRate);
+      var source = offline.createBufferSource();
+      source.buffer = decoded;
+      source.playbackRate.setValueAtTime(fromRate, 0);
+      if (cfg) {
+        if (cfg.fullSong) {
+          source.playbackRate.linearRampToValueAtTime(toRate, estimatedOutSeconds);
+        } else {
+          var rampSecs = Math.max(0.01, Math.min(estimatedOutSeconds, Number(cfg.seconds || 1)));
+          source.playbackRate.linearRampToValueAtTime(toRate, rampSecs);
+          source.playbackRate.setValueAtTime(toRate, estimatedOutSeconds);
+        }
+      }
+      var gainNode = offline.createGain();
+      gainNode.gain.value = Math.max(0, Math.min(2, Number(musicState.audioVolume || 1)));
+      source.connect(gainNode);
+      gainNode.connect(offline.destination);
+      source.start(0, offsetSeconds);
+      var blobPromise = offline.startRendering().then(function (rendered) {
+        return _arrayBufferToWaveBlob(rendered, 1);
+      });
+      return blobPromise.then(function (blob) {
       var baseName = String(musicState.audioName || 'edited-track').replace(/\.[a-z0-9]{2,6}$/i, '');
       var a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
@@ -480,8 +510,9 @@
         try { URL.revokeObjectURL(a.href); } catch (e) { /* ignore */ }
         a.remove();
       }, 0);
-      _toast('Edited audio exported (WAV).');
+      _toast('Edited accelerated audio exported (WAV).');
       try { ctx.close(); } catch (e2) { /* ignore */ }
+      });
     }).catch(function () {
       try { ctx.close(); } catch (e3) { /* ignore */ }
       _toast('Could not export this audio file.');
