@@ -689,21 +689,21 @@
       gainNode.connect(offline.destination);
       source.start(0, offsetSeconds);
       var blobPromise = offline.startRendering().then(function (rendered) {
-        return { blob: _arrayBufferToWaveBlob(rendered, 1), ext: 'wav', label: 'WAV' };
+        return _arrayBufferToWaveBlob(rendered, 1);
       });
-      return blobPromise.then(function (out) {
-      if (!out || !out.blob || !out.blob.size) throw new Error('Export produced an empty file.');
+      return blobPromise.then(function (wavBlob) {
+      if (!wavBlob || !wavBlob.size) throw new Error('Export produced an empty WAV file.');
       var baseName = String(musicState.audioName || 'edited-track').replace(/\.[a-z0-9]{2,6}$/i, '');
       var a = document.createElement('a');
-      a.href = URL.createObjectURL(out.blob);
-      a.download = baseName + '-edited.' + out.ext;
+      a.href = URL.createObjectURL(wavBlob);
+      a.download = baseName + '-edited.wav';
       document.body.appendChild(a);
       a.click();
       setTimeout(function () {
         try { URL.revokeObjectURL(a.href); } catch (e) { /* ignore */ }
         a.remove();
       }, 0);
-      _toast('Edited accelerated audio exported (' + out.label + ').');
+      _toast('Edited accelerated WAV exported.');
       try { ctx.close(); } catch (e2) { /* ignore */ }
       });
     }).catch(function (err) {
