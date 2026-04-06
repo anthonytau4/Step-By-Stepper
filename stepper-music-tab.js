@@ -689,25 +689,33 @@
       gainNode.connect(offline.destination);
       source.start(0, offsetSeconds);
       var blobPromise = offline.startRendering().then(function (rendered) {
-        return encodeAudioBufferToMp3Blob(rendered, 192).catch(function () {
-          return encodeAudioBufferToMp3ViaWebCodecs(rendered, 192000);
+        return encodeAudioBufferToMp3Blob(rendered, 192).then(function (blob) {
+          return { blob: blob, ext: 'mp3', label: 'MP3' };
         }).catch(function () {
-          return encodeAudioBufferToMp3ViaRecorder(rendered);
+          return encodeAudioBufferToMp3ViaWebCodecs(rendered, 192000).then(function (blob) {
+            return { blob: blob, ext: 'mp3', label: 'MP3' };
+          });
+        }).catch(function () {
+          return encodeAudioBufferToMp3ViaRecorder(rendered).then(function (blob) {
+            return { blob: blob, ext: 'mp3', label: 'MP3' };
+          });
+        }).catch(function () {
+          return { blob: _arrayBufferToWaveBlob(rendered, 1), ext: 'wav', label: 'WAV' };
         });
       });
-      return blobPromise.then(function (blob) {
-      if (!blob || !blob.size) throw new Error('Export produced an empty file.');
+      return blobPromise.then(function (out) {
+      if (!out || !out.blob || !out.blob.size) throw new Error('Export produced an empty file.');
       var baseName = String(musicState.audioName || 'edited-track').replace(/\.[a-z0-9]{2,6}$/i, '');
       var a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = baseName + '-edited.mp3';
+      a.href = URL.createObjectURL(out.blob);
+      a.download = baseName + '-edited.' + out.ext;
       document.body.appendChild(a);
       a.click();
       setTimeout(function () {
         try { URL.revokeObjectURL(a.href); } catch (e) { /* ignore */ }
         a.remove();
       }, 0);
-      _toast('Edited accelerated audio exported (MP3).');
+      _toast('Edited accelerated audio exported (' + out.label + ').');
       try { ctx.close(); } catch (e2) { /* ignore */ }
       });
     }).catch(function (err) {
@@ -1040,6 +1048,7 @@
     html += '.studio-full-mixer{margin-top:10px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;}';
     html += '.studio-full-header-actions{width:100%;}';
     html += '.studio-full-header-actions button{flex:1 1 160px;}';
+    html += '@media (max-width:980px){.studio-full-layout{grid-template-columns:1fr;min-width:0;min-height:auto;}.studio-full-main{min-width:0;}.studio-full-aside{border-right:none!important;border-bottom:1px solid rgba(148,163,184,.28);} .studio-full-mixer{grid-template-columns:1fr;}.studio-full-header-actions button{flex:1 1 100%;}}';
     html += '</style>';
     html += '<div class="studio-full-shell rounded-3xl border ' + theme.shell + '">';
     html += '<div class="studio-full-header ' + theme.panel + '">';
@@ -1177,7 +1186,7 @@
       html += '<button data-music-double style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnSecondary + '">2× Counts</button>';
       html += '<button data-music-export-edited style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;background:#0ea5e9;color:#fff;">Export Edited MP3</button>';
       html += '</div>';
-      html += '<div class="' + theme.subtle + '" style="font-size:11px;margin-top:2px;">Export creates a new edited MP3 (trim + tempo + volume), not the original source file.</div>';
+      html += '<div class="' + theme.subtle + '" style="font-size:11px;margin-top:2px;">Export creates a new edited file (trim + tempo + volume). MP3 is preferred, with WAV fallback when Android browsers block MP3 encoding APIs.</div>';
       html += '<div class="' + theme.subtle + '" style="font-size:12px;">Detected BPM: <strong>' + (musicState.audioDetectedBpm || '—') + '</strong> · Count Feel: <strong>' + musicState.audioCountFeel + '×</strong> · Effective Count BPM: <strong>' + (effectiveBpm || '—') + '</strong></div>';
       html += '<div class="' + theme.subtle + '" style="font-size:12px;margin-top:4px;">Start dance after <strong>' + (startCounts || 0) + ' counts</strong>';
       if (startCounts) html += ' (' + startEights + ' eight-counts' + (startRemainder ? (' + ' + startRemainder) : '') + ')';
