@@ -30,6 +30,8 @@
   const TEMPLATES_TAB_ID = 'stepper-templates-tab';
   const NOTIFICATIONS_PAGE_ID = 'stepper-notifications-page';
   const NOTIFICATIONS_TAB_ID = 'stepper-notifications-tab';
+  const TIPS_PAGE_ID = 'stepper-tips-page';
+  const TIPS_TAB_ID = 'stepper-tips-tab';
   const ADMIN_EMAIL = 'anthonytau4@gmail.com';
   const DEFAULT_RENDER_SERVICE_ID = 'srv-d6ss4295pdvs73e1iifg';
   const DEFAULT_BACKEND_BASE = 'https://step-by-stepper.onrender.com';
@@ -2351,6 +2353,7 @@
     if (state.ui.pdfBtn) applyTabStyles(state.ui.pdfBtn, state.activePage === 'pdfimport', '#4f46e5');
     if (state.ui.settingsBtn) applyTabStyles(state.ui.settingsBtn, state.activePage === 'settings', '#4f46e5');
     if (state.ui.notificationsBtn) applyTabStyles(state.ui.notificationsBtn, state.activePage === 'notifications', '#4f46e5');
+    if (state.ui.tipsBtn) applyTabStyles(state.ui.tipsBtn, state.activePage === 'tips', '#4f46e5');
   }
 
   function makeTabButton(label, iconSvg, pageName, id){
@@ -2530,12 +2533,19 @@
       else tabStrip.appendChild(state.ui.notificationsBtn);
     }
 
+    var tipsIcon = (window.__stepperTipsTab && window.__stepperTipsTab.icon) ? window.__stepperTipsTab.icon() : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>';
+    state.ui.tipsBtn = makeTabButton('Tips', tipsIcon, 'tips', TIPS_TAB_ID);
+    if (!state.ui.tipsBtn.parentNode) {
+      if (state.ui.musicBtn && state.ui.musicBtn.parentNode === tabStrip) state.ui.musicBtn.insertAdjacentElement('afterend', state.ui.tipsBtn);
+      else tabStrip.appendChild(state.ui.tipsBtn);
+    }
+
     if (!tabStrip.__stepperGoogleAdminCloseWired) {
       tabStrip.__stepperGoogleAdminCloseWired = true;
       tabStrip.addEventListener('click', (event) => {
         const button = event.target.closest('button');
         if (!button) return;
-        const own = button.id === SIGNIN_TAB_ID || button.id === SUBSCRIPTION_TAB_ID || button.id === ADMIN_TAB_ID || button.id === FRIENDS_TAB_ID || button.id === GLOSSARY_TAB_ID || button.id === PDF_TAB_ID || button.id === SETTINGS_TAB_ID || button.id === MUSIC_TAB_ID || button.id === TEMPLATES_TAB_ID || button.id === NOTIFICATIONS_TAB_ID;
+        const own = button.id === SIGNIN_TAB_ID || button.id === SUBSCRIPTION_TAB_ID || button.id === ADMIN_TAB_ID || button.id === FRIENDS_TAB_ID || button.id === GLOSSARY_TAB_ID || button.id === PDF_TAB_ID || button.id === SETTINGS_TAB_ID || button.id === MUSIC_TAB_ID || button.id === TEMPLATES_TAB_ID || button.id === NOTIFICATIONS_TAB_ID || button.id === TIPS_TAB_ID;
         if (!own && state.activePage) closePages();
       }, true);
     }
@@ -2557,7 +2567,7 @@
     host.id = HOST_ID;
     host.hidden = true;
     host.className = 'max-w-4xl mx-auto px-3 sm:px-4 py-6 sm:py-8 pb-28 sm:pb-32 print:hidden';
-    host.innerHTML = `<div class="space-y-5"><section id="${SIGNIN_PAGE_ID}" hidden style="display:none"></section><section id="${SUBSCRIPTION_PAGE_ID}" hidden style="display:none"></section><section id="${ADMIN_PAGE_ID}" hidden style="display:none"></section><section id="${FRIENDS_PAGE_ID}" hidden style="display:none"></section><section id="${GLOSSARY_PAGE_ID}" hidden style="display:none"></section><section id="${PDF_PAGE_ID}" hidden style="display:none"></section><section id="${SETTINGS_PAGE_ID}" hidden style="display:none"></section><section id="${MUSIC_PAGE_ID}" hidden style="display:none"></section><section id="${TEMPLATES_PAGE_ID}" hidden style="display:none"></section><section id="${NOTIFICATIONS_PAGE_ID}" hidden style="display:none"></section></div>`;
+    host.innerHTML = `<div class="space-y-5"><section id="${SIGNIN_PAGE_ID}" hidden style="display:none"></section><section id="${SUBSCRIPTION_PAGE_ID}" hidden style="display:none"></section><section id="${ADMIN_PAGE_ID}" hidden style="display:none"></section><section id="${FRIENDS_PAGE_ID}" hidden style="display:none"></section><section id="${GLOSSARY_PAGE_ID}" hidden style="display:none"></section><section id="${PDF_PAGE_ID}" hidden style="display:none"></section><section id="${SETTINGS_PAGE_ID}" hidden style="display:none"></section><section id="${MUSIC_PAGE_ID}" hidden style="display:none"></section><section id="${TEMPLATES_PAGE_ID}" hidden style="display:none"></section><section id="${NOTIFICATIONS_PAGE_ID}" hidden style="display:none"></section><section id="${TIPS_PAGE_ID}" hidden style="display:none"></section></div>`;
     if (parent) parent.insertBefore(host, anchor || null);
     else document.body.appendChild(host);
     state.ui.host = host;
@@ -2603,7 +2613,7 @@
   }
 
   function openPage(pageName){
-    var validPages = { admin: 1, subscription: 1, signin: 1, friends: 1, glossary: 1, pdfimport: 1, settings: 1, music: 1, templates: 1, notifications: 1 };
+    var validPages = { admin: 1, subscription: 1, signin: 1, friends: 1, glossary: 1, pdfimport: 1, settings: 1, music: 1, templates: 1, notifications: 1, tips: 1 };
     state.activePage = validPages[pageName] ? pageName : 'signin';
     const host = ensureHost();
     host.hidden = false;
@@ -5055,6 +5065,7 @@
     const musicPage = document.getElementById(MUSIC_PAGE_ID);
     const templatesPage = document.getElementById(TEMPLATES_PAGE_ID);
     const notificationsPage = document.getElementById(NOTIFICATIONS_PAGE_ID);
+    const tipsPage = document.getElementById(TIPS_PAGE_ID);
     const showSignIn = state.activePage === 'signin';
     const showSubscription = state.activePage === 'subscription';
     const showAdmin = state.activePage === 'admin';
@@ -5065,6 +5076,7 @@
     const showMusic = state.activePage === 'music';
     const showTemplates = state.activePage === 'templates';
     const showNotifications = state.activePage === 'notifications';
+    const showTips = state.activePage === 'tips';
     setVisibility(signInPage, showSignIn);
     setVisibility(subscriptionPage, showSubscription);
     setVisibility(adminPage, showAdmin);
@@ -5075,10 +5087,11 @@
     setVisibility(musicPage, showMusic);
     setVisibility(templatesPage, showTemplates);
     setVisibility(notificationsPage, showNotifications);
+    setVisibility(tipsPage, showTips);
     host.hidden = !state.activePage;
     host.style.display = state.activePage ? '' : 'none';
     /* ── Enforce contain on hidden pages to prevent bleed ── */
-    [signInPage, adminPage, subscriptionPage, friendsPage, glossaryPage, pdfPage, settingsPage, musicPage, templatesPage, notificationsPage].forEach(function(el){
+    [signInPage, adminPage, subscriptionPage, friendsPage, glossaryPage, pdfPage, settingsPage, musicPage, templatesPage, notificationsPage, tipsPage].forEach(function(el){
       if (!el) return;
       if (el.hidden) { el.style.overflow = 'hidden'; el.style.height = '0'; el.style.pointerEvents = 'none'; }
       else { el.style.overflow = ''; el.style.height = ''; el.style.pointerEvents = ''; }
@@ -5152,6 +5165,7 @@
     if (state.activePage === 'music' && window.__stepperMusicTab) window.__stepperMusicTab.render();
     if (state.activePage === 'templates' && window.__stepperTemplatesTab) window.__stepperTemplatesTab.render();
     if (state.activePage === 'notifications' && window.__stepperNotificationsTab) window.__stepperNotificationsTab.render();
+    if (state.activePage === 'tips' && window.__stepperTipsTab) window.__stepperTipsTab.render();
     renderPresenceOnly();
     renderSuspensionBanner();
     patchFeaturedPageCopy();
