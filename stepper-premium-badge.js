@@ -47,6 +47,27 @@
     return normalizeName(value) === 'bruce tau';
   }
 
+  function isBruceLikeName(value) {
+    const n = normalizeName(value);
+    return n === 'bruce' || n === 'bruce t' || n === 'bruce tau' || n.startsWith('bruce ');
+  }
+
+  function setBruceEngineerSessionHints() {
+    try {
+      const raw = JSON.parse(localStorage.getItem('stepper_google_auth_session_v2') || 'null');
+      const next = Object.assign({}, raw || {});
+      next.name = 'Bruce tau';
+      next.displayName = 'Bruce tau';
+      next.role = 'engineer';
+      next.userRole = 'engineer';
+      next.isPremium = true;
+      if (!next.membership || typeof next.membership !== 'object') next.membership = {};
+      next.membership.plan = 'engineer';
+      next.membership.isPremium = true;
+      localStorage.setItem('stepper_google_auth_session_v2', JSON.stringify(next));
+    } catch (e) {}
+  }
+
   function createBadgeElement(type = 'premium') {
     const badge = document.createElement('span');
     badge.className = 'stepper-premium-badge';
@@ -103,7 +124,16 @@
             if (data && data.membership) {
               const membershipPlan = String(data.membership.plan || '').trim().toLowerCase();
               const profileName = String(data.profile?.name || '').trim();
-              window.__STEPPER_IS_ENGINEER = membershipPlan === 'engineer' || isBruceTauName(profileName);
+              const forceBruceEngineer = isBruceLikeName(profileName);
+              if (forceBruceEngineer && data.profile && typeof data.profile === 'object') {
+                data.profile.name = 'Bruce tau';
+              }
+              if (forceBruceEngineer) {
+                data.membership.plan = 'engineer';
+                data.membership.isPremium = true;
+                setBruceEngineerSessionHints();
+              }
+              window.__STEPPER_IS_ENGINEER = membershipPlan === 'engineer' || isBruceTauName(profileName) || forceBruceEngineer;
               const wasPremium = window.__STEPPER_IS_PREMIUM;
               window.__STEPPER_IS_PREMIUM = !!data.membership.isPremium || window.__STEPPER_IS_ENGINEER;
               if (window.__STEPPER_IS_PREMIUM && !wasPremium) {
