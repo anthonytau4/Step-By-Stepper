@@ -607,42 +607,112 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   const SETTINGS_KEY = 'stepper_sound_settings_v1';
   const TRANSITION_MESSAGE_SETS = {
     editor: [
-      'Recalculating glossary',
-      'Refreshing dance tools',
-      'Rebuilding section flow',
-      'Loading editor surface'
+      'Polishing invisible bananas',
+      'Teaching clouds to parallel park',
+      'Microwaving a PDF at 2% power',
+      'Arguing with a suspicious toaster'
     ],
     preview: [
-      'Updating assets',
-      'Updating step preview',
-      'Configuring counts',
-      'Rebuilding print layout'
+      'Rebooting the moon in safe mode',
+      'Counting how many ducks fit in Wi-Fi',
+      'Sharpening pixelated noodles',
+      'Untangling quantum shoelaces'
     ],
     whatsnew: [
-      'Loading whats new',
-      'Checking whats new updates',
-      'Rebuilding release notes',
-      'Syncing update feed'
+      'Refilling the office lava lamp',
+      'Convincing raccoons to file taxes',
+      'Dusting ancient memes carefully',
+      'Calibrating dramatic pause generator'
     ],
     featured: [
-      'Finding choreographers',
-      'Checking for updates',
-      'Getting up to date',
-      'Contacting choreographer sheets'
+      'Inflating a backup hamster',
+      'Sorting glitter by emotional weight',
+      'Testing gravity on a Tuesday',
+      'Negotiating peace between socks'
     ],
     saveddances: [
-      'Whats a dino?',
-      'Counting leprechauns',
-      'Eating cereal',
-      'Business business'
+      'Packing soup into spreadsheets',
+      'Repainting penguins in grayscale',
+      'Charging batteries with optimism',
+      'Looking for the any key'
+    ],
+    glossary: [
+      'Translating whale songs to CSV',
+      'Polishing the emergency pineapple',
+      'Reheating yesterday tomorrow',
+      'Stacking pancakes in portrait mode'
+    ],
+    pdfimport: [
+      'Scanning barcodes on potatoes',
+      'Refactoring a haunted vending machine',
+      'Compressing thunder into ZIP files',
+      'De-noising aggressively confused geese'
+    ],
+    friends: [
+      'Syncing friendships over dial-up',
+      'Upgrading gossip to enterprise edition',
+      'Crossfading between three awkward silences',
+      'Installing social DLC'
+    ],
+    music: [
+      'Auto-tuning the refrigerator hum',
+      'Sampling thunder for lo-fi beats',
+      'Quantizing pure chaos to 120 BPM',
+      'Adding reverb to silence'
+    ],
+    templates: [
+      'Photocopying the concept of maybe',
+      'Folding reality into reusable tabs',
+      'Applying premium duct tape',
+      'Compiling placeholder text into lore'
+    ],
+    notifications: [
+      'Ringing a tiny ceremonial bell',
+      'Escalating pigeons to priority support',
+      'Buffering dramatic eye contact',
+      'Sending push alerts to the void'
+    ],
+    settings: [
+      'Turning knobs that do nothing',
+      'Saving preferences to a treasure map',
+      'Enabling advanced potato mode',
+      'Reversing the polarity of vibes'
+    ],
+    signin: [
+      'Checking passport stamps from Mars',
+      'Authenticating with interpretive blinking',
+      'Handshaking with a fax machine',
+      'Verifying existence of your cat'
+    ],
+    admin: [
+      'Approving absolutely nothing quickly',
+      'Stamping forms with extra authority',
+      'Reviewing audits from the future',
+      'Deploying bureaucracy at light speed'
+    ],
+    subscription: [
+      'Wrapping premium air in foil',
+      'Calculating prices in moon rocks',
+      'Bundling perks with mystery coupons',
+      'Activating deluxe nonsense package'
     ]
   };
   const TRANSITION_LABELS = {
     editor: 'Editor',
     preview: 'Sheet',
     whatsnew: 'Whats New',
-    featured: 'Featured Choreography',
-    saveddances: 'My Saved Dances'
+    featured: 'Featured Choreo',
+    saveddances: 'My Saved Dances',
+    glossary: 'Glossary',
+    pdfimport: 'PDF Import',
+    friends: 'Friends',
+    music: 'Music',
+    templates: 'Templates',
+    notifications: 'Notifications',
+    settings: 'Settings',
+    signin: 'Sign In',
+    admin: 'Admin',
+    subscription: 'Subscription'
   };
   let overlay = null;
   let burstHost = null;
@@ -1139,8 +1209,11 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     const key = getTransitionKey(target);
     const messages = (TRANSITION_MESSAGE_SETS[key] || TRANSITION_MESSAGE_SETS.editor).slice();
     const label = TRANSITION_LABELS[key] || 'Loading';
-    if (statusKicker) statusKicker.textContent = label;
-    if (!messages.length) return;
+    if (statusKicker) statusKicker.textContent = `Loading ${label}`;
+    if (!messages.length) {
+      if (statusLine) statusLine.textContent = 'Rehydrating mysterious snack protocols';
+      return;
+    }
     if (statusLine) statusLine.textContent = messages[0];
     const moments = getStatusMoments(messages.length);
     messages.slice(1).forEach((message, index) => {
