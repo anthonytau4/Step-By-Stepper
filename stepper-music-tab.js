@@ -147,6 +147,15 @@
     };
   }
 
+  function isAndroidDevice() {
+    try {
+      var ua = String((navigator && navigator.userAgent) || '').toLowerCase();
+      return ua.indexOf('android') !== -1;
+    } catch (e) {
+      return false;
+    }
+  }
+
   function _toast(msg) {
     if (window.__stepperStepSelect && window.__stepperStepSelect.showToast) {
       window.__stepperStepSelect.showToast(msg);
@@ -394,6 +403,482 @@
     });
   }
 
+  function _arrayBufferToWaveBlob(audioBuffer, gain) {
+    var channels = Math.max(1, Number(audioBuffer.numberOfChannels || 1));
+    var sampleRate = Number(audioBuffer.sampleRate || 44100);
+    var length = Math.max(0, Number(audioBuffer.length || 0));
+    var bytesPerSample = 2;
+    var blockAlign = channels * bytesPerSample;
+    var dataSize = length * blockAlign;
+    var buffer = new ArrayBuffer(44 + dataSize);
+    var view = new DataView(buffer);
+    var offset = 0;
+    var volume = Math.max(0, Math.min(2, Number(gain || 1)));
+
+    function writeString(str) {
+      for (var i = 0; i < str.length; i++) view.setUint8(offset++, str.charCodeAt(i));
+    }
+    function writeUint16(v) { view.setUint16(offset, v, true); offset += 2; }
+    function writeUint32(v) { view.setUint32(offset, v, true); offset += 4; }
+
+    writeString('RIFF');
+    writeUint32(36 + dataSize);
+    writeString('WAVE');
+    writeString('fmt ');
+    writeUint32(16);
+    writeUint16(1);
+    writeUint16(channels);
+    writeUint32(sampleRate);
+    writeUint32(sampleRate * blockAlign);
+    writeUint16(blockAlign);
+    writeUint16(16);
+    writeString('data');
+    writeUint32(dataSize);
+
+    var channelData = [];
+    for (var c = 0; c < channels; c++) channelData.push(audioBuffer.getChannelData(c));
+    for (var iS = 0; iS < length; iS++) {
+      for (var c2 = 0; c2 < channels; c2++) {
+        var sample = (channelData[c2][iS] || 0) * volume;
+        sample = Math.max(-1, Math.min(1, sample));
+        view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+        offset += 2;
+      }
+    }
+    return new Blob([view], { type: 'audio/wav' });
+  }
+
+  function ensureMp3EncoderLoaded() {
+    if (window.lamejs && typeof window.lamejs.Mp3Encoder === 'function') {
+      return Promise.resolve(window.lamejs);
+    }
+    return Promise.reject(new Error('MP3 encoder unavailable.'));
+  }
+
+  function _floatTo16BitPCM(input) {
+    var output = new Int16Array(input.length);
+    for (var i = 0; i < input.length; i++) {
+      var s = Math.max(-1, Math.min(1, input[i]));
+      output[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+    }
+    return output;
+  }
+
+  function encodeAudioBufferToMp3Blob(audioBuffer, kbps) {
+    return ensureMp3EncoderLoaded().then(function (lamejs) {
+      var channels = Math.max(1, Math.min(2, Number(audioBuffer.numberOfChannels || 1)));
+      var sampleRate = Number(audioBuffer.sampleRate || 44100);
+      var bitrate = Math.max(96, Math.min(320, Number(kbps || 192)));
+      var mp3Encoder = new lamejs.Mp3Encoder(channels, sampleRate, bitrate);
+      var samplesL = _floatTo16BitPCM(audioBuffer.getChannelData(0));
+      var samplesR = channels > 1 ? _floatTo16BitPCM(audioBuffer.getChannelData(1)) : null;
+      var chunk = 1152;
+      var out = [];
+      for (var i = 0; i < samplesL.length; i += chunk) {
+        var leftChunk = samplesL.subarray(i, i + chunk);
+        var mp3buf = channels > 1
+          ? mp3Encoder.encodeBuffer(leftChunk, samplesR.subarray(i, i + chunk))
+          : mp3Encoder.encodeBuffer(leftChunk);
+        if (mp3buf.length > 0) out.push(new Uint8Array(mp3buf));
+      }
+      var endBuf = mp3Encoder.flush();
+      if (endBuf.length > 0) out.push(new Uint8Array(endBuf));
+      return new Blob(out, { type: 'audio/mpeg' });
+    });
+  }
+
+  function encodeAudioBufferToMp3ViaWebCodecs(audioBuffer, kbps) {
+    return new Promise(function (resolve, reject) {
+      try {
+        if (typeof AudioEncoder === 'undefined' || typeof AudioData === 'undefined') {
+          reject(new Error('WebCodecs is unavailable.'));
+          return;
+        }
+        var channels = Math.max(1, Math.min(2, Number(audioBuffer.numberOfChannels || 1)));
+        var sampleRate = Number(audioBuffer.sampleRate || 44100);
+        var bitrate = Math.max(96000, Math.min(320000, Number(kbps || 192000)));
+        AudioEncoder.isConfigSupported({
+          codec: 'mp3',
+          sampleRate: sampleRate,
+          numberOfChannels: channels,
+          bitrate: bitrate
+        }).then(function (support) {
+          if (!support || !support.supported) {
+            reject(new Error('MP3 codec is not supported by WebCodecs.'));
+            return;
+          }
+          var chunks = [];
+          var encoder = new AudioEncoder({
+            output: function (chunk) {
+              var out = new Uint8Array(chunk.byteLength);
+              chunk.copyTo(out);
+              chunks.push(out);
+            },
+            error: function (err) { reject(err || new Error('WebCodecs MP3 encode failed.')); }
+          });
+          encoder.configure({
+            codec: 'mp3',
+            sampleRate: sampleRate,
+            numberOfChannels: channels,
+            bitrate: bitrate
+          });
+
+          var frameSize = 1152;
+          var numFrames = Number(audioBuffer.length || 0);
+          var timestampUs = 0;
+          var frameDurUs = Math.round((frameSize / sampleRate) * 1e6);
+          for (var i = 0; i < numFrames; i += frameSize) {
+            var size = Math.min(frameSize, numFrames - i);
+            var planar = new Float32Array(size * channels);
+            for (var c = 0; c < channels; c++) {
+              var src = audioBuffer.getChannelData(c).subarray(i, i + size);
+              planar.set(src, c * size);
+            }
+            var audioData = new AudioData({
+              format: 'f32-planar',
+              sampleRate: sampleRate,
+              numberOfFrames: size,
+              numberOfChannels: channels,
+              timestamp: timestampUs,
+              data: planar
+            });
+            encoder.encode(audioData);
+            audioData.close();
+            timestampUs += frameDurUs;
+          }
+          encoder.flush().then(function () {
+            encoder.close();
+            if (!chunks.length) {
+              reject(new Error('No MP3 data generated by WebCodecs.'));
+              return;
+            }
+            resolve(new Blob(chunks, { type: 'audio/mpeg' }));
+          }).catch(function (err) {
+            try { encoder.close(); } catch (e) { /* ignore */ }
+            reject(err || new Error('WebCodecs flush failed.'));
+          });
+        }).catch(function (err) {
+          reject(err || new Error('WebCodecs support check failed.'));
+        });
+      } catch (err) {
+        reject(err || new Error('WebCodecs MP3 path failed.'));
+      }
+    });
+  }
+
+  function encodeAudioBufferToMp3ViaRecorder(audioBuffer) {
+    return new Promise(function (resolve, reject) {
+      if (typeof MediaRecorder === 'undefined') {
+        reject(new Error('MediaRecorder unavailable.'));
+        return;
+      }
+      var mime = 'audio/mpeg';
+      if (!MediaRecorder.isTypeSupported || !MediaRecorder.isTypeSupported(mime)) {
+        reject(new Error('audio/mpeg recording is not supported in this browser.'));
+        return;
+      }
+      var AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) {
+        reject(new Error('Web Audio unavailable.'));
+        return;
+      }
+      var liveCtx = new AudioCtx();
+      var src = liveCtx.createBufferSource();
+      src.buffer = audioBuffer;
+      var gain = liveCtx.createGain();
+      gain.gain.value = 1;
+      var dest = liveCtx.createMediaStreamDestination();
+      src.connect(gain);
+      gain.connect(dest);
+      var recorder = new MediaRecorder(dest.stream, { mimeType: mime });
+      var chunks = [];
+      recorder.ondataavailable = function (ev) {
+        if (ev && ev.data && ev.data.size > 0) chunks.push(ev.data);
+      };
+      recorder.onerror = function () {
+        try { liveCtx.close(); } catch (e1) { /* ignore */ }
+        reject(new Error('Recorder failed.'));
+      };
+      recorder.onstop = function () {
+        try { liveCtx.close(); } catch (e2) { /* ignore */ }
+        if (!chunks.length) {
+          reject(new Error('No MP3 data generated.'));
+          return;
+        }
+        var outBlob = new Blob(chunks, { type: mime });
+        isLikelyMp3Blob(outBlob).then(function (ok) {
+          if (!ok) {
+            reject(new Error('Browser recorder returned non-MP3 data.'));
+            return;
+          }
+          resolve(outBlob);
+        }).catch(function () {
+          reject(new Error('Could not validate recorder MP3 output.'));
+        });
+      };
+      recorder.start(100);
+      src.start(0);
+      src.onended = function () {
+        if (recorder.state !== 'inactive') recorder.stop();
+      };
+    });
+  }
+
+  function isLikelyMp3Blob(blob) {
+    if (!blob || typeof blob.arrayBuffer !== 'function') return Promise.resolve(false);
+    return blob.arrayBuffer().then(function (ab) {
+      var u8 = new Uint8Array(ab || new ArrayBuffer(0));
+      if (u8.length < 4) return false;
+      // ID3 header
+      if (u8[0] === 0x49 && u8[1] === 0x44 && u8[2] === 0x33) return true;
+      // MPEG frame sync (11111111 111xxxxx)
+      return (u8[0] === 0xff) && ((u8[1] & 0xe0) === 0xe0);
+    }).catch(function () {
+      return false;
+    });
+  }
+
+  function capturePitchPreservedWavFromPlayer(player, opts) {
+    return new Promise(function (resolve, reject) {
+      if (!player) {
+        reject(new Error('Audio player is unavailable for pitch-preserved export.'));
+        return;
+      }
+      if (typeof MediaRecorder === 'undefined') {
+        reject(new Error('MediaRecorder is unavailable for pitch-preserved export.'));
+        return;
+      }
+      if (!player.captureStream && !player.mozCaptureStream) {
+        reject(new Error('This browser cannot capture audio playback for pitch-preserved export.'));
+        return;
+      }
+      var stream = player.captureStream ? player.captureStream() : player.mozCaptureStream();
+      if (!stream) {
+        reject(new Error('Could not capture player stream for export.'));
+        return;
+      }
+      var mimeChoices = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/ogg'];
+      var mime = '';
+      for (var m = 0; m < mimeChoices.length; m++) {
+        if (!MediaRecorder.isTypeSupported || MediaRecorder.isTypeSupported(mimeChoices[m])) {
+          mime = mimeChoices[m];
+          break;
+        }
+      }
+      if (!mime) {
+        reject(new Error('No supported recorder format for pitch-preserved export.'));
+        return;
+      }
+
+      var original = {
+        currentTime: Number(player.currentTime || 0),
+        playbackRate: Number(player.playbackRate || 1),
+        volume: Number(player.volume || 1),
+        paused: !!player.paused
+      };
+      var offset = Math.max(0, Number(opts.offsetSeconds || 0));
+      var fromRate = Math.max(0.5, Math.min(2.5, Number(opts.fromRate || 1)));
+      var toRate = Math.max(0.5, Math.min(2.5, Number(opts.toRate || fromRate)));
+      var cfg = opts.cfg || null;
+      var expectedSeconds = Math.max(0.2, Number(opts.expectedSeconds || 0.2));
+      var outGain = Math.max(0, Math.min(1, Number(opts.volume || 1)));
+
+      var chunks = [];
+      var recorder = new MediaRecorder(stream, { mimeType: mime });
+      var rampTimer = null;
+      var stopTimer = null;
+      var endedHandler = null;
+      var finished = false;
+
+      function cleanupAndRestore() {
+        if (rampTimer) clearInterval(rampTimer);
+        if (stopTimer) clearTimeout(stopTimer);
+        if (endedHandler) player.removeEventListener('ended', endedHandler);
+        try { player.pause(); } catch (e1) { /* ignore */ }
+        try { player.currentTime = original.currentTime; } catch (e2) { /* ignore */ }
+        try { player.playbackRate = original.playbackRate; } catch (e3) { /* ignore */ }
+        try { player.volume = original.volume; } catch (e4) { /* ignore */ }
+        if (!original.paused) {
+          Promise.resolve(player.play()).catch(function () { /* ignore */ });
+        }
+        try {
+          var tracks = stream.getTracks ? stream.getTracks() : [];
+          tracks.forEach(function (t) { try { t.stop(); } catch (e5) { /* ignore */ } });
+        } catch (e6) { /* ignore */ }
+      }
+
+      function finalizeBlob(rawBlob) {
+        if (!rawBlob || !rawBlob.size) {
+          reject(new Error('Pitch-preserved export produced empty audio.'));
+          return;
+        }
+        var AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) {
+          reject(new Error('Web Audio decode is unavailable for WAV conversion.'));
+          return;
+        }
+        var decodeCtx = new AudioCtx();
+        rawBlob.arrayBuffer().then(function (ab) {
+          return decodeCtx.decodeAudioData(ab);
+        }).then(function (decoded) {
+          var wavBlob = _arrayBufferToWaveBlob(decoded, 1);
+          try { decodeCtx.close(); } catch (e7) { /* ignore */ }
+          resolve(wavBlob);
+        }).catch(function () {
+          try { decodeCtx.close(); } catch (e8) { /* ignore */ }
+          reject(new Error('Could not decode captured audio for WAV export.'));
+        });
+      }
+
+      recorder.ondataavailable = function (ev) {
+        if (ev && ev.data && ev.data.size > 0) chunks.push(ev.data);
+      };
+      recorder.onerror = function () {
+        if (finished) return;
+        finished = true;
+        cleanupAndRestore();
+        reject(new Error('Recorder failed during pitch-preserved export.'));
+      };
+      recorder.onstop = function () {
+        if (finished) return;
+        finished = true;
+        cleanupAndRestore();
+        finalizeBlob(new Blob(chunks, { type: mime }));
+      };
+
+      var startMs = Date.now();
+      function applyRate() {
+        var elapsed = (Date.now() - startMs) / 1000;
+        var nextRate = fromRate;
+        if (cfg) {
+          if (cfg.fullSong) {
+            var t = Math.min(1, Math.max(0, elapsed / expectedSeconds));
+            nextRate = fromRate + (toRate - fromRate) * t;
+          } else {
+            var rampSecs = Math.max(0.01, Math.min(expectedSeconds, Number(cfg.seconds || 1)));
+            if (elapsed < rampSecs) {
+              var r = Math.min(1, Math.max(0, elapsed / rampSecs));
+              nextRate = fromRate + (toRate - fromRate) * r;
+            } else {
+              nextRate = toRate;
+            }
+          }
+        }
+        try { player.playbackRate = Math.max(0.5, Math.min(2.5, nextRate)); } catch (e9) { /* ignore */ }
+      }
+
+      try {
+        player.preservesPitch = true;
+        player.mozPreservesPitch = true;
+        player.webkitPreservesPitch = true;
+      } catch (e10) { /* ignore */ }
+      try { player.currentTime = offset; } catch (e11) { /* ignore */ }
+      player.volume = outGain;
+      applyRate();
+      recorder.start(100);
+      endedHandler = function () {
+        if (recorder.state !== 'inactive') recorder.stop();
+      };
+      player.addEventListener('ended', endedHandler, { once: true });
+      rampTimer = setInterval(applyRate, 50);
+      stopTimer = setTimeout(function () {
+        if (recorder.state !== 'inactive') recorder.stop();
+      }, Math.ceil((expectedSeconds + 0.25) * 1000));
+      Promise.resolve(player.play()).catch(function () {
+        if (recorder.state !== 'inactive') recorder.stop();
+      });
+    });
+  }
+
+  function exportEditedAudio() {
+    if (!_audioAnalysisBuffer) {
+      _toast('Import an MP3 first.');
+      return;
+    }
+    var AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) {
+      _toast('Export needs Web Audio support.');
+      return;
+    }
+    var ctx = new AudioCtx();
+    ctx.decodeAudioData(_audioAnalysisBuffer.slice(0)).then(function (decoded) {
+      var offsetSeconds = Math.max(0, Number(musicState.audioStartOffset || 0));
+      var channels = Math.max(1, decoded.numberOfChannels || 1);
+      var player = document.querySelector('[data-music-audio-player]');
+      var cfg = musicState.tempoRampConfig;
+      var baseRate = player ? Math.max(0.5, Math.min(2.5, Number(player.playbackRate || 1))) : 1;
+      var fromRate = cfg ? Math.max(0.5, Math.min(2.5, Number(cfg.from || baseRate || 1))) : baseRate;
+      var toRate = cfg ? Math.max(0.5, Math.min(2.5, Number(cfg.to || fromRate || 1))) : fromRate;
+      var sourceDuration = Math.max(0.01, Number(decoded.duration || 0) - offsetSeconds);
+      var avgRate = Math.max(0.5, (fromRate + toRate) / 2);
+      var estimatedOutSeconds = Math.max(0.2, sourceDuration / avgRate);
+      var hasSpeedChange = Math.abs(fromRate - 1) > 0.001 || Math.abs(toRate - 1) > 0.001;
+      if (hasSpeedChange && player) {
+        return capturePitchPreservedWavFromPlayer(player, {
+          offsetSeconds: offsetSeconds,
+          expectedSeconds: estimatedOutSeconds,
+          fromRate: fromRate,
+          toRate: toRate,
+          cfg: cfg,
+          volume: Number(musicState.audioVolume || 1)
+        }).then(function (wavBlob) {
+          if (!wavBlob || !wavBlob.size) throw new Error('Export produced an empty WAV file.');
+          var baseName = String(musicState.audioName || 'edited-track').replace(/\.[a-z0-9]{2,6}$/i, '');
+          var a = document.createElement('a');
+          a.href = URL.createObjectURL(wavBlob);
+          a.download = baseName + '-edited.wav';
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(function () {
+            try { URL.revokeObjectURL(a.href); } catch (e0) { /* ignore */ }
+            a.remove();
+          }, 0);
+          _toast('Edited WAV exported (sped up + original pitch preserved).');
+          try { ctx.close(); } catch (e1) { /* ignore */ }
+        });
+      }
+      estimatedOutSeconds = Math.max(0.2, sourceDuration);
+      var renderSampleRate = 44100;
+      var offlineLen = Math.max(1, Math.ceil(renderSampleRate * estimatedOutSeconds));
+      var OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+      if (!OfflineCtx) {
+        _toast('Offline export is not supported in this browser.');
+        try { ctx.close(); } catch (e1) { /* ignore */ }
+        return;
+      }
+      var offline = new OfflineCtx(channels, offlineLen, renderSampleRate);
+      var source = offline.createBufferSource();
+      source.buffer = decoded;
+      source.playbackRate.setValueAtTime(1, 0);
+      var gainNode = offline.createGain();
+      gainNode.gain.value = Math.max(0, Math.min(2, Number(musicState.audioVolume || 1)));
+      source.connect(gainNode);
+      gainNode.connect(offline.destination);
+      source.start(0, offsetSeconds);
+      var blobPromise = offline.startRendering().then(function (rendered) {
+        return _arrayBufferToWaveBlob(rendered, 1);
+      });
+      return blobPromise.then(function (wavBlob) {
+      if (!wavBlob || !wavBlob.size) throw new Error('Export produced an empty WAV file.');
+      var baseName = String(musicState.audioName || 'edited-track').replace(/\.[a-z0-9]{2,6}$/i, '');
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(wavBlob);
+      a.download = baseName + '-edited.wav';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () {
+        try { URL.revokeObjectURL(a.href); } catch (e) { /* ignore */ }
+        a.remove();
+      }, 0);
+      _toast('Edited WAV exported (original pitch preserved).');
+      try { ctx.close(); } catch (e2) { /* ignore */ }
+      });
+    }).catch(function (err) {
+      try { ctx.close(); } catch (e3) { /* ignore */ }
+      _toast((err && err.message) ? ('Export failed: ' + err.message) : 'Could not export this audio file.');
+    });
+  }
+
   /* ── Style injection ─────────────────────────────────────────────────── */
   function ensureMusicStyles() {
     if (document.getElementById('stepper-music-tab-style')) return;
@@ -408,7 +893,24 @@
       '@keyframes stepper-metro-flash { 0%{box-shadow:0 0 0 0 rgba(99,102,241,.7);} 70%{box-shadow:0 0 0 18px rgba(99,102,241,0);} 100%{box-shadow:0 0 0 0 rgba(99,102,241,0);} }',
       '@keyframes stepper-toast-in { from{opacity:0;transform:translateX(-50%) translateY(12px);} to{opacity:1;transform:translateX(-50%) translateY(0);} }',
       '#' + PAGE_ID + ' .metro-dot.active { animation:stepper-metro-pulse .3s ease,stepper-metro-flash .6s ease; }',
-      '#' + PAGE_ID + ' .tap-btn:active { transform:scale(.93); }'
+      '#' + PAGE_ID + ' .tap-btn:active { transform:scale(.93); }',
+      '#' + PAGE_ID + '.stepper-android-layout .music-card { border-radius:16px!important;padding:14px!important; }',
+      '#' + PAGE_ID + '.stepper-android-layout .music-card:hover { transform:none;box-shadow:none; }',
+      '#' + PAGE_ID + '.stepper-android-layout table { font-size:12px!important; }',
+      '#' + PAGE_ID + '.stepper-android-layout button { max-width:100%; }',
+      '@media (max-width:900px) { #' + PAGE_ID + '.stepper-android-layout [data-music-audio-file] { width:100%;max-width:100%; } }',
+      '@media (max-width:900px) { #' + PAGE_ID + '.stepper-android-layout [data-music-compact-grid] { grid-template-columns:1fr!important; } }',
+      '@media (max-width:900px) { #' + PAGE_ID + '.stepper-android-layout [data-music-compact-actions] { display:grid!important;grid-template-columns:1fr 1fr;gap:8px!important; } }',
+      '@media (max-width:520px) { #' + PAGE_ID + '.stepper-android-layout [data-music-compact-actions] { grid-template-columns:1fr!important; } }',
+      '@media (max-width:900px) { #' + PAGE_ID + '.stepper-android-layout [data-music-compact-actions] button { width:100%;padding:10px 8px!important;font-size:11px!important; } }',
+      '@media (max-width:900px) { #' + PAGE_ID + '.stepper-android-layout [data-music-transport-wrap] { width:100%;display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr)); } }',
+      '@media (max-width:900px) { #' + PAGE_ID + '.stepper-android-layout [data-music-transport-wrap] button { width:100%; } }',
+      '@media (max-width:900px) { #' + PAGE_ID + '.stepper-android-layout [data-music-header-actions] { flex-direction:column!important;align-items:stretch!important; } }'
+      ,
+      '@media (max-width:1200px) { #' + PAGE_ID + '.stepper-android-layout [data-music-compact-grid] { grid-template-columns:1fr!important; } }',
+      '@media (max-width:1200px) { #' + PAGE_ID + '.stepper-android-layout [data-music-header-actions] { flex-direction:column!important;align-items:stretch!important; } }',
+      '@media (max-width:1200px) { #' + PAGE_ID + '.stepper-android-layout [data-music-transport-wrap] { width:100%;display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr)); } }',
+      '@media (max-width:1200px) { #' + PAGE_ID + '.stepper-android-layout [data-music-transport-wrap] button { width:100%; } }'
     ].join('\n');
     document.head.appendChild(style);
   }
@@ -701,6 +1203,7 @@
     html += '.studio-full-mixer{margin-top:10px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;}';
     html += '.studio-full-header-actions{width:100%;}';
     html += '.studio-full-header-actions button{flex:1 1 160px;}';
+    html += '@media (max-width:980px){.studio-full-layout{grid-template-columns:1fr;min-width:0;min-height:auto;}.studio-full-main{min-width:0;}.studio-full-aside{border-right:none!important;border-bottom:1px solid rgba(148,163,184,.28);} .studio-full-mixer{grid-template-columns:1fr;}.studio-full-header-actions button{flex:1 1 100%;}}';
     html += '</style>';
     html += '<div class="studio-full-shell rounded-3xl border ' + theme.shell + '">';
     html += '<div class="studio-full-header ' + theme.panel + '">';
@@ -830,13 +1333,15 @@
       html += '<label class="' + theme.subtle + '" style="font-size:12px;">Start Trim Offset (seconds):</label>';
       html += '<input data-music-start-offset type="number" min="0" step="0.1" value="' + escapeHtml(String(musicState.audioStartOffset || 0)) + '" style="width:120px;padding:8px 10px;border:1px solid;border-radius:10px;' + theme.inputBg + '" />';
       html += '</div>';
-      html += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">';
+      html += '<div data-music-compact-actions style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">';
       html += '<button data-music-play-trim style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnPrimary + '">Play from Trim</button>';
       html += '<button data-music-metro-from-start style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnPrimary + '">Play + Metronome from Start Spot</button>';
       html += '<button data-music-half style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnSecondary + '">½ Counts</button>';
       html += '<button data-music-normal style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnSecondary + '">1× Counts</button>';
       html += '<button data-music-double style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnSecondary + '">2× Counts</button>';
+      html += '<button data-music-export-edited style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;background:#0ea5e9;color:#fff;">Export Edited WAV</button>';
       html += '</div>';
+      html += '<div class="' + theme.subtle + '" style="font-size:11px;margin-top:2px;">Export creates a new edited WAV (trim + speed + volume) while keeping original pitch.</div>';
       html += '<div class="' + theme.subtle + '" style="font-size:12px;">Detected BPM: <strong>' + (musicState.audioDetectedBpm || '—') + '</strong> · Count Feel: <strong>' + musicState.audioCountFeel + '×</strong> · Effective Count BPM: <strong>' + (effectiveBpm || '—') + '</strong></div>';
       html += '<div class="' + theme.subtle + '" style="font-size:12px;margin-top:4px;">Start dance after <strong>' + (startCounts || 0) + ' counts</strong>';
       if (startCounts) html += ' (' + startEights + ' eight-counts' + (startRemainder ? (' + ' + startRemainder) : '') + ')';
@@ -852,11 +1357,11 @@
       html += '<div data-music-studio-close style="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99998;display:flex;align-items:center;justify-content:center;padding:20px;">';
       html += '<div style="width:min(1400px,98vw);max-height:94vh;overflow:auto;border-radius:22px;border:1px solid;' + (theme.dark ? 'background:#101218;border-color:#2a2f3b;color:#e5e7eb;' : 'background:#f5f6f8;border-color:#d1d5db;color:#111827;') + '">';
       html += '<div style="padding:10px 14px;border-bottom:1px solid;' + (theme.dark ? 'border-color:#2a2f3b;background:#181b24;' : 'border-color:#d1d5db;background:#eceff3;') + ';display:flex;justify-content:space-between;align-items:center;"><div style="font-weight:900;letter-spacing:.04em;">🎛 STEP BY STEPPER STUDIO</div><button data-music-studio-close-btn style="padding:7px 12px;border:none;border-radius:9px;cursor:pointer;' + theme.btnSecondary + '">Close</button></div>';
-      html += '<div style="padding:12px;border-bottom:1px solid;' + (theme.dark ? 'border-color:#2a2f3b;background:#1f2430;' : 'border-color:#d1d5db;background:#e5e7eb;') + ';display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">';
-      html += '<div style="display:flex;gap:8px;"><button data-music-transport-rewind style="padding:7px 10px;border:none;border-radius:8px;' + theme.btnSecondary + '">⏮</button><button data-music-transport-play style="padding:7px 12px;border:none;border-radius:8px;' + theme.btnPrimary + '">▶</button><button data-music-transport-pause style="padding:7px 12px;border:none;border-radius:8px;' + theme.btnSecondary + '">⏸</button></div>';
+      html += '<div data-music-header-actions style="padding:12px;border-bottom:1px solid;' + (theme.dark ? 'border-color:#2a2f3b;background:#1f2430;' : 'border-color:#d1d5db;background:#e5e7eb;') + ';display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">';
+      html += '<div data-music-transport-wrap style="display:flex;gap:8px;"><button data-music-transport-rewind style="padding:7px 10px;border:none;border-radius:8px;' + theme.btnSecondary + '">⏮</button><button data-music-transport-play style="padding:7px 12px;border:none;border-radius:8px;' + theme.btnPrimary + '">▶</button><button data-music-transport-pause style="padding:7px 12px;border:none;border-radius:8px;' + theme.btnSecondary + '">⏸</button></div>';
       html += '<div style="font-size:12px;font-weight:800;">TRANSPORT · BPM ' + (effectiveBpm || '—') + ' · Start After ' + (startCounts || 0) + ' Counts</div>';
       html += '</div>';
-      html += '<div style="display:grid;grid-template-columns:300px 360px 1fr;gap:0;min-height:520px;">';
+      html += '<div data-music-compact-grid style="display:grid;grid-template-columns:300px 360px 1fr;gap:0;min-height:520px;">';
       html += '<div style="border-right:1px solid ' + (theme.dark ? '#2a2f3b' : '#d1d5db') + ';padding:14px;background:' + (theme.dark ? '#171a22' : '#f0f2f6') + ';"><div style="font-size:13px;font-weight:800;margin-bottom:10px;">CONTENT LIBRARY</div><div style="height:420px;border:1px solid ' + (theme.dark ? '#2a2f3b' : '#cbd5e1') + ';border-radius:10px;padding:10px;overflow:auto;"><div style="opacity:.8;font-size:12px;">Imported: ' + escapeHtml(musicState.audioName || 'No file') + '</div><div style="margin-top:12px;font-size:12px;">Trim Start: ' + Number(musicState.audioStartOffset || 0).toFixed(1) + 's</div></div></div>';
       html += '<div style="border-right:1px solid ' + (theme.dark ? '#2a2f3b' : '#d1d5db') + ';padding:14px;background:' + (theme.dark ? '#1c202b' : '#e9edf2') + ';"><div style="font-size:13px;font-weight:800;margin-bottom:10px;">TRACK PANEL</div><div style="height:420px;border:1px solid ' + (theme.dark ? '#2a2f3b' : '#cbd5e1') + ';border-radius:10px;padding:10px;"><div style="font-size:12px;">Audio 1</div><div style="margin-top:10px;height:8px;border-radius:999px;background:' + (theme.dark ? '#374151' : '#cbd5e1') + ';"><div style="width:55%;height:8px;border-radius:999px;background:#22c55e;"></div></div></div></div>';
       html += '<div style="padding:14px;background:' + (theme.dark ? '#141821' : '#f8fafc') + ';"><div style="font-size:13px;font-weight:800;margin-bottom:10px;">TIMELINE</div><div style="height:420px;border:1px solid ' + (theme.dark ? '#2a2f3b' : '#cbd5e1') + ';border-radius:10px;position:relative;overflow:hidden;">';
@@ -920,6 +1425,8 @@
     html += '</div>';
 
     page.innerHTML = html;
+    if (isAndroidDevice()) page.classList.add('stepper-android-layout');
+    else page.classList.remove('stepper-android-layout');
     attachMusicListeners(page);
   }
 
@@ -1326,6 +1833,7 @@
       }
       musicState.studioFullPageOpen = true;
       renderMusicPage();
+      try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) { window.scrollTo(0, 0); }
     });
     page.querySelectorAll('[data-music-studio-close],[data-music-studio-close-btn]').forEach(function (el) {
       el.addEventListener('click', function () {
@@ -1333,6 +1841,8 @@
         renderMusicPage();
       });
     });
+    var exportEditedBtn = page.querySelector('[data-music-export-edited]');
+    if (exportEditedBtn) exportEditedBtn.addEventListener('click', function () { exportEditedAudio(); });
 
     // Tap reset
     var tapResetBtn = page.querySelector('[data-tap-reset]');

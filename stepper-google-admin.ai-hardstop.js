@@ -39,6 +39,29 @@
   const PRESENCE_INTERVAL_MS = 30000;
   const FEATURED_SYNC_INTERVAL_MS = 18000;
   const LIVE_QUEUE_SYNC_INTERVAL_MS = 4000;
+  const EXTRA_PAGE_PATHS = {
+    signin: '/signin',
+    subscription: '/subscription',
+    admin: '/admin',
+    friends: '/friends',
+    glossary: '/glossary',
+    pdfimport: '/pdf-import',
+    settings: '/settings',
+    music: '/music',
+    templates: '/templates',
+    notifications: '/notifications',
+    moderator: '/moderator'
+  };
+  const LOADING_SPLASH_LINES = [
+    'Polishing invisible cowboy boots with quantum glitter...',
+    'Translating dance counts into dolphin legalese...',
+    'Rehearsing with three polite raccoons and a fog machine...',
+    'Calibrating moonwalk gravity to exactly 87% noodle...',
+    'Summoning BPM from a haunted toaster oven...',
+    'Checking if penguins approve this layout update...',
+    'Aligning disco lasers with certified banana geometry...',
+    'Teaching pixels how to yeehaw responsibly...'
+  ];
 
   const state = {
     activePage: null,
@@ -2599,11 +2622,12 @@
     showNativeExtraHost();
     if (state.ui.mainEl) state.ui.mainEl.style.display = '';
     if (state.ui.footerWrap) state.ui.footerWrap.style.display = '';
+    syncBrowserPathForActivePage();
     updateTabButtons();
   }
 
   function openPage(pageName){
-    var validPages = { admin: 1, subscription: 1, signin: 1, friends: 1, glossary: 1, pdfimport: 1, settings: 1, music: 1, templates: 1, notifications: 1 };
+    var validPages = { admin: 1, subscription: 1, signin: 1, friends: 1, glossary: 1, pdfimport: 1, settings: 1, music: 1, templates: 1, notifications: 1, moderator: 1 };
     state.activePage = validPages[pageName] ? pageName : 'signin';
     const host = ensureHost();
     host.hidden = false;
@@ -2611,11 +2635,44 @@
     hideNativeExtraHost();
     if (state.ui.mainEl) state.ui.mainEl.style.display = 'none';
     if (state.ui.footerWrap) state.ui.footerWrap.style.display = 'none';
+    syncBrowserPathForActivePage();
     renderPages(true);
     updateTabButtons();
     refreshLiveQueues().then(() => {
       if (state.activePage) scheduleRenderPages(2000);
     }).catch(() => {});
+  }
+
+  function pathToExtraPage(pathname){
+    const clean = String(pathname || '/').replace(/\/+$/, '') || '/';
+    const entries = Object.entries(EXTRA_PAGE_PATHS);
+    for (let i = 0; i < entries.length; i++) {
+      if (entries[i][1] === clean) return entries[i][0];
+    }
+    return null;
+  }
+
+  function syncBrowserPathForActivePage(){
+    const target = state.activePage ? (EXTRA_PAGE_PATHS[state.activePage] || '/') : '/';
+    const current = String(location.pathname || '/').replace(/\/+$/, '') || '/';
+    if (target === current) return;
+    try { history.pushState({ stepperPage: state.activePage || null }, '', target + location.search + location.hash); } catch (e) { /* ignore */ }
+  }
+
+  function openPageFromCurrentPathIfNeeded(){
+    const page = pathToExtraPage(location.pathname);
+    if (!page) return;
+    openPage(page);
+  }
+
+  function installPathRouting(){
+    if (window.__stepperExtraPathRoutingInstalled) return;
+    window.__stepperExtraPathRoutingInstalled = true;
+    window.addEventListener('popstate', function () {
+      const page = pathToExtraPage(location.pathname);
+      if (page) openPage(page);
+      else closePages();
+    });
   }
 
   function updateAdminTabVisibility(){
@@ -5166,36 +5223,59 @@
     return true;
   }
 
+  function showWeirdLoadingSplash() {
+    if (document.getElementById('stepper-weird-loading-splash')) return function () {};
+    const splash = document.createElement('div');
+    splash.id = 'stepper-weird-loading-splash';
+    splash.style.cssText = 'position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#0f172a,#312e81);color:#fff;font-family:Inter,system-ui,sans-serif;';
+    const line = LOADING_SPLASH_LINES[Math.floor(Math.random() * LOADING_SPLASH_LINES.length)];
+    splash.innerHTML = '<div style="text-align:center;padding:24px;max-width:min(680px,92vw);"><div style="font-size:22px;font-weight:900;letter-spacing:.04em;margin-bottom:12px;">Step By Stepper is booting...</div><div style="font-size:15px;opacity:.92;">' + escapeHtml(line) + '</div></div>';
+    document.body.appendChild(splash);
+    return function hide() {
+      if (!splash || !splash.parentNode) return;
+      splash.style.transition = 'opacity .25s ease';
+      splash.style.opacity = '0';
+      setTimeout(function () { try { splash.remove(); } catch (e) { /* ignore */ } }, 260);
+    };
+  }
+
   async function prime(){
-    ensureStyles();
-    if (location.protocol === 'http:' || location.protocol === 'https:') {
-      const savedBase = normalizeApiBase(localStorage.getItem(API_BASE_KEY) || '');
-      const preferredBase = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') ? 'http://localhost:3000' : DEFAULT_BACKEND_BASE;
-      if (!savedBase || savedBase === 'http://localhost:3000' || savedBase === 'https://localhost:3000' || savedBase === normalizeApiBase(location.origin)) saveApiBase(preferredBase);
-      await chooseWorkingApiBase(state.apiBase || preferredBase);
+    const hideLoadingSplash = showWeirdLoadingSplash();
+    installPathRouting();
+    try {
+      ensureStyles();
+      if (location.protocol === 'http:' || location.protocol === 'https:') {
+        const savedBase = normalizeApiBase(localStorage.getItem(API_BASE_KEY) || '');
+        const preferredBase = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') ? 'http://localhost:3000' : DEFAULT_BACKEND_BASE;
+        if (!savedBase || savedBase === 'http://localhost:3000' || savedBase === 'https://localhost:3000' || savedBase === normalizeApiBase(location.origin)) saveApiBase(preferredBase);
+        await chooseWorkingApiBase(state.apiBase || preferredBase);
+      }
+      if (!locateUi()) return;
+      ensureHost();
+      _initSectionContextMenu();
+      wireStartupBackendBase();
+      wireSecurityDeterrent();
+      await refreshConfig();
+      await refreshPresence();
+      if (state.session && state.session.credential) {
+        await refreshSession();
+        await heartbeat();
+        await refreshCloudSaves();
+      state.savedDancesUiSignature = '';
+        await restoreLatestCloudSaveIfNeeded();
+        await syncCurrentDanceToBackend(false);
+        await refreshNotifications();
+        await refreshSubscription();
+        await confirmCheckoutIfPresent();
+        if (isAdminSession()) { await refreshAdminDances(); await refreshSubmissions(); await refreshGlossaryRequests(); }
+      }
+      await refreshGlossaryApproved();
+      await syncFeaturedFromBackend();
+      renderPages();
+      openPageFromCurrentPathIfNeeded();
+    } finally {
+      hideLoadingSplash();
     }
-    if (!locateUi()) return;
-    ensureHost();
-    _initSectionContextMenu();
-    wireStartupBackendBase();
-    wireSecurityDeterrent();
-    await refreshConfig();
-    await refreshPresence();
-    if (state.session && state.session.credential) {
-      await refreshSession();
-      await heartbeat();
-      await refreshCloudSaves();
-    state.savedDancesUiSignature = '';
-      await restoreLatestCloudSaveIfNeeded();
-      await syncCurrentDanceToBackend(false);
-      await refreshNotifications();
-      await refreshSubscription();
-      await confirmCheckoutIfPresent();
-      if (isAdminSession()) { await refreshAdminDances(); await refreshSubmissions(); await refreshGlossaryRequests(); }
-    }
-    await refreshGlossaryApproved();
-    await syncFeaturedFromBackend();
-    renderPages();
   }
 
   if (document.readyState === 'loading') {
