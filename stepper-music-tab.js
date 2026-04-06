@@ -38,6 +38,7 @@
     tempoRampConfig: null
   };
   var _audioAnalysisBuffer = null;
+  var _lameLoadPromise = null;
 
   /* ── Helpers ─────────────────────────────────────────────────────────── */
   function isDarkMode() {
@@ -448,6 +449,57 @@
     return new Blob([view], { type: 'audio/wav' });
   }
 
+  function ensureMp3EncoderLoaded() {
+    if (window.lamejs && typeof window.lamejs.Mp3Encoder === 'function') {
+      return Promise.resolve(window.lamejs);
+    }
+    if (_lameLoadPromise) return _lameLoadPromise;
+    _lameLoadPromise = new Promise(function (resolve, reject) {
+      var script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js';
+      script.async = true;
+      script.onload = function () {
+        if (window.lamejs && typeof window.lamejs.Mp3Encoder === 'function') resolve(window.lamejs);
+        else reject(new Error('MP3 encoder unavailable.'));
+      };
+      script.onerror = function () { reject(new Error('Failed to load MP3 encoder.')); };
+      document.head.appendChild(script);
+    });
+    return _lameLoadPromise;
+  }
+
+  function _floatTo16BitPCM(input) {
+    var output = new Int16Array(input.length);
+    for (var i = 0; i < input.length; i++) {
+      var s = Math.max(-1, Math.min(1, input[i]));
+      output[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+    }
+    return output;
+  }
+
+  function encodeAudioBufferToMp3Blob(audioBuffer, kbps) {
+    return ensureMp3EncoderLoaded().then(function (lamejs) {
+      var channels = Math.max(1, Math.min(2, Number(audioBuffer.numberOfChannels || 1)));
+      var sampleRate = Number(audioBuffer.sampleRate || 44100);
+      var bitrate = Math.max(96, Math.min(320, Number(kbps || 192)));
+      var mp3Encoder = new lamejs.Mp3Encoder(channels, sampleRate, bitrate);
+      var samplesL = _floatTo16BitPCM(audioBuffer.getChannelData(0));
+      var samplesR = channels > 1 ? _floatTo16BitPCM(audioBuffer.getChannelData(1)) : null;
+      var chunk = 1152;
+      var out = [];
+      for (var i = 0; i < samplesL.length; i += chunk) {
+        var leftChunk = samplesL.subarray(i, i + chunk);
+        var mp3buf = channels > 1
+          ? mp3Encoder.encodeBuffer(leftChunk, samplesR.subarray(i, i + chunk))
+          : mp3Encoder.encodeBuffer(leftChunk);
+        if (mp3buf.length > 0) out.push(new Uint8Array(mp3buf));
+      }
+      var endBuf = mp3Encoder.flush();
+      if (endBuf.length > 0) out.push(new Uint8Array(endBuf));
+      return new Blob(out, { type: 'audio/mpeg' });
+    });
+  }
+
   function exportEditedAudio() {
     if (!_audioAnalysisBuffer) {
       _toast('Import an MP3 first.');
@@ -471,14 +523,15 @@
       var sourceDuration = Math.max(0.01, Number(decoded.duration || 0) - offsetSeconds);
       var avgRate = Math.max(0.5, (fromRate + toRate) / 2);
       var estimatedOutSeconds = Math.max(0.2, sourceDuration / avgRate);
-      var offlineLen = Math.max(1, Math.ceil(decoded.sampleRate * estimatedOutSeconds));
+      var renderSampleRate = 44100;
+      var offlineLen = Math.max(1, Math.ceil(renderSampleRate * estimatedOutSeconds));
       var OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
       if (!OfflineCtx) {
         _toast('Offline export is not supported in this browser.');
         try { ctx.close(); } catch (e1) { /* ignore */ }
         return;
       }
-      var offline = new OfflineCtx(channels, offlineLen, decoded.sampleRate);
+      var offline = new OfflineCtx(channels, offlineLen, renderSampleRate);
       var source = offline.createBufferSource();
       source.buffer = decoded;
       source.playbackRate.setValueAtTime(fromRate, 0);
@@ -497,20 +550,20 @@
       gainNode.connect(offline.destination);
       source.start(0, offsetSeconds);
       var blobPromise = offline.startRendering().then(function (rendered) {
-        return _arrayBufferToWaveBlob(rendered, 1);
+        return encodeAudioBufferToMp3Blob(rendered, 192);
       });
       return blobPromise.then(function (blob) {
       var baseName = String(musicState.audioName || 'edited-track').replace(/\.[a-z0-9]{2,6}$/i, '');
       var a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = baseName + '-edited.wav';
+      a.download = baseName + '-edited.mp3';
       document.body.appendChild(a);
       a.click();
       setTimeout(function () {
         try { URL.revokeObjectURL(a.href); } catch (e) { /* ignore */ }
         a.remove();
       }, 0);
-      _toast('Edited accelerated audio exported (WAV).');
+      _toast('Edited accelerated audio exported (MP3).');
       try { ctx.close(); } catch (e2) { /* ignore */ }
       });
     }).catch(function () {
@@ -974,7 +1027,7 @@
       html += '<button data-music-double style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnSecondary + '">2× Counts</button>';
       html += '<button data-music-export-edited style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;background:#0ea5e9;color:#fff;">Export Edited MP3</button>';
       html += '</div>';
-      html += '<div class="' + theme.subtle + '" style="font-size:11px;margin-top:2px;">Export downloads a trimmed file from the current start offset (WAV fallback for browser compatibility).</div>';
+      html += '<div class="' + theme.subtle + '" style="font-size:11px;margin-top:2px;">Export creates a new edited MP3 (trim + tempo + volume), not the original source file.</div>';
       html += '<div class="' + theme.subtle + '" style="font-size:12px;">Detected BPM: <strong>' + (musicState.audioDetectedBpm || '—') + '</strong> · Count Feel: <strong>' + musicState.audioCountFeel + '×</strong> · Effective Count BPM: <strong>' + (effectiveBpm || '—') + '</strong></div>';
       html += '<div class="' + theme.subtle + '" style="font-size:12px;margin-top:4px;">Start dance after <strong>' + (startCounts || 0) + ' counts</strong>';
       if (startCounts) html += ' (' + startEights + ' eight-counts' + (startRemainder ? (' + ' + startRemainder) : '') + ')';
