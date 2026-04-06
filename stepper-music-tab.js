@@ -453,19 +453,7 @@
     if (window.lamejs && typeof window.lamejs.Mp3Encoder === 'function') {
       return Promise.resolve(window.lamejs);
     }
-    if (_lameLoadPromise) return _lameLoadPromise;
-    _lameLoadPromise = new Promise(function (resolve, reject) {
-      var script = document.createElement('script');
-      script.src = 'https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js';
-      script.async = true;
-      script.onload = function () {
-        if (window.lamejs && typeof window.lamejs.Mp3Encoder === 'function') resolve(window.lamejs);
-        else reject(new Error('MP3 encoder unavailable.'));
-      };
-      script.onerror = function () { reject(new Error('Failed to load MP3 encoder.')); };
-      document.head.appendChild(script);
-    });
-    return _lameLoadPromise;
+    return Promise.reject(new Error('MP3 encoder unavailable.'));
   }
 
   function _floatTo16BitPCM(input) {
@@ -497,6 +485,55 @@
       var endBuf = mp3Encoder.flush();
       if (endBuf.length > 0) out.push(new Uint8Array(endBuf));
       return new Blob(out, { type: 'audio/mpeg' });
+    });
+  }
+
+  function encodeAudioBufferToMp3ViaRecorder(audioBuffer) {
+    return new Promise(function (resolve, reject) {
+      if (typeof MediaRecorder === 'undefined') {
+        reject(new Error('MediaRecorder unavailable.'));
+        return;
+      }
+      var mime = 'audio/mpeg';
+      if (!MediaRecorder.isTypeSupported || !MediaRecorder.isTypeSupported(mime)) {
+        reject(new Error('audio/mpeg recording is not supported in this browser.'));
+        return;
+      }
+      var AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) {
+        reject(new Error('Web Audio unavailable.'));
+        return;
+      }
+      var liveCtx = new AudioCtx();
+      var src = liveCtx.createBufferSource();
+      src.buffer = audioBuffer;
+      var gain = liveCtx.createGain();
+      gain.gain.value = 1;
+      var dest = liveCtx.createMediaStreamDestination();
+      src.connect(gain);
+      gain.connect(dest);
+      var recorder = new MediaRecorder(dest.stream, { mimeType: mime });
+      var chunks = [];
+      recorder.ondataavailable = function (ev) {
+        if (ev && ev.data && ev.data.size > 0) chunks.push(ev.data);
+      };
+      recorder.onerror = function () {
+        try { liveCtx.close(); } catch (e1) { /* ignore */ }
+        reject(new Error('Recorder failed.'));
+      };
+      recorder.onstop = function () {
+        try { liveCtx.close(); } catch (e2) { /* ignore */ }
+        if (!chunks.length) {
+          reject(new Error('No MP3 data generated.'));
+          return;
+        }
+        resolve(new Blob(chunks, { type: mime }));
+      };
+      recorder.start(100);
+      src.start(0);
+      src.onended = function () {
+        if (recorder.state !== 'inactive') recorder.stop();
+      };
     });
   }
 
@@ -550,7 +587,9 @@
       gainNode.connect(offline.destination);
       source.start(0, offsetSeconds);
       var blobPromise = offline.startRendering().then(function (rendered) {
-        return encodeAudioBufferToMp3Blob(rendered, 192);
+        return encodeAudioBufferToMp3Blob(rendered, 192).catch(function () {
+          return encodeAudioBufferToMp3ViaRecorder(rendered);
+        });
       });
       return blobPromise.then(function (blob) {
       var baseName = String(musicState.audioName || 'edited-track').replace(/\.[a-z0-9]{2,6}$/i, '');
