@@ -653,15 +653,8 @@
     ctx.decodeAudioData(_audioAnalysisBuffer.slice(0)).then(function (decoded) {
       var offsetSeconds = Math.max(0, Number(musicState.audioStartOffset || 0));
       var channels = Math.max(1, decoded.numberOfChannels || 1);
-      var player = document.querySelector('[data-music-audio-player]');
-      var cfg = musicState.tempoRampConfig;
-      var baseRate = player ? Math.max(0.5, Math.min(2.5, Number(player.playbackRate || 1))) : 1;
-      var fromRate = cfg ? Math.max(0.5, Math.min(2.5, Number(cfg.from || baseRate || 1))) : baseRate;
-      var toRate = cfg ? Math.max(0.5, Math.min(2.5, Number(cfg.to || fromRate || 1))) : fromRate;
-
       var sourceDuration = Math.max(0.01, Number(decoded.duration || 0) - offsetSeconds);
-      var avgRate = Math.max(0.5, (fromRate + toRate) / 2);
-      var estimatedOutSeconds = Math.max(0.2, sourceDuration / avgRate);
+      var estimatedOutSeconds = Math.max(0.2, sourceDuration);
       var renderSampleRate = 44100;
       var offlineLen = Math.max(1, Math.ceil(renderSampleRate * estimatedOutSeconds));
       var OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
@@ -673,16 +666,7 @@
       var offline = new OfflineCtx(channels, offlineLen, renderSampleRate);
       var source = offline.createBufferSource();
       source.buffer = decoded;
-      source.playbackRate.setValueAtTime(fromRate, 0);
-      if (cfg) {
-        if (cfg.fullSong) {
-          source.playbackRate.linearRampToValueAtTime(toRate, estimatedOutSeconds);
-        } else {
-          var rampSecs = Math.max(0.01, Math.min(estimatedOutSeconds, Number(cfg.seconds || 1)));
-          source.playbackRate.linearRampToValueAtTime(toRate, rampSecs);
-          source.playbackRate.setValueAtTime(toRate, estimatedOutSeconds);
-        }
-      }
+      source.playbackRate.setValueAtTime(1, 0);
       var gainNode = offline.createGain();
       gainNode.gain.value = Math.max(0, Math.min(2, Number(musicState.audioVolume || 1)));
       source.connect(gainNode);
@@ -703,7 +687,7 @@
         try { URL.revokeObjectURL(a.href); } catch (e) { /* ignore */ }
         a.remove();
       }, 0);
-      _toast('Edited accelerated WAV exported.');
+      _toast('Edited WAV exported (original pitch preserved).');
       try { ctx.close(); } catch (e2) { /* ignore */ }
       });
     }).catch(function (err) {
@@ -1174,7 +1158,7 @@
       html += '<button data-music-double style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnSecondary + '">2× Counts</button>';
       html += '<button data-music-export-edited style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;background:#0ea5e9;color:#fff;">Export Edited WAV</button>';
       html += '</div>';
-      html += '<div class="' + theme.subtle + '" style="font-size:11px;margin-top:2px;">Export creates a new edited WAV (trim + tempo + volume).</div>';
+      html += '<div class="' + theme.subtle + '" style="font-size:11px;margin-top:2px;">Export creates a new edited WAV (trim + volume) and keeps original pitch.</div>';
       html += '<div class="' + theme.subtle + '" style="font-size:12px;">Detected BPM: <strong>' + (musicState.audioDetectedBpm || '—') + '</strong> · Count Feel: <strong>' + musicState.audioCountFeel + '×</strong> · Effective Count BPM: <strong>' + (effectiveBpm || '—') + '</strong></div>';
       html += '<div class="' + theme.subtle + '" style="font-size:12px;margin-top:4px;">Start dance after <strong>' + (startCounts || 0) + ' counts</strong>';
       if (startCounts) html += ' (' + startEights + ' eight-counts' + (startRemainder ? (' + ' + startRemainder) : '') + ')';
