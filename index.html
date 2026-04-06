@@ -607,42 +607,112 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   const SETTINGS_KEY = 'stepper_sound_settings_v1';
   const TRANSITION_MESSAGE_SETS = {
     editor: [
-      'Recalculating glossary',
-      'Refreshing dance tools',
-      'Rebuilding section flow',
-      'Loading editor surface'
+      'Build tab is alphabetizing your chaos',
+      'Convincing steps to line up politely',
+      'Reticulating boot-scootin splines',
+      'Installing premium yeehaw compiler'
     ],
     preview: [
-      'Updating assets',
-      'Updating step preview',
-      'Configuring counts',
-      'Rebuilding print layout'
+      'Sheet tab is pretending this is printable',
+      'Measuring margins with interpretive dance',
+      'Stretching counts so they look responsible',
+      'Calibrating printer confidence'
     ],
     whatsnew: [
-      'Loading whats new',
-      'Checking whats new updates',
-      'Rebuilding release notes',
-      'Syncing update feed'
+      'Whats New tab is collecting shiny drama',
+      'Polishing update crumbs into headlines',
+      'Reheating old notes for emotional warmth',
+      'Filing chaos under definitely planned'
     ],
     featured: [
-      'Finding choreographers',
-      'Checking for updates',
-      'Getting up to date',
-      'Contacting choreographer sheets'
+      'Featured Choreo tab is scouting ankle legends',
+      'Dusting trophies no one asked for',
+      'Applying cinematic wind to choreographers',
+      'Highlighting moves with extra sparkle tax'
     ],
     saveddances: [
-      'Whats a dino?',
-      'Counting leprechauns',
-      'Eating cereal',
-      'Business business'
+      'My Saved Dances tab is hugging your drafts',
+      'Untangling filenames named final-final-really',
+      'Counting vibes instead of backups',
+      'Stacking memories by dramatic importance'
+    ],
+    glossary: [
+      'Glossary tab is translating dance gobbledygook',
+      'Teaching feet new vocabulary words',
+      'Sorting jargon into tiny neat piles',
+      'Defining things with suspicious confidence'
+    ],
+    pdfimport: [
+      'PDF Import tab is wrestling stubborn pages',
+      'Extracting text from caffeinated pixels',
+      'Bribing commas to stay in order',
+      'Converting document soup into step soup'
+    ],
+    friends: [
+      'Friends tab is summoning dance gremlins',
+      'Checking who liked your shuffle era',
+      'Buffering group chat choreography',
+      'Recharging social battery at 1%'
+    ],
+    music: [
+      'Music tab is counting beats on fingers',
+      'Negotiating peace with the metronome',
+      'Inflating BPM with pure confidence',
+      'Making silence feel legally rhythmic'
+    ],
+    templates: [
+      'Templates tab is cloning starter dances',
+      'Copy-pasting structure with style',
+      'Folding reusable chaos into neat cards',
+      'Pretending this was always organized'
+    ],
+    notifications: [
+      'Notifications tab is ringing tiny alarms',
+      'Shuffling pings into dramatic order',
+      'Inflating badges for no reason',
+      'Delivering updates with jazz hands'
+    ],
+    settings: [
+      'Settings tab is flipping mysterious switches',
+      'Tuning preferences with a butter knife',
+      'Saving choices in invisible jars',
+      'Pretending defaults were your idea'
+    ],
+    signin: [
+      'Sign In tab is checking your dance passport',
+      'Polishing login buttons to a mirror shine',
+      'Negotiating with the account gremlin',
+      'Stamping access with imaginary ink'
+    ],
+    admin: [
+      'Admin tab is putting on serious glasses',
+      'Auditing mischief in 4K',
+      'Approving things with dramatic authority',
+      'Deploying spreadsheets of justice'
+    ],
+    subscription: [
+      'Subscription tab is counting sparkly perks',
+      'Calculating value in pure jazz hands',
+      'Wrapping plans in shiny ribbons',
+      'Upgrading vibes to deluxe'
     ]
   };
   const TRANSITION_LABELS = {
-    editor: 'Editor',
+    editor: 'Build',
     preview: 'Sheet',
     whatsnew: 'Whats New',
-    featured: 'Featured Choreography',
-    saveddances: 'My Saved Dances'
+    featured: 'Featured Choreo',
+    saveddances: 'My Saved Dances',
+    glossary: 'Glossary',
+    pdfimport: 'PDF Import',
+    friends: 'Friends',
+    music: 'Music',
+    templates: 'Templates',
+    notifications: 'Notifications',
+    settings: 'Settings',
+    signin: 'Sign In',
+    admin: 'Admin',
+    subscription: 'Subscription'
   };
   let overlay = null;
   let burstHost = null;
@@ -1139,12 +1209,16 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     const key = getTransitionKey(target);
     const messages = (TRANSITION_MESSAGE_SETS[key] || TRANSITION_MESSAGE_SETS.editor).slice();
     const label = TRANSITION_LABELS[key] || 'Loading';
-    if (statusKicker) statusKicker.textContent = label;
-    if (!messages.length) return;
-    if (statusLine) statusLine.textContent = messages[0];
+    const loadingLabel = `Loading ${label}`;
+    const splashTester = messages.length ? messages[0] : 'Summoning tab nonsense';
+    if (statusKicker) statusKicker.textContent = splashTester;
+    if (statusLine) statusLine.textContent = loadingLabel;
+    if (messages.length <= 1) return;
     const moments = getStatusMoments(messages.length);
     messages.slice(1).forEach((message, index) => {
-      const timer = window.setTimeout(() => swapStatusText(message), moments[index + 1] || 0);
+      const timer = window.setTimeout(() => {
+        if (statusKicker) statusKicker.textContent = message;
+      }, moments[index + 1] || 0);
       transitionTimers.push(timer);
     });
   }
