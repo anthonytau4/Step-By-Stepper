@@ -530,12 +530,10 @@
           var frameDurUs = Math.round((frameSize / sampleRate) * 1e6);
           for (var i = 0; i < numFrames; i += frameSize) {
             var size = Math.min(frameSize, numFrames - i);
-            var planes = [];
+            var planar = new Float32Array(size * channels);
             for (var c = 0; c < channels; c++) {
               var src = audioBuffer.getChannelData(c).subarray(i, i + size);
-              var p = new Float32Array(size);
-              p.set(src);
-              planes.push(p);
+              planar.set(src, c * size);
             }
             var audioData = new AudioData({
               format: 'f32-planar',
@@ -543,7 +541,7 @@
               numberOfFrames: size,
               numberOfChannels: channels,
               timestamp: timestampUs,
-              data: planes
+              data: planar
             });
             encoder.encode(audioData);
             audioData.close();
@@ -740,15 +738,16 @@
       '@media (max-width:900px) { #' + PAGE_ID + '.stepper-android-layout [data-music-audio-file] { width:100%;max-width:100%; } }',
       '@media (max-width:900px) { #' + PAGE_ID + '.stepper-android-layout [data-music-compact-grid] { grid-template-columns:1fr!important; } }',
       '@media (max-width:900px) { #' + PAGE_ID + '.stepper-android-layout [data-music-compact-actions] { display:grid!important;grid-template-columns:1fr 1fr;gap:8px!important; } }',
+      '@media (max-width:520px) { #' + PAGE_ID + '.stepper-android-layout [data-music-compact-actions] { grid-template-columns:1fr!important; } }',
       '@media (max-width:900px) { #' + PAGE_ID + '.stepper-android-layout [data-music-compact-actions] button { width:100%;padding:10px 8px!important;font-size:11px!important; } }',
       '@media (max-width:900px) { #' + PAGE_ID + '.stepper-android-layout [data-music-transport-wrap] { width:100%;display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr)); } }',
       '@media (max-width:900px) { #' + PAGE_ID + '.stepper-android-layout [data-music-transport-wrap] button { width:100%; } }',
       '@media (max-width:900px) { #' + PAGE_ID + '.stepper-android-layout [data-music-header-actions] { flex-direction:column!important;align-items:stretch!important; } }'
       ,
-      '@media (max-width:1200px) { #' + PAGE_ID + ' [data-music-compact-grid] { grid-template-columns:1fr!important; } }',
-      '@media (max-width:1200px) { #' + PAGE_ID + ' [data-music-header-actions] { flex-direction:column!important;align-items:stretch!important; } }',
-      '@media (max-width:1200px) { #' + PAGE_ID + ' [data-music-transport-wrap] { width:100%;display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr)); } }',
-      '@media (max-width:1200px) { #' + PAGE_ID + ' [data-music-transport-wrap] button { width:100%; } }'
+      '@media (max-width:1200px) { #' + PAGE_ID + '.stepper-android-layout [data-music-compact-grid] { grid-template-columns:1fr!important; } }',
+      '@media (max-width:1200px) { #' + PAGE_ID + '.stepper-android-layout [data-music-header-actions] { flex-direction:column!important;align-items:stretch!important; } }',
+      '@media (max-width:1200px) { #' + PAGE_ID + '.stepper-android-layout [data-music-transport-wrap] { width:100%;display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr)); } }',
+      '@media (max-width:1200px) { #' + PAGE_ID + '.stepper-android-layout [data-music-transport-wrap] button { width:100%; } }'
     ].join('\n');
     document.head.appendChild(style);
   }
