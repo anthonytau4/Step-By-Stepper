@@ -38,6 +38,7 @@
     tempoRampConfig: null
   };
   var _audioAnalysisBuffer = null;
+  var _lameLoadPromise = null;
 
   /* ── Helpers ─────────────────────────────────────────────────────────── */
   function isDarkMode() {
