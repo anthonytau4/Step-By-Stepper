@@ -1834,6 +1834,7 @@
       }
       musicState.studioFullPageOpen = true;
       renderMusicPage();
+      try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) { window.scrollTo(0, 0); }
     });
     page.querySelectorAll('[data-music-studio-close],[data-music-studio-close-btn]').forEach(function (el) {
       el.addEventListener('click', function () {
