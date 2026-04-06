@@ -147,6 +147,15 @@
     };
   }
 
+  function isAndroidDevice() {
+    try {
+      var ua = String((navigator && navigator.userAgent) || '').toLowerCase();
+      return ua.indexOf('android') !== -1;
+    } catch (e) {
+      return false;
+    }
+  }
+
   function _toast(msg) {
     if (window.__stepperStepSelect && window.__stepperStepSelect.showToast) {
       window.__stepperStepSelect.showToast(msg);
@@ -394,6 +403,122 @@
     });
   }
 
+  function _arrayBufferToWaveBlob(audioBuffer, gain) {
+    var channels = Math.max(1, Number(audioBuffer.numberOfChannels || 1));
+    var sampleRate = Number(audioBuffer.sampleRate || 44100);
+    var length = Math.max(0, Number(audioBuffer.length || 0));
+    var bytesPerSample = 2;
+    var blockAlign = channels * bytesPerSample;
+    var dataSize = length * blockAlign;
+    var buffer = new ArrayBuffer(44 + dataSize);
+    var view = new DataView(buffer);
+    var offset = 0;
+    var volume = Math.max(0, Math.min(2, Number(gain || 1)));
+
+    function writeString(str) {
+      for (var i = 0; i < str.length; i++) view.setUint8(offset++, str.charCodeAt(i));
+    }
+    function writeUint16(v) { view.setUint16(offset, v, true); offset += 2; }
+    function writeUint32(v) { view.setUint32(offset, v, true); offset += 4; }
+
+    writeString('RIFF');
+    writeUint32(36 + dataSize);
+    writeString('WAVE');
+    writeString('fmt ');
+    writeUint32(16);
+    writeUint16(1);
+    writeUint16(channels);
+    writeUint32(sampleRate);
+    writeUint32(sampleRate * blockAlign);
+    writeUint16(blockAlign);
+    writeUint16(16);
+    writeString('data');
+    writeUint32(dataSize);
+
+    var channelData = [];
+    for (var c = 0; c < channels; c++) channelData.push(audioBuffer.getChannelData(c));
+    for (var iS = 0; iS < length; iS++) {
+      for (var c2 = 0; c2 < channels; c2++) {
+        var sample = (channelData[c2][iS] || 0) * volume;
+        sample = Math.max(-1, Math.min(1, sample));
+        view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+        offset += 2;
+      }
+    }
+    return new Blob([view], { type: 'audio/wav' });
+  }
+
+  function exportEditedAudio() {
+    if (!_audioAnalysisBuffer) {
+      _toast('Import an MP3 first.');
+      return;
+    }
+    var AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) {
+      _toast('Export needs Web Audio support.');
+      return;
+    }
+    var ctx = new AudioCtx();
+    ctx.decodeAudioData(_audioAnalysisBuffer.slice(0)).then(function (decoded) {
+      var offsetSeconds = Math.max(0, Number(musicState.audioStartOffset || 0));
+      var channels = Math.max(1, decoded.numberOfChannels || 1);
+      var player = document.querySelector('[data-music-audio-player]');
+      var cfg = musicState.tempoRampConfig;
+      var baseRate = player ? Math.max(0.5, Math.min(2.5, Number(player.playbackRate || 1))) : 1;
+      var fromRate = cfg ? Math.max(0.5, Math.min(2.5, Number(cfg.from || baseRate || 1))) : baseRate;
+      var toRate = cfg ? Math.max(0.5, Math.min(2.5, Number(cfg.to || fromRate || 1))) : fromRate;
+
+      var sourceDuration = Math.max(0.01, Number(decoded.duration || 0) - offsetSeconds);
+      var avgRate = Math.max(0.5, (fromRate + toRate) / 2);
+      var estimatedOutSeconds = Math.max(0.2, sourceDuration / avgRate);
+      var offlineLen = Math.max(1, Math.ceil(decoded.sampleRate * estimatedOutSeconds));
+      var OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+      if (!OfflineCtx) {
+        _toast('Offline export is not supported in this browser.');
+        try { ctx.close(); } catch (e1) { /* ignore */ }
+        return;
+      }
+      var offline = new OfflineCtx(channels, offlineLen, decoded.sampleRate);
+      var source = offline.createBufferSource();
+      source.buffer = decoded;
+      source.playbackRate.setValueAtTime(fromRate, 0);
+      if (cfg) {
+        if (cfg.fullSong) {
+          source.playbackRate.linearRampToValueAtTime(toRate, estimatedOutSeconds);
+        } else {
+          var rampSecs = Math.max(0.01, Math.min(estimatedOutSeconds, Number(cfg.seconds || 1)));
+          source.playbackRate.linearRampToValueAtTime(toRate, rampSecs);
+          source.playbackRate.setValueAtTime(toRate, estimatedOutSeconds);
+        }
+      }
+      var gainNode = offline.createGain();
+      gainNode.gain.value = Math.max(0, Math.min(2, Number(musicState.audioVolume || 1)));
+      source.connect(gainNode);
+      gainNode.connect(offline.destination);
+      source.start(0, offsetSeconds);
+      var blobPromise = offline.startRendering().then(function (rendered) {
+        return _arrayBufferToWaveBlob(rendered, 1);
+      });
+      return blobPromise.then(function (blob) {
+      var baseName = String(musicState.audioName || 'edited-track').replace(/\.[a-z0-9]{2,6}$/i, '');
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = baseName + '-edited.wav';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () {
+        try { URL.revokeObjectURL(a.href); } catch (e) { /* ignore */ }
+        a.remove();
+      }, 0);
+      _toast('Edited accelerated audio exported (WAV).');
+      try { ctx.close(); } catch (e2) { /* ignore */ }
+      });
+    }).catch(function () {
+      try { ctx.close(); } catch (e3) { /* ignore */ }
+      _toast('Could not export this audio file.');
+    });
+  }
+
   /* ── Style injection ─────────────────────────────────────────────────── */
   function ensureMusicStyles() {
     if (document.getElementById('stepper-music-tab-style')) return;
@@ -408,7 +533,18 @@
       '@keyframes stepper-metro-flash { 0%{box-shadow:0 0 0 0 rgba(99,102,241,.7);} 70%{box-shadow:0 0 0 18px rgba(99,102,241,0);} 100%{box-shadow:0 0 0 0 rgba(99,102,241,0);} }',
       '@keyframes stepper-toast-in { from{opacity:0;transform:translateX(-50%) translateY(12px);} to{opacity:1;transform:translateX(-50%) translateY(0);} }',
       '#' + PAGE_ID + ' .metro-dot.active { animation:stepper-metro-pulse .3s ease,stepper-metro-flash .6s ease; }',
-      '#' + PAGE_ID + ' .tap-btn:active { transform:scale(.93); }'
+      '#' + PAGE_ID + ' .tap-btn:active { transform:scale(.93); }',
+      '#' + PAGE_ID + '.stepper-android-layout .music-card { border-radius:16px!important;padding:14px!important; }',
+      '#' + PAGE_ID + '.stepper-android-layout .music-card:hover { transform:none;box-shadow:none; }',
+      '#' + PAGE_ID + '.stepper-android-layout table { font-size:12px!important; }',
+      '#' + PAGE_ID + '.stepper-android-layout button { max-width:100%; }',
+      '@media (max-width:900px) { #' + PAGE_ID + '.stepper-android-layout [data-music-audio-file] { width:100%;max-width:100%; } }',
+      '@media (max-width:900px) { #' + PAGE_ID + '.stepper-android-layout [data-music-compact-grid] { grid-template-columns:1fr!important; } }',
+      '@media (max-width:900px) { #' + PAGE_ID + '.stepper-android-layout [data-music-compact-actions] { display:grid!important;grid-template-columns:1fr 1fr;gap:8px!important; } }',
+      '@media (max-width:900px) { #' + PAGE_ID + '.stepper-android-layout [data-music-compact-actions] button { width:100%;padding:10px 8px!important;font-size:11px!important; } }',
+      '@media (max-width:900px) { #' + PAGE_ID + '.stepper-android-layout [data-music-transport-wrap] { width:100%;display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr)); } }',
+      '@media (max-width:900px) { #' + PAGE_ID + '.stepper-android-layout [data-music-transport-wrap] button { width:100%; } }',
+      '@media (max-width:900px) { #' + PAGE_ID + '.stepper-android-layout [data-music-header-actions] { flex-direction:column!important;align-items:stretch!important; } }'
     ].join('\n');
     document.head.appendChild(style);
   }
@@ -830,13 +966,15 @@
       html += '<label class="' + theme.subtle + '" style="font-size:12px;">Start Trim Offset (seconds):</label>';
       html += '<input data-music-start-offset type="number" min="0" step="0.1" value="' + escapeHtml(String(musicState.audioStartOffset || 0)) + '" style="width:120px;padding:8px 10px;border:1px solid;border-radius:10px;' + theme.inputBg + '" />';
       html += '</div>';
-      html += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">';
+      html += '<div data-music-compact-actions style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">';
       html += '<button data-music-play-trim style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnPrimary + '">Play from Trim</button>';
       html += '<button data-music-metro-from-start style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnPrimary + '">Play + Metronome from Start Spot</button>';
       html += '<button data-music-half style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnSecondary + '">½ Counts</button>';
       html += '<button data-music-normal style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnSecondary + '">1× Counts</button>';
       html += '<button data-music-double style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnSecondary + '">2× Counts</button>';
+      html += '<button data-music-export-edited style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;background:#0ea5e9;color:#fff;">Export Edited MP3</button>';
       html += '</div>';
+      html += '<div class="' + theme.subtle + '" style="font-size:11px;margin-top:2px;">Export downloads a trimmed file from the current start offset (WAV fallback for browser compatibility).</div>';
       html += '<div class="' + theme.subtle + '" style="font-size:12px;">Detected BPM: <strong>' + (musicState.audioDetectedBpm || '—') + '</strong> · Count Feel: <strong>' + musicState.audioCountFeel + '×</strong> · Effective Count BPM: <strong>' + (effectiveBpm || '—') + '</strong></div>';
       html += '<div class="' + theme.subtle + '" style="font-size:12px;margin-top:4px;">Start dance after <strong>' + (startCounts || 0) + ' counts</strong>';
       if (startCounts) html += ' (' + startEights + ' eight-counts' + (startRemainder ? (' + ' + startRemainder) : '') + ')';
@@ -852,11 +990,11 @@
       html += '<div data-music-studio-close style="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99998;display:flex;align-items:center;justify-content:center;padding:20px;">';
       html += '<div style="width:min(1400px,98vw);max-height:94vh;overflow:auto;border-radius:22px;border:1px solid;' + (theme.dark ? 'background:#101218;border-color:#2a2f3b;color:#e5e7eb;' : 'background:#f5f6f8;border-color:#d1d5db;color:#111827;') + '">';
       html += '<div style="padding:10px 14px;border-bottom:1px solid;' + (theme.dark ? 'border-color:#2a2f3b;background:#181b24;' : 'border-color:#d1d5db;background:#eceff3;') + ';display:flex;justify-content:space-between;align-items:center;"><div style="font-weight:900;letter-spacing:.04em;">🎛 STEP BY STEPPER STUDIO</div><button data-music-studio-close-btn style="padding:7px 12px;border:none;border-radius:9px;cursor:pointer;' + theme.btnSecondary + '">Close</button></div>';
-      html += '<div style="padding:12px;border-bottom:1px solid;' + (theme.dark ? 'border-color:#2a2f3b;background:#1f2430;' : 'border-color:#d1d5db;background:#e5e7eb;') + ';display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">';
-      html += '<div style="display:flex;gap:8px;"><button data-music-transport-rewind style="padding:7px 10px;border:none;border-radius:8px;' + theme.btnSecondary + '">⏮</button><button data-music-transport-play style="padding:7px 12px;border:none;border-radius:8px;' + theme.btnPrimary + '">▶</button><button data-music-transport-pause style="padding:7px 12px;border:none;border-radius:8px;' + theme.btnSecondary + '">⏸</button></div>';
+      html += '<div data-music-header-actions style="padding:12px;border-bottom:1px solid;' + (theme.dark ? 'border-color:#2a2f3b;background:#1f2430;' : 'border-color:#d1d5db;background:#e5e7eb;') + ';display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">';
+      html += '<div data-music-transport-wrap style="display:flex;gap:8px;"><button data-music-transport-rewind style="padding:7px 10px;border:none;border-radius:8px;' + theme.btnSecondary + '">⏮</button><button data-music-transport-play style="padding:7px 12px;border:none;border-radius:8px;' + theme.btnPrimary + '">▶</button><button data-music-transport-pause style="padding:7px 12px;border:none;border-radius:8px;' + theme.btnSecondary + '">⏸</button></div>';
       html += '<div style="font-size:12px;font-weight:800;">TRANSPORT · BPM ' + (effectiveBpm || '—') + ' · Start After ' + (startCounts || 0) + ' Counts</div>';
       html += '</div>';
-      html += '<div style="display:grid;grid-template-columns:300px 360px 1fr;gap:0;min-height:520px;">';
+      html += '<div data-music-compact-grid style="display:grid;grid-template-columns:300px 360px 1fr;gap:0;min-height:520px;">';
       html += '<div style="border-right:1px solid ' + (theme.dark ? '#2a2f3b' : '#d1d5db') + ';padding:14px;background:' + (theme.dark ? '#171a22' : '#f0f2f6') + ';"><div style="font-size:13px;font-weight:800;margin-bottom:10px;">CONTENT LIBRARY</div><div style="height:420px;border:1px solid ' + (theme.dark ? '#2a2f3b' : '#cbd5e1') + ';border-radius:10px;padding:10px;overflow:auto;"><div style="opacity:.8;font-size:12px;">Imported: ' + escapeHtml(musicState.audioName || 'No file') + '</div><div style="margin-top:12px;font-size:12px;">Trim Start: ' + Number(musicState.audioStartOffset || 0).toFixed(1) + 's</div></div></div>';
       html += '<div style="border-right:1px solid ' + (theme.dark ? '#2a2f3b' : '#d1d5db') + ';padding:14px;background:' + (theme.dark ? '#1c202b' : '#e9edf2') + ';"><div style="font-size:13px;font-weight:800;margin-bottom:10px;">TRACK PANEL</div><div style="height:420px;border:1px solid ' + (theme.dark ? '#2a2f3b' : '#cbd5e1') + ';border-radius:10px;padding:10px;"><div style="font-size:12px;">Audio 1</div><div style="margin-top:10px;height:8px;border-radius:999px;background:' + (theme.dark ? '#374151' : '#cbd5e1') + ';"><div style="width:55%;height:8px;border-radius:999px;background:#22c55e;"></div></div></div></div>';
       html += '<div style="padding:14px;background:' + (theme.dark ? '#141821' : '#f8fafc') + ';"><div style="font-size:13px;font-weight:800;margin-bottom:10px;">TIMELINE</div><div style="height:420px;border:1px solid ' + (theme.dark ? '#2a2f3b' : '#cbd5e1') + ';border-radius:10px;position:relative;overflow:hidden;">';
@@ -920,6 +1058,8 @@
     html += '</div>';
 
     page.innerHTML = html;
+    if (isAndroidDevice()) page.classList.add('stepper-android-layout');
+    else page.classList.remove('stepper-android-layout');
     attachMusicListeners(page);
   }
 
@@ -1333,6 +1473,8 @@
         renderMusicPage();
       });
     });
+    var exportEditedBtn = page.querySelector('[data-music-export-edited]');
+    if (exportEditedBtn) exportEditedBtn.addEventListener('click', function () { exportEditedAudio(); });
 
     // Tap reset
     var tapResetBtn = page.querySelector('[data-tap-reset]');
