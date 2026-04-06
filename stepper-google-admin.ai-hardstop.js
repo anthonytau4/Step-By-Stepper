@@ -2639,7 +2639,7 @@
   }
 
   function openPage(pageName){
-    var validPages = { admin: 1, subscription: 1, signin: 1, friends: 1, glossary: 1, pdfimport: 1, settings: 1, music: 1, templates: 1, notifications: 1, moderator: 1 };
+    var validPages = { admin: 1, subscription: 1, signin: 1, friends: 1, glossary: 1, pdfimport: 1, settings: 1, music: 1, templates: 1, notifications: 1, tips: 1 };
     state.activePage = validPages[pageName] ? pageName : 'signin';
     const host = ensureHost();
     host.hidden = false;
