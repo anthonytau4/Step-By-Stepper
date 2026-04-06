@@ -607,94 +607,94 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
   const SETTINGS_KEY = 'stepper_sound_settings_v1';
   const TRANSITION_MESSAGE_SETS = {
     editor: [
-      'Build tab is alphabetizing your chaos',
-      'Convincing steps to line up politely',
-      'Reticulating boot-scootin splines',
-      'Installing premium yeehaw compiler'
+      'Polishing invisible bananas',
+      'Teaching clouds to parallel park',
+      'Microwaving a PDF at 2% power',
+      'Arguing with a suspicious toaster'
     ],
     preview: [
-      'Sheet tab is pretending this is printable',
-      'Measuring margins with interpretive dance',
-      'Stretching counts so they look responsible',
-      'Calibrating printer confidence'
+      'Rebooting the moon in safe mode',
+      'Counting how many ducks fit in Wi-Fi',
+      'Sharpening pixelated noodles',
+      'Untangling quantum shoelaces'
     ],
     whatsnew: [
-      'Whats New tab is collecting shiny drama',
-      'Polishing update crumbs into headlines',
-      'Reheating old notes for emotional warmth',
-      'Filing chaos under definitely planned'
+      'Refilling the office lava lamp',
+      'Convincing raccoons to file taxes',
+      'Dusting ancient memes carefully',
+      'Calibrating dramatic pause generator'
     ],
     featured: [
-      'Featured Choreo tab is scouting ankle legends',
-      'Dusting trophies no one asked for',
-      'Applying cinematic wind to choreographers',
-      'Highlighting moves with extra sparkle tax'
+      'Inflating a backup hamster',
+      'Sorting glitter by emotional weight',
+      'Testing gravity on a Tuesday',
+      'Negotiating peace between socks'
     ],
     saveddances: [
-      'My Saved Dances tab is hugging your drafts',
-      'Untangling filenames named final-final-really',
-      'Counting vibes instead of backups',
-      'Stacking memories by dramatic importance'
+      'Packing soup into spreadsheets',
+      'Repainting penguins in grayscale',
+      'Charging batteries with optimism',
+      'Looking for the any key'
     ],
     glossary: [
-      'Glossary tab is translating dance gobbledygook',
-      'Teaching feet new vocabulary words',
-      'Sorting jargon into tiny neat piles',
-      'Defining things with suspicious confidence'
+      'Translating whale songs to CSV',
+      'Polishing the emergency pineapple',
+      'Reheating yesterday tomorrow',
+      'Stacking pancakes in portrait mode'
     ],
     pdfimport: [
-      'PDF Import tab is wrestling stubborn pages',
-      'Extracting text from caffeinated pixels',
-      'Bribing commas to stay in order',
-      'Converting document soup into step soup'
+      'Scanning barcodes on potatoes',
+      'Refactoring a haunted vending machine',
+      'Compressing thunder into ZIP files',
+      'De-noising aggressively confused geese'
     ],
     friends: [
-      'Friends tab is summoning dance gremlins',
-      'Checking who liked your shuffle era',
-      'Buffering group chat choreography',
-      'Recharging social battery at 1%'
+      'Syncing friendships over dial-up',
+      'Upgrading gossip to enterprise edition',
+      'Crossfading between three awkward silences',
+      'Installing social DLC'
     ],
     music: [
-      'Music tab is counting beats on fingers',
-      'Negotiating peace with the metronome',
-      'Inflating BPM with pure confidence',
-      'Making silence feel legally rhythmic'
+      'Auto-tuning the refrigerator hum',
+      'Sampling thunder for lo-fi beats',
+      'Quantizing pure chaos to 120 BPM',
+      'Adding reverb to silence'
     ],
     templates: [
-      'Templates tab is cloning starter dances',
-      'Copy-pasting structure with style',
-      'Folding reusable chaos into neat cards',
-      'Pretending this was always organized'
+      'Photocopying the concept of maybe',
+      'Folding reality into reusable tabs',
+      'Applying premium duct tape',
+      'Compiling placeholder text into lore'
     ],
     notifications: [
-      'Notifications tab is ringing tiny alarms',
-      'Shuffling pings into dramatic order',
-      'Inflating badges for no reason',
-      'Delivering updates with jazz hands'
+      'Ringing a tiny ceremonial bell',
+      'Escalating pigeons to priority support',
+      'Buffering dramatic eye contact',
+      'Sending push alerts to the void'
     ],
     settings: [
-      'Settings tab is flipping mysterious switches',
-      'Tuning preferences with a butter knife',
-      'Saving choices in invisible jars',
-      'Pretending defaults were your idea'
+      'Turning knobs that do nothing',
+      'Saving preferences to a treasure map',
+      'Enabling advanced potato mode',
+      'Reversing the polarity of vibes'
     ],
     signin: [
-      'Sign In tab is checking your dance passport',
-      'Polishing login buttons to a mirror shine',
-      'Negotiating with the account gremlin',
-      'Stamping access with imaginary ink'
+      'Checking passport stamps from Mars',
+      'Authenticating with interpretive blinking',
+      'Handshaking with a fax machine',
+      'Verifying existence of your cat'
     ],
     admin: [
-      'Admin tab is putting on serious glasses',
-      'Auditing mischief in 4K',
-      'Approving things with dramatic authority',
-      'Deploying spreadsheets of justice'
+      'Approving absolutely nothing quickly',
+      'Stamping forms with extra authority',
+      'Reviewing audits from the future',
+      'Deploying bureaucracy at light speed'
     ],
     subscription: [
-      'Subscription tab is counting sparkly perks',
-      'Calculating value in pure jazz hands',
-      'Wrapping plans in shiny ribbons',
-      'Upgrading vibes to deluxe'
+      'Wrapping premium air in foil',
+      'Calculating prices in moon rocks',
+      'Bundling perks with mystery coupons',
+      'Activating deluxe nonsense package'
     ]
   };
   const TRANSITION_LABELS = {
@@ -1209,11 +1209,12 @@ function kg(){const[e,t]=W.useState("editor"),[r,o]=W.useState(!1),[n,i]=W.useSt
     const key = getTransitionKey(target);
     const messages = (TRANSITION_MESSAGE_SETS[key] || TRANSITION_MESSAGE_SETS.editor).slice();
     const label = TRANSITION_LABELS[key] || 'Loading';
-    const loadingLabel = `Loading ${label}`;
-    const splashTester = messages.length ? messages[0] : 'Summoning tab nonsense';
-    if (statusKicker) statusKicker.textContent = splashTester;
-    if (statusLine) statusLine.textContent = loadingLabel;
-    if (messages.length <= 1) return;
+    if (statusKicker) statusKicker.textContent = `Loading ${label}`;
+    if (!messages.length) {
+      if (statusLine) statusLine.textContent = 'Rehydrating mysterious snack protocols';
+      return;
+    }
+    if (statusLine) statusLine.textContent = messages[0];
     const moments = getStatusMoments(messages.length);
     messages.slice(1).forEach((message, index) => {
       const timer = window.setTimeout(() => {
