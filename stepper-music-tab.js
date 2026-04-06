@@ -639,6 +639,158 @@
     });
   }
 
+  function capturePitchPreservedWavFromPlayer(player, opts) {
+    return new Promise(function (resolve, reject) {
+      if (!player) {
+        reject(new Error('Audio player is unavailable for pitch-preserved export.'));
+        return;
+      }
+      if (typeof MediaRecorder === 'undefined') {
+        reject(new Error('MediaRecorder is unavailable for pitch-preserved export.'));
+        return;
+      }
+      if (!player.captureStream && !player.mozCaptureStream) {
+        reject(new Error('This browser cannot capture audio playback for pitch-preserved export.'));
+        return;
+      }
+      var stream = player.captureStream ? player.captureStream() : player.mozCaptureStream();
+      if (!stream) {
+        reject(new Error('Could not capture player stream for export.'));
+        return;
+      }
+      var mimeChoices = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/ogg'];
+      var mime = '';
+      for (var m = 0; m < mimeChoices.length; m++) {
+        if (!MediaRecorder.isTypeSupported || MediaRecorder.isTypeSupported(mimeChoices[m])) {
+          mime = mimeChoices[m];
+          break;
+        }
+      }
+      if (!mime) {
+        reject(new Error('No supported recorder format for pitch-preserved export.'));
+        return;
+      }
+
+      var original = {
+        currentTime: Number(player.currentTime || 0),
+        playbackRate: Number(player.playbackRate || 1),
+        volume: Number(player.volume || 1),
+        paused: !!player.paused
+      };
+      var offset = Math.max(0, Number(opts.offsetSeconds || 0));
+      var fromRate = Math.max(0.5, Math.min(2.5, Number(opts.fromRate || 1)));
+      var toRate = Math.max(0.5, Math.min(2.5, Number(opts.toRate || fromRate)));
+      var cfg = opts.cfg || null;
+      var expectedSeconds = Math.max(0.2, Number(opts.expectedSeconds || 0.2));
+      var outGain = Math.max(0, Math.min(1, Number(opts.volume || 1)));
+
+      var chunks = [];
+      var recorder = new MediaRecorder(stream, { mimeType: mime });
+      var rampTimer = null;
+      var stopTimer = null;
+      var endedHandler = null;
+      var finished = false;
+
+      function cleanupAndRestore() {
+        if (rampTimer) clearInterval(rampTimer);
+        if (stopTimer) clearTimeout(stopTimer);
+        if (endedHandler) player.removeEventListener('ended', endedHandler);
+        try { player.pause(); } catch (e1) { /* ignore */ }
+        try { player.currentTime = original.currentTime; } catch (e2) { /* ignore */ }
+        try { player.playbackRate = original.playbackRate; } catch (e3) { /* ignore */ }
+        try { player.volume = original.volume; } catch (e4) { /* ignore */ }
+        if (!original.paused) {
+          Promise.resolve(player.play()).catch(function () { /* ignore */ });
+        }
+        try {
+          var tracks = stream.getTracks ? stream.getTracks() : [];
+          tracks.forEach(function (t) { try { t.stop(); } catch (e5) { /* ignore */ } });
+        } catch (e6) { /* ignore */ }
+      }
+
+      function finalizeBlob(rawBlob) {
+        if (!rawBlob || !rawBlob.size) {
+          reject(new Error('Pitch-preserved export produced empty audio.'));
+          return;
+        }
+        var AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) {
+          reject(new Error('Web Audio decode is unavailable for WAV conversion.'));
+          return;
+        }
+        var decodeCtx = new AudioCtx();
+        rawBlob.arrayBuffer().then(function (ab) {
+          return decodeCtx.decodeAudioData(ab);
+        }).then(function (decoded) {
+          var wavBlob = _arrayBufferToWaveBlob(decoded, 1);
+          try { decodeCtx.close(); } catch (e7) { /* ignore */ }
+          resolve(wavBlob);
+        }).catch(function () {
+          try { decodeCtx.close(); } catch (e8) { /* ignore */ }
+          reject(new Error('Could not decode captured audio for WAV export.'));
+        });
+      }
+
+      recorder.ondataavailable = function (ev) {
+        if (ev && ev.data && ev.data.size > 0) chunks.push(ev.data);
+      };
+      recorder.onerror = function () {
+        if (finished) return;
+        finished = true;
+        cleanupAndRestore();
+        reject(new Error('Recorder failed during pitch-preserved export.'));
+      };
+      recorder.onstop = function () {
+        if (finished) return;
+        finished = true;
+        cleanupAndRestore();
+        finalizeBlob(new Blob(chunks, { type: mime }));
+      };
+
+      var startMs = Date.now();
+      function applyRate() {
+        var elapsed = (Date.now() - startMs) / 1000;
+        var nextRate = fromRate;
+        if (cfg) {
+          if (cfg.fullSong) {
+            var t = Math.min(1, Math.max(0, elapsed / expectedSeconds));
+            nextRate = fromRate + (toRate - fromRate) * t;
+          } else {
+            var rampSecs = Math.max(0.01, Math.min(expectedSeconds, Number(cfg.seconds || 1)));
+            if (elapsed < rampSecs) {
+              var r = Math.min(1, Math.max(0, elapsed / rampSecs));
+              nextRate = fromRate + (toRate - fromRate) * r;
+            } else {
+              nextRate = toRate;
+            }
+          }
+        }
+        try { player.playbackRate = Math.max(0.5, Math.min(2.5, nextRate)); } catch (e9) { /* ignore */ }
+      }
+
+      try {
+        player.preservesPitch = true;
+        player.mozPreservesPitch = true;
+        player.webkitPreservesPitch = true;
+      } catch (e10) { /* ignore */ }
+      try { player.currentTime = offset; } catch (e11) { /* ignore */ }
+      player.volume = outGain;
+      applyRate();
+      recorder.start(100);
+      endedHandler = function () {
+        if (recorder.state !== 'inactive') recorder.stop();
+      };
+      player.addEventListener('ended', endedHandler, { once: true });
+      rampTimer = setInterval(applyRate, 50);
+      stopTimer = setTimeout(function () {
+        if (recorder.state !== 'inactive') recorder.stop();
+      }, Math.ceil((expectedSeconds + 0.25) * 1000));
+      Promise.resolve(player.play()).catch(function () {
+        if (recorder.state !== 'inactive') recorder.stop();
+      });
+    });
+  }
+
   function exportEditedAudio() {
     if (!_audioAnalysisBuffer) {
       _toast('Import an MP3 first.');
@@ -653,8 +805,40 @@
     ctx.decodeAudioData(_audioAnalysisBuffer.slice(0)).then(function (decoded) {
       var offsetSeconds = Math.max(0, Number(musicState.audioStartOffset || 0));
       var channels = Math.max(1, decoded.numberOfChannels || 1);
+      var player = document.querySelector('[data-music-audio-player]');
+      var cfg = musicState.tempoRampConfig;
+      var baseRate = player ? Math.max(0.5, Math.min(2.5, Number(player.playbackRate || 1))) : 1;
+      var fromRate = cfg ? Math.max(0.5, Math.min(2.5, Number(cfg.from || baseRate || 1))) : baseRate;
+      var toRate = cfg ? Math.max(0.5, Math.min(2.5, Number(cfg.to || fromRate || 1))) : fromRate;
       var sourceDuration = Math.max(0.01, Number(decoded.duration || 0) - offsetSeconds);
-      var estimatedOutSeconds = Math.max(0.2, sourceDuration);
+      var avgRate = Math.max(0.5, (fromRate + toRate) / 2);
+      var estimatedOutSeconds = Math.max(0.2, sourceDuration / avgRate);
+      var hasSpeedChange = Math.abs(fromRate - 1) > 0.001 || Math.abs(toRate - 1) > 0.001;
+      if (hasSpeedChange && player) {
+        return capturePitchPreservedWavFromPlayer(player, {
+          offsetSeconds: offsetSeconds,
+          expectedSeconds: estimatedOutSeconds,
+          fromRate: fromRate,
+          toRate: toRate,
+          cfg: cfg,
+          volume: Number(musicState.audioVolume || 1)
+        }).then(function (wavBlob) {
+          if (!wavBlob || !wavBlob.size) throw new Error('Export produced an empty WAV file.');
+          var baseName = String(musicState.audioName || 'edited-track').replace(/\.[a-z0-9]{2,6}$/i, '');
+          var a = document.createElement('a');
+          a.href = URL.createObjectURL(wavBlob);
+          a.download = baseName + '-edited.wav';
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(function () {
+            try { URL.revokeObjectURL(a.href); } catch (e0) { /* ignore */ }
+            a.remove();
+          }, 0);
+          _toast('Edited WAV exported (sped up + original pitch preserved).');
+          try { ctx.close(); } catch (e1) { /* ignore */ }
+        });
+      }
+      estimatedOutSeconds = Math.max(0.2, sourceDuration);
       var renderSampleRate = 44100;
       var offlineLen = Math.max(1, Math.ceil(renderSampleRate * estimatedOutSeconds));
       var OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
@@ -1158,7 +1342,7 @@
       html += '<button data-music-double style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;' + theme.btnSecondary + '">2× Counts</button>';
       html += '<button data-music-export-edited style="padding:8px 14px;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:700;background:#0ea5e9;color:#fff;">Export Edited WAV</button>';
       html += '</div>';
-      html += '<div class="' + theme.subtle + '" style="font-size:11px;margin-top:2px;">Export creates a new edited WAV (trim + volume) and keeps original pitch.</div>';
+      html += '<div class="' + theme.subtle + '" style="font-size:11px;margin-top:2px;">Export creates a new edited WAV (trim + speed + volume) while keeping original pitch.</div>';
       html += '<div class="' + theme.subtle + '" style="font-size:12px;">Detected BPM: <strong>' + (musicState.audioDetectedBpm || '—') + '</strong> · Count Feel: <strong>' + musicState.audioCountFeel + '×</strong> · Effective Count BPM: <strong>' + (effectiveBpm || '—') + '</strong></div>';
       html += '<div class="' + theme.subtle + '" style="font-size:12px;margin-top:4px;">Start dance after <strong>' + (startCounts || 0) + ' counts</strong>';
       if (startCounts) html += ' (' + startEights + ' eight-counts' + (startRemainder ? (' + ' + startRemainder) : '') + ')';
