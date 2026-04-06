@@ -53,6 +53,7 @@
     moderator: '/moderator'
   };
   const LOADING_SPLASH_LINES = [
+    'Amy tab is negotiating snack rights with the loading bar...',
     'Polishing invisible cowboy boots with quantum glitter...',
     'Translating dance counts into dolphin legalese...',
     'Rehearsing with three polite raccoons and a fog machine...',
@@ -60,7 +61,8 @@
     'Summoning BPM from a haunted toaster oven...',
     'Checking if penguins approve this layout update...',
     'Aligning disco lasers with certified banana geometry...',
-    'Teaching pixels how to yeehaw responsibly...'
+    'Teaching pixels how to yeehaw responsibly...',
+    'Amy tab says this startup is brought to you by dramatic jazz hands...'
   ];
 
   const state = {
@@ -5229,7 +5231,7 @@
     splash.id = 'stepper-weird-loading-splash';
     splash.style.cssText = 'position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#0f172a,#312e81);color:#fff;font-family:Inter,system-ui,sans-serif;';
     const line = LOADING_SPLASH_LINES[Math.floor(Math.random() * LOADING_SPLASH_LINES.length)];
-    splash.innerHTML = '<div style="text-align:center;padding:24px;max-width:min(680px,92vw);"><div style="font-size:22px;font-weight:900;letter-spacing:.04em;margin-bottom:12px;">Step By Stepper is booting...</div><div style="font-size:15px;opacity:.92;">' + escapeHtml(line) + '</div></div>';
+    splash.innerHTML = '<div style="text-align:center;padding:24px;max-width:min(680px,92vw);"><div style="font-size:22px;font-weight:900;letter-spacing:.04em;margin-bottom:12px;">Step By Stepper + Amy tab are booting...</div><div style="font-size:15px;opacity:.92;">' + escapeHtml(line) + '</div></div>';
     document.body.appendChild(splash);
     return function hide() {
       if (!splash || !splash.parentNode) return;
