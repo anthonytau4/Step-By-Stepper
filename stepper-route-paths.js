@@ -15,7 +15,8 @@
     pdfimport: '/pdf-import/',
     settings: '/settings/',
     music: '/music/',
-    templates: '/templates/'
+    templates: '/templates/',
+    tips: '/tips/'
   };
 
   const PATH_TO_ROUTE = {
@@ -43,6 +44,8 @@
     '/music/': 'music',
     '/templates': 'templates',
     '/templates/': 'templates',
+    '/tips': 'tips',
+    '/tips/': 'tips',
     '/editor/index.html': 'editor',
     '/sheet/index.html': 'preview',
     '/whats-new/index.html': 'whatsnew',
@@ -160,6 +163,7 @@
     if (routeName === 'settings') return document.getElementById('stepper-settings-tab');
     if (routeName === 'music') return document.getElementById('stepper-music-tab');
     if (routeName === 'templates') return document.getElementById('stepper-templates-tab');
+    if (routeName === 'tips') return document.getElementById('stepper-tips-tab');
     return null;
   }
 
@@ -184,6 +188,7 @@
     attachPathBinding(getRouteButton('settings'), 'settings');
     attachPathBinding(getRouteButton('music'), 'music');
     attachPathBinding(getRouteButton('templates'), 'templates');
+    attachPathBinding(getRouteButton('tips'), 'tips');
     bindingsReady = !!(getRouteButton('editor') && getRouteButton('preview') && getRouteButton('whatsnew'));
     return bindingsReady;
   }

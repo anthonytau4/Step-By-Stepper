@@ -221,6 +221,11 @@
               }
               openPageDirect('notifications', function(){ return document.getElementById('stepper-notifications-tab'); });
             }
+          },
+          {
+            key: 'tips', label: 'Tips Interactive', desc: '10-step tutorial',
+            icon: svg('<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>'),
+            action: function () { openPageDirect('tips', function(){ return document.getElementById('stepper-tips-tab'); }); }
           }
         ]
       },
@@ -626,7 +631,8 @@
       'stepper-settings-tab',
       'stepper-music-tab',
       'stepper-templates-tab',
-      'stepper-notifications-tab'
+      'stepper-notifications-tab',
+      'stepper-tips-tab'
     ];
     for (var k = 0; k < knownIds.length; k++) {
       var tab = document.getElementById(knownIds[k]);
