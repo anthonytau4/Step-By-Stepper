@@ -527,13 +527,36 @@
           reject(new Error('No MP3 data generated.'));
           return;
         }
-        resolve(new Blob(chunks, { type: mime }));
+        var outBlob = new Blob(chunks, { type: mime });
+        isLikelyMp3Blob(outBlob).then(function (ok) {
+          if (!ok) {
+            reject(new Error('Browser recorder returned non-MP3 data.'));
+            return;
+          }
+          resolve(outBlob);
+        }).catch(function () {
+          reject(new Error('Could not validate recorder MP3 output.'));
+        });
       };
       recorder.start(100);
       src.start(0);
       src.onended = function () {
         if (recorder.state !== 'inactive') recorder.stop();
       };
+    });
+  }
+
+  function isLikelyMp3Blob(blob) {
+    if (!blob || typeof blob.arrayBuffer !== 'function') return Promise.resolve(false);
+    return blob.arrayBuffer().then(function (ab) {
+      var u8 = new Uint8Array(ab || new ArrayBuffer(0));
+      if (u8.length < 4) return false;
+      // ID3 header
+      if (u8[0] === 0x49 && u8[1] === 0x44 && u8[2] === 0x33) return true;
+      // MPEG frame sync (11111111 111xxxxx)
+      return (u8[0] === 0xff) && ((u8[1] & 0xe0) === 0xe0);
+    }).catch(function () {
+      return false;
     });
   }
 
@@ -592,6 +615,7 @@
         });
       });
       return blobPromise.then(function (blob) {
+      if (!blob || !blob.size) throw new Error('Export produced an empty file.');
       var baseName = String(musicState.audioName || 'edited-track').replace(/\.[a-z0-9]{2,6}$/i, '');
       var a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
@@ -605,9 +629,9 @@
       _toast('Edited accelerated audio exported (MP3).');
       try { ctx.close(); } catch (e2) { /* ignore */ }
       });
-    }).catch(function () {
+    }).catch(function (err) {
       try { ctx.close(); } catch (e3) { /* ignore */ }
-      _toast('Could not export this audio file.');
+      _toast((err && err.message) ? ('Export failed: ' + err.message) : 'Could not export this audio file.');
     });
   }
 
