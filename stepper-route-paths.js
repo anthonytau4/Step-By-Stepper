@@ -15,7 +15,8 @@
     pdfimport: '/pdf-import/',
     settings: '/settings/',
     music: '/music/',
-    templates: '/templates/'
+    templates: '/templates/',
+    tips: '/tips/'
   };
 
   const PATH_TO_ROUTE = {
@@ -43,6 +44,8 @@
     '/music/': 'music',
     '/templates': 'templates',
     '/templates/': 'templates',
+    '/tips': 'tips',
+    '/tips/': 'tips',
     '/editor/index.html': 'editor',
     '/sheet/index.html': 'preview',
     '/whats-new/index.html': 'whatsnew',
@@ -160,6 +163,7 @@
     if (routeName === 'settings') return document.getElementById('stepper-settings-tab');
     if (routeName === 'music') return document.getElementById('stepper-music-tab');
     if (routeName === 'templates') return document.getElementById('stepper-templates-tab');
+    if (routeName === 'tips') return document.getElementById('stepper-tips-tab');
     return null;
   }
 
@@ -184,6 +188,7 @@
     attachPathBinding(getRouteButton('settings'), 'settings');
     attachPathBinding(getRouteButton('music'), 'music');
     attachPathBinding(getRouteButton('templates'), 'templates');
+    attachPathBinding(getRouteButton('tips'), 'tips');
     bindingsReady = !!(getRouteButton('editor') && getRouteButton('preview') && getRouteButton('whatsnew'));
     return bindingsReady;
   }
@@ -198,6 +203,20 @@
       window.setTimeout(() => { applyingRoute = false; }, 50);
     }
     return true;
+  }
+
+  function goToRoute(routeName, replace){
+    if (!ROUTES[routeName]) return false;
+    reflectRouteState(routeName);
+    setCanonicalPath(routeName, !!replace);
+    if (routeName === 'editor') {
+      const build = getRouteButton('editor');
+      if (!build) return false;
+      applyingRoute = true;
+      try { build.click(); } finally { window.setTimeout(() => { applyingRoute = false; }, 50); }
+      return true;
+    }
+    return clickRoute(routeName);
   }
 
   function applyInitialRoute(replace){
@@ -242,6 +261,16 @@
       if ((build && tries > 2) || tries > 40) window.clearInterval(timer);
     }, 250);
   }
+
+  window.__stepperRoutePaths = {
+    go: function(routeName, opts){
+      return goToRoute(routeName, !!(opts && opts.replace));
+    },
+    paths: Object.assign({}, ROUTES),
+    current: function(){
+      return currentRouteFromPath() || 'editor';
+    }
+  };
 
   window.addEventListener('popstate', () => {
     const routeName = currentRouteFromPath() || 'editor';
