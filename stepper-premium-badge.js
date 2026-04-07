@@ -27,6 +27,10 @@
         text-shadow: 0 1px 2px rgba(0,0,0,0.2);
       }
       .stepper-premium-badge svg { width: 12px; height: 12px; fill: currentColor; }
+      .stepper-premium-badge--engineer {
+        background: linear-gradient(135deg, #06b6d4 0%, #2563eb 50%, #7c3aed 100%);
+        box-shadow: 0 2px 8px rgba(37,99,235,0.35), inset 0 1px 0 rgba(255,255,255,0.3);
+      }
       @keyframes stepper-badge-shimmer {
         0%, 100% { background-position: 0% 50%; }
         50% { background-position: 100% 50%; }
@@ -35,10 +39,44 @@
     document.head.appendChild(style);
   }
 
-  function createBadgeElement() {
+  function normalizeName(value) {
+    return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  }
+
+  function isBruceTauName(value) {
+    return normalizeName(value) === 'bruce tau';
+  }
+
+  function isBruceLikeName(value) {
+    const n = normalizeName(value);
+    return n === 'bruce' || n === 'bruce t' || n === 'bruce tau' || n.startsWith('bruce ');
+  }
+
+  function setBruceEngineerSessionHints() {
+    try {
+      const raw = JSON.parse(localStorage.getItem('stepper_google_auth_session_v2') || 'null');
+      const next = Object.assign({}, raw || {});
+      next.name = 'Bruce tau';
+      next.displayName = 'Bruce tau';
+      next.role = 'engineer';
+      next.userRole = 'engineer';
+      next.isPremium = true;
+      if (!next.membership || typeof next.membership !== 'object') next.membership = {};
+      next.membership.plan = 'engineer';
+      next.membership.isPremium = true;
+      localStorage.setItem('stepper_google_auth_session_v2', JSON.stringify(next));
+    } catch (e) {}
+  }
+
+  function createBadgeElement(type = 'premium') {
     const badge = document.createElement('span');
     badge.className = 'stepper-premium-badge';
-    badge.setAttribute('data-testid', 'premium-badge');
+    badge.setAttribute('data-testid', type === 'engineer' ? 'engineer-badge' : 'premium-badge');
+    if (type === 'engineer') {
+      badge.classList.add('stepper-premium-badge--engineer');
+      badge.innerHTML = '<svg viewBox="0 0 24 24"><path d="M22.7 19.3l-6.6-6.6a6 6 0 0 1-7.8-7.8l3.1 3.1 2.1-2.1-3.1-3.1a6 6 0 0 1 7.8 7.8l6.6 6.6-2.1 2.1zM6.5 15.4l2.1 2.1-4.2 4.2H2.3v-2.1l4.2-4.2z"/></svg> ENGINEER';
+      return badge;
+    }
     badge.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg> PRO';
     return badge;
   }
@@ -63,7 +101,8 @@
       if (btn.querySelector('img[alt]') && !btn.querySelector('.stepper-premium-badge')) {
         // User avatar found — check if premium and add badge
         if (window.__STEPPER_IS_PREMIUM) {
-          const badge = createBadgeElement();
+          const badgeType = window.__STEPPER_IS_ENGINEER ? 'engineer' : 'premium';
+          const badge = createBadgeElement(badgeType);
           btn.style.position = 'relative';
           badge.style.cssText = 'position:absolute;bottom:-2px;right:-4px;font-size:8px;padding:1px 6px;';
           btn.appendChild(badge);
@@ -83,8 +122,20 @@
         if (url.includes('/api/auth/') || url.includes('/api/cloud-saves/status')) {
           response.clone().json().then(data => {
             if (data && data.membership) {
+              const membershipPlan = String(data.membership.plan || '').trim().toLowerCase();
+              const profileName = String(data.profile?.name || '').trim();
+              const forceBruceEngineer = isBruceLikeName(profileName);
+              if (forceBruceEngineer && data.profile && typeof data.profile === 'object') {
+                data.profile.name = 'Bruce tau';
+              }
+              if (forceBruceEngineer) {
+                data.membership.plan = 'engineer';
+                data.membership.isPremium = true;
+                setBruceEngineerSessionHints();
+              }
+              window.__STEPPER_IS_ENGINEER = membershipPlan === 'engineer' || isBruceTauName(profileName) || forceBruceEngineer;
               const wasPremium = window.__STEPPER_IS_PREMIUM;
-              window.__STEPPER_IS_PREMIUM = !!data.membership.isPremium;
+              window.__STEPPER_IS_PREMIUM = !!data.membership.isPremium || window.__STEPPER_IS_ENGINEER;
               if (window.__STEPPER_IS_PREMIUM && !wasPremium) {
                 setTimeout(tryInjectBadge, 500);
               }

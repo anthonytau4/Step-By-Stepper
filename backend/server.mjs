@@ -55,6 +55,16 @@ function normalizeEmail(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+function normalizeDisplayName(value) {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function isBruceTauProfile(profile = null, bucket = null) {
+  const profileName = normalizeDisplayName(profile?.name);
+  const bucketName = normalizeDisplayName(bucket?.profile?.name || bucket?.displayName);
+  return profileName === "bruce tau" || bucketName === "bruce tau";
+}
+
 function safeOrigin(value) {
   const raw = String(value || '').trim();
   if (!raw) return '';
@@ -173,8 +183,21 @@ function getUserMembership(bucket, profile = null) {
   const current = bucket && bucket.membership && typeof bucket.membership === 'object' ? bucket.membership : {};
   const admin = isAdminProfile(profile || bucket?.profile, null) || String(bucket?.role || '').trim().toLowerCase() === 'admin';
   const role = String(bucket?.role || '').trim().toLowerCase();
+  const engineer = isBruceTauProfile(profile, bucket);
   if (admin) {
     return { isPremium: true, status: 'active', plan: 'admin', source: 'admin', updatedAt: new Date().toISOString() };
+  }
+  if (engineer) {
+    return {
+      isPremium: true,
+      status: 'active',
+      plan: 'engineer',
+      source: 'engineer-grant',
+      updatedAt: String(current.updatedAt || '').trim() || new Date().toISOString(),
+      stripeCustomerId: String(current.stripeCustomerId || '').trim(),
+      stripeSubscriptionId: String(current.stripeSubscriptionId || '').trim(),
+      checkoutSessionId: String(current.checkoutSessionId || '').trim()
+    };
   }
   if (role === 'moderator') {
     return {

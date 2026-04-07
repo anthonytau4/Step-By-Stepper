@@ -147,6 +147,15 @@
     };
   }
 
+  function isAndroidDevice() {
+    try {
+      var ua = String((navigator && navigator.userAgent) || '').toLowerCase();
+      return ua.indexOf('android') !== -1;
+    } catch (e) {
+      return false;
+    }
+  }
+
   function _toast(msg) {
     if (window.__stepperStepSelect && window.__stepperStepSelect.showToast) {
       window.__stepperStepSelect.showToast(msg);
@@ -408,7 +417,24 @@
       '@keyframes stepper-metro-flash { 0%{box-shadow:0 0 0 0 rgba(99,102,241,.7);} 70%{box-shadow:0 0 0 18px rgba(99,102,241,0);} 100%{box-shadow:0 0 0 0 rgba(99,102,241,0);} }',
       '@keyframes stepper-toast-in { from{opacity:0;transform:translateX(-50%) translateY(12px);} to{opacity:1;transform:translateX(-50%) translateY(0);} }',
       '#' + PAGE_ID + ' .metro-dot.active { animation:stepper-metro-pulse .3s ease,stepper-metro-flash .6s ease; }',
-      '#' + PAGE_ID + ' .tap-btn:active { transform:scale(.93); }'
+      '#' + PAGE_ID + ' .tap-btn:active { transform:scale(.93); }',
+      '#' + PAGE_ID + '.stepper-android-layout .music-card { border-radius:16px!important;padding:14px!important; }',
+      '#' + PAGE_ID + '.stepper-android-layout .music-card:hover { transform:none;box-shadow:none; }',
+      '#' + PAGE_ID + '.stepper-android-layout table { font-size:12px!important; }',
+      '#' + PAGE_ID + '.stepper-android-layout button { max-width:100%; }',
+      '@media (max-width:900px) { #' + PAGE_ID + '.stepper-android-layout [data-music-audio-file] { width:100%;max-width:100%; } }',
+      '@media (max-width:900px) { #' + PAGE_ID + '.stepper-android-layout [data-music-compact-grid] { grid-template-columns:1fr!important; } }',
+      '@media (max-width:900px) { #' + PAGE_ID + '.stepper-android-layout [data-music-compact-actions] { display:grid!important;grid-template-columns:1fr 1fr;gap:8px!important; } }',
+      '@media (max-width:520px) { #' + PAGE_ID + '.stepper-android-layout [data-music-compact-actions] { grid-template-columns:1fr!important; } }',
+      '@media (max-width:900px) { #' + PAGE_ID + '.stepper-android-layout [data-music-compact-actions] button { width:100%;padding:10px 8px!important;font-size:11px!important; } }',
+      '@media (max-width:900px) { #' + PAGE_ID + '.stepper-android-layout [data-music-transport-wrap] { width:100%;display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr)); } }',
+      '@media (max-width:900px) { #' + PAGE_ID + '.stepper-android-layout [data-music-transport-wrap] button { width:100%; } }',
+      '@media (max-width:900px) { #' + PAGE_ID + '.stepper-android-layout [data-music-header-actions] { flex-direction:column!important;align-items:stretch!important; } }'
+      ,
+      '@media (max-width:1200px) { #' + PAGE_ID + '.stepper-android-layout [data-music-compact-grid] { grid-template-columns:1fr!important; } }',
+      '@media (max-width:1200px) { #' + PAGE_ID + '.stepper-android-layout [data-music-header-actions] { flex-direction:column!important;align-items:stretch!important; } }',
+      '@media (max-width:1200px) { #' + PAGE_ID + '.stepper-android-layout [data-music-transport-wrap] { width:100%;display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr)); } }',
+      '@media (max-width:1200px) { #' + PAGE_ID + '.stepper-android-layout [data-music-transport-wrap] button { width:100%; } }'
     ].join('\n');
     document.head.appendChild(style);
   }
@@ -909,6 +935,8 @@
     html += '</div>';
 
     page.innerHTML = html;
+    if (isAndroidDevice()) page.classList.add('stepper-android-layout');
+    else page.classList.remove('stepper-android-layout');
     attachMusicListeners(page);
   }
 
