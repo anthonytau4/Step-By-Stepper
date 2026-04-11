@@ -356,16 +356,17 @@
   function row(label, val) { return `<div class="meta-row"><span class="meta-label">${label}</span><span class="meta-value">${esc(val)}</span></div>`; }
   function esc(str) { const d = document.createElement('div'); d.textContent = String(str || ''); return d.innerHTML; }
 
-  function suspendBackgroundWork(active) {
+  function suspendBackgroundWork(active, reason) {
+    if (reason !== 'apply-import') return;
     try {
       window.__stepperBackgroundSuspend = !!active;
       document.documentElement.setAttribute('data-stepper-background-suspend', active ? '1' : '0');
-      window.dispatchEvent(new CustomEvent('stepper-background-suspend', { detail: { active: !!active, source: 'pdf-import' } }));
+      window.dispatchEvent(new CustomEvent('stepper-background-suspend', { detail: { active: !!active, source: 'pdf-import-apply' } }));
     } catch (_) {}
   }
 
   function applyToEditor(data) {
-    suspendBackgroundWork(true);
+    suspendBackgroundWork(true, 'apply-import');
     setStatus('loading', 'Applying import (pausing background tasks)…');
     const run = () => {
       try {
@@ -386,7 +387,7 @@
         try { if (typeof window.__stepperRefreshWorksheetFromStorage === 'function') window.__stepperRefreshWorksheetFromStorage(); } catch (_) {}
         setStatus('success', 'Imported into the editor live. No reload needed.');
       } finally {
-        window.setTimeout(() => suspendBackgroundWork(false), 350);
+        window.setTimeout(() => suspendBackgroundWork(false, 'apply-import'), 350);
       }
     };
     window.requestAnimationFrame ? window.requestAnimationFrame(() => window.requestAnimationFrame(run)) : window.setTimeout(run, 0);
