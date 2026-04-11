@@ -1763,6 +1763,8 @@
 
     /* Use curated high-flow step combos if glossary is sparse */
     var PERFECT_FLOW_8 = [
+      { name:'Cross Side', count:'1-2', foot:'R', description:'Cross right over left, step left to side.' },
+      { name:'Sailor Heel Step', count:'1&2&', foot:'R', description:'Cross right behind left, step left to side, step right to side, touch left heel forward.' },
       { name:'Vine Right', count:'1-2', foot:'R', description:'Step right, cross left behind, step right, touch left beside.' },
       { name:'Vine Left', count:'3-4', foot:'L', description:'Step left, cross right behind, step left, touch right beside.' },
       { name:'Rock Forward', count:'5-6', foot:'R', description:'Rock forward on right foot, recover weight back onto left.' },
