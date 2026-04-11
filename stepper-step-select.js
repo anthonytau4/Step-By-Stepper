@@ -33,6 +33,7 @@
   var toastQueue      = [];
   var toastTimer      = null;
   var frState         = { open: false, query: '', replace: '', idx: -1, matches: [], caseSensitive: false };
+  var dragState       = { from: null, dragging: false, justDropped: false };
 
   /* ══════════════════════════ Utility Helpers ═════════════════════════════ */
 
@@ -83,6 +84,10 @@
       var d = JSON.parse(localStorage.getItem(DATA_KEY) || 'null');
       return !!(d && d.isDarkMode);
     } catch (_) { return false; }
+  }
+
+  function isBackgroundSuspended() {
+    return !!window.__stepperBackgroundSuspend;
   }
 
   /* ══════════════════════════ CSS Injection ═══════════════════════════════ */
@@ -143,6 +148,38 @@
       'body.dark [data-step-find-match="true"],',
       'html.dark [data-step-find-match="true"] {',
       '  box-shadow: 0 0 0 2px rgba(251,191,36,.45), 0 0 12px rgba(251,191,36,.18);',
+      '}',
+      /* ── Step dragger handle ── */
+      '[data-section-idx] { position: relative; }',
+      '.stepper-step-dragger {',
+      '  position: absolute;',
+      '  left: 6px;',
+      '  top: 50%;',
+      '  transform: translateY(-50%);',
+      '  width: 18px; height: 18px;',
+      '  border-radius: 999px;',
+      '  border: 1px solid rgba(99,102,241,.20);',
+      '  background: rgba(255,255,255,.78);',
+      '  color: #4f46e5;',
+      '  display: flex; align-items: center; justify-content: center;',
+      '  font-size: 10px; font-weight: 900;',
+      '  cursor: grab; user-select: none;',
+      '  z-index: 3;',
+      '  opacity: .15;',
+      '  transition: opacity .14s ease, background .14s ease;',
+      '}',
+      '[data-section-idx]:hover .stepper-step-dragger,',
+      '[data-section-idx][data-step-selected="true"] .stepper-step-dragger { opacity: .75; }',
+      '.stepper-step-dragger:active { cursor: grabbing; }',
+      '.dark .stepper-step-dragger,',
+      'body.dark .stepper-step-dragger,',
+      'html.dark .stepper-step-dragger {',
+      '  background: rgba(30,30,46,.92);',
+      '  border-color: rgba(129,140,248,.34);',
+      '  color: #a5b4fc;',
+      '}',
+      '[data-step-drop-target="true"] {',
+      '  box-shadow: inset 0 0 0 2px rgba(79,70,229,.35), 0 0 0 2px rgba(79,70,229,.12);',
       '}',
       /* ── Toast host ── */
       '#' + TOAST_HOST + ' {',
@@ -358,6 +395,7 @@
 
         row.setAttribute('data-section-idx', si);
         row.setAttribute('data-step-idx', stepRows.length);
+        ensureDragHandle(row, si, stepRows.length);
         stepRows.push(row);
       }
       rows.push(stepRows);
@@ -368,12 +406,33 @@
   }
 
   function scheduleRemap() {
+    if (isBackgroundSuspended()) return;
     if (remapTimer) clearTimeout(remapTimer);
     remapTimer = setTimeout(function () {
       remapTimer = null;
       mapDomSteps();
       paintSelection();
     }, REMAP_DEBOUNCE);
+  }
+
+  function clearDropTargets() {
+    var marks = document.querySelectorAll('[data-step-drop-target="true"]');
+    for (var i = 0; i < marks.length; i++) marks[i].removeAttribute('data-step-drop-target');
+  }
+
+  function ensureDragHandle(row, si, ri) {
+    if (!row || !row.querySelector) return;
+    var handle = row.querySelector('.stepper-step-dragger');
+    if (!handle) {
+      handle = document.createElement('div');
+      handle.className = 'stepper-step-dragger';
+      handle.textContent = '⋮⋮';
+      handle.setAttribute('title', 'Drag step');
+      handle.setAttribute('draggable', 'true');
+      row.insertBefore(handle, row.firstChild);
+    }
+    handle.setAttribute('data-drag-sec', String(si));
+    handle.setAttribute('data-drag-step', String(ri));
   }
 
   /* ══════════════════════ Selection Painting ═════════════════════════════ */
@@ -457,6 +516,12 @@
   /* ═══════════════════════ Click Handler ══════════════════════════════════ */
 
   function handleStepClick(e) {
+    if (isBackgroundSuspended()) return;
+    if (dragState.justDropped) {
+      dragState.justDropped = false;
+      e.preventDefault();
+      return;
+    }
     // Walk up from target to find a step row with data-section-idx
     var row = e.target.closest('[data-section-idx]');
     if (!row) return;
@@ -639,6 +704,32 @@
 
   function deleteSelectedSteps() {
     deleteSelectedStepsInternal(true);
+  }
+
+  function moveStep(fromSec, fromIdx, toSec, toIdx) {
+    var data = readData();
+    if (!data) return false;
+    var secs = getSections(data);
+    var srcSec = secs[fromSec];
+    var dstSec = secs[toSec];
+    if (!srcSec || !Array.isArray(srcSec.steps) || !dstSec || !Array.isArray(dstSec.steps)) return false;
+    if (fromIdx < 0 || fromIdx >= srcSec.steps.length) return false;
+    if (toIdx < 0) toIdx = 0;
+    if (toIdx > dstSec.steps.length) toIdx = dstSec.steps.length;
+
+    snapshot();
+    var moved = srcSec.steps.splice(fromIdx, 1)[0];
+    if (fromSec === toSec && fromIdx < toIdx) toIdx--;
+    moved.count = 'x';
+    if (typeof moved.counts === 'string') moved.counts = 'x';
+    dstSec.steps.splice(toIdx, 0, moved);
+
+    setSections(data, secs);
+    writeData(data);
+    selectedSteps = [{ sectionIndex: toSec, stepIndex: toIdx }];
+    scheduleRemap();
+    showToast('Step moved');
+    return true;
   }
 
   /* ═══════════════════════ Insert Operations ═════════════════════════════ */
@@ -1061,6 +1152,7 @@
   }
 
   function handleKeydown(e) {
+    if (isBackgroundSuspended()) return;
     // Allow Find/Replace panel-specific shortcuts to pass through
     if (e.target && e.target.closest('#' + FR_PANEL_ID)) return;
 
@@ -1164,6 +1256,56 @@
 
     // Keyboard shortcuts
     document.addEventListener('keydown', handleKeydown, true);
+
+    document.addEventListener('dragstart', function (e) {
+      var handle = e.target && e.target.closest ? e.target.closest('.stepper-step-dragger') : null;
+      if (!handle) return;
+      var sec = parseInt(handle.getAttribute('data-drag-sec'), 10);
+      var step = parseInt(handle.getAttribute('data-drag-step'), 10);
+      if (isNaN(sec) || isNaN(step)) return;
+      dragState.from = { sectionIndex: sec, stepIndex: step };
+      dragState.dragging = true;
+      try { e.dataTransfer.effectAllowed = 'move'; } catch (_) {}
+      document.documentElement.style.overflow = 'hidden';
+      document.body.style.overflow = 'hidden';
+    }, true);
+
+    document.addEventListener('dragover', function (e) {
+      if (!dragState.dragging) return;
+      var row = e.target && e.target.closest ? e.target.closest('[data-section-idx]') : null;
+      if (!row) return;
+      e.preventDefault();
+      clearDropTargets();
+      row.setAttribute('data-step-drop-target', 'true');
+      try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
+    }, true);
+
+    document.addEventListener('drop', function (e) {
+      if (!dragState.dragging || !dragState.from) return;
+      var row = e.target && e.target.closest ? e.target.closest('[data-section-idx]') : null;
+      clearDropTargets();
+      if (row) {
+        e.preventDefault();
+        var toSec = parseInt(row.getAttribute('data-section-idx'), 10);
+        var toStep = parseInt(row.getAttribute('data-step-idx'), 10);
+        if (!isNaN(toSec) && !isNaN(toStep)) {
+          moveStep(dragState.from.sectionIndex, dragState.from.stepIndex, toSec, toStep);
+          dragState.justDropped = true;
+        }
+      }
+      dragState.dragging = false;
+      dragState.from = null;
+      document.documentElement.style.overflow = '';
+      document.body.style.overflow = '';
+    }, true);
+
+    document.addEventListener('dragend', function () {
+      clearDropTargets();
+      dragState.dragging = false;
+      dragState.from = null;
+      document.documentElement.style.overflow = '';
+      document.body.style.overflow = '';
+    }, true);
 
     // Initial DOM mapping (retry until main exists)
     function tryMap() {
