@@ -3538,11 +3538,51 @@
     try {
       const data = await fetchJson('/api/glossary/steps');
       state.glossaryApproved = Array.isArray(data.items) ? data.items : [];
+      syncApprovedStepsIntoMainDictionary(state.glossaryApproved);
       return state.glossaryApproved;
     } catch {
       state.glossaryApproved = [];
+      syncApprovedStepsIntoMainDictionary([]);
       return [];
     }
+  }
+
+  function parseGlossaryCountsToNumber(countsLabel){
+    const label = String(countsLabel || '').trim();
+    if (!label) return 1;
+    const numbers = label.match(/\d+/g);
+    if (!numbers || !numbers.length) return 1;
+    const values = numbers.map((item) => Number(item)).filter((item) => Number.isFinite(item));
+    if (!values.length) return 1;
+    if (values.length >= 2) return Math.max(1, values[values.length - 1] - values[0] + 1);
+    return Math.max(1, values[0]);
+  }
+
+  function syncApprovedStepsIntoMainDictionary(approvedSteps){
+    const dict = window.__stepperStepDictionary;
+    if (!dict || !Array.isArray(dict.STEPS)) return;
+    const base = dict.STEPS.filter((step) => !(step && step.__fromCommunityGlossary));
+    const injected = (Array.isArray(approvedSteps) ? approvedSteps : []).map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const name = String(item.name || '').trim();
+      const description = String(item.description || item.desc || '').trim();
+      if (!name || !description) return null;
+      const tags = String(item.tags || '').toLowerCase();
+      const category = /\b(cross|vine|touch|side|rock|turn|jazz|kick|stomp|slide|sway|hold|syncopated|triple)\b/.test(tags)
+        ? (tags.match(/\b(cross|vine|touch|side|rock|turn|jazz|kick|stomp|slide|sway|hold|syncopated|triple)\b/) || [])[1]
+        : 'specialty';
+      return {
+        name,
+        aliases: [name.toLowerCase()],
+        counts: parseGlossaryCountsToNumber(item.counts || item.count),
+        feet: String(item.foot || 'Either').trim() || 'Either',
+        description,
+        category,
+        __fromCommunityGlossary: true
+      };
+    }).filter(Boolean);
+    dict.STEPS.length = 0;
+    base.concat(injected).forEach((step) => dict.STEPS.push(step));
   }
 
 
