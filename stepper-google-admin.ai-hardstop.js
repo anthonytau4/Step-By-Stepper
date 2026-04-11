@@ -740,10 +740,29 @@
     return match && match[1] ? compactWhitespace(String(match[1]).replace(/\bto\b/ig, '-')) : '';
   }
 
+  function extractLocalFootHint(text){
+    const source = normalizeLocalMotionText(text);
+    if (!source) return null;
+    if (/\b(?:either|any)\b/.test(source)) return '';
+    if (/\b(?:right|r)\b/.test(source)) return 'R';
+    if (/\b(?:left|l)\b/.test(source)) return 'L';
+    return null;
+  }
+
+  function stripLocalFootHintText(text){
+    return compactWhitespace(String(text || '')
+      .replace(/\((?:right|left|r|l|either|any)\)/ig, '')
+      .replace(/\b(?:start|starting|on|foot)\s*[:=-]?\s*(?:right|left|r|l|either|any)\b/ig, '')
+      .replace(/\b(?:right|left)\s+foot\b/ig, '')
+      .replace(/\s+[-–]\s*(?:right|left|r|l|either|any)\s*$/ig, '')
+      .replace(/\s+(?:right|left|r|l|either|any)\s*$/ig, ''));
+  }
+
   function inferLocalStepCount(body){
     const lowered = normalizeLocalMotionText(body);
     const repeatedWalk = parseLocalRepeatedWalk(lowered);
     if (repeatedWalk) return `1-${Number(repeatedWalk.repeats) + (repeatedWalk.touch ? 1 : 0)}`;
+    if (/\bcross\s+side\b/.test(lowered)) return '1-2';
     if (/\b(?:grapevine|vine)\b/.test(lowered)) return '1-4';
     if (/rock\s+back(?:,|\s+)recover/.test(lowered)) return '1-2';
     if (/\b(?:coaster|sailor|shuffle|triple step|triple|chasse|kick ball change|mambo)\b/.test(lowered)) return '1&2';
@@ -771,6 +790,7 @@
       [/^kick\s+ball\s+change$/i, () => ({ name:'Kick Ball Change', confident:true })],
       [/^step\s+touch$/i, () => ({ name:'Step Touch', confident:true })],
       [/^side\s+touch$/i, () => ({ name:'Side Touch', confident:true })],
+      [/^cross\s+side$/i, () => ({ name:'Cross Side', confident:true })],
       [/^step\s+lock\s+step$/i, () => ({ name:'Step Lock Step', confident:true })],
       [/^shuffle\s+(forward|back|left|right)$/i, (m) => ({ name:`Shuffle ${titleCaseWords(m[1])}`, confident:true })],
       [/^pivot(?:\s+\d+)?(?:\s*(?:1\/4|1\/2|1\/8|quarter|half))?\s*(left|right)?$/i, () => ({ name:'Pivot Turn', confident:true })],
@@ -940,6 +960,7 @@
       return repeatedWalk.touch ? `${sentence}, then touch beside with no weight change.` : `${sentence}.`;
     }
     if (/rock\s+back(?:,|\s+)recover/.test(source)) return 'Rock back onto the stepping foot and recover back onto the other foot.';
+    if (/\bcross\s+side\b/.test(source)) return 'Cross over, then step to the side.';
     if (/\b(?:grapevine|vine)\b/.test(source)) {
       const direction = /right/.test(source) ? 'right' : (/left/.test(source) ? 'left' : 'to the side');
       return `Step ${direction}, cross behind, step ${direction}, then touch or step to finish.`;
@@ -1026,12 +1047,15 @@
     let currentStart = getLocalExpectedStartFoot();
     return rawTokens.map((token) => {
       const explicitCount = extractLocalStepCountLabel(token);
-      const body = compactWhitespace(token.replace(/\(([^)]*\d[^)]*)\)\s*$/i, '').replace(/\b((?:\d+\s*[&,-]\s*)+\d+)\b\s*$/i, '').replace(/\b(?:use|put|set|on)\s+counts?\b\s*$/i, '').trim() || token);
+      const footHint = extractLocalFootHint(token);
+      const body = compactWhitespace(stripLocalFootHintText(token).replace(/\(([^)]*\d[^)]*)\)\s*$/i, '').replace(/\b((?:\d+\s*[&,-]\s*)+\d+)\b\s*$/i, '').replace(/\b(?:use|put|set|on)\s+counts?\b\s*$/i, '').trim() || token);
       if (!body) return null;
       let glossaryItem = glossaryMap.get(compactWhitespace(body).toLowerCase());
       if (!glossaryItem) glossaryItem = findBestLocalGlossaryMatch(body, glossary, currentStart);
       if (glossaryItem) {
-        const foot = /^(R|L)$/i.test(compactWhitespace(glossaryItem.foot || '')) ? compactWhitespace(glossaryItem.foot || '').toUpperCase() : currentStart;
+        const foot = footHint === 'R' || footHint === 'L'
+          ? footHint
+          : (/^(R|L)$/i.test(compactWhitespace(glossaryItem.foot || '')) ? compactWhitespace(glossaryItem.foot || '').toUpperCase() : currentStart);
         const step = {
           name: compactWhitespace(glossaryItem.name || body),
           description: compactWhitespace(glossaryItem.description || glossaryItem.desc || '') || inferLocalStepDescription(body, compactWhitespace(explicitCount || glossaryItem.counts || glossaryItem.count || inferLocalStepCount(body) || '1'), foot),
@@ -1050,7 +1074,7 @@
       const count = compactWhitespace(explicitCount || inferLocalStepCount(body));
       const needsName = singleToken && !inferredName.confident && !compactWhitespace(inferredName.name);
       const needsCount = singleToken && !count;
-      const foot = currentStart === 'R' || currentStart === 'L' ? currentStart : '';
+      const foot = footHint === 'R' || footHint === 'L' ? footHint : (currentStart === 'R' || currentStart === 'L' ? currentStart : '');
       const step = {
         name: compactWhitespace(inferredName.name || (needsName ? '' : titleCaseWords(body.split(/\s+/).slice(0, 5).join(' '))) || 'Custom Step'),
         description: inferLocalStepDescription(body, count, foot),
