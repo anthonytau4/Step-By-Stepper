@@ -3007,6 +3007,24 @@
     return !!(title || choreographer || sections.some(section => Array.isArray(section && section.steps) && section.steps.length));
   }
 
+
+  function normalizeSnapshotCountsToAuto(data){
+    if (!data || typeof data !== 'object') return data;
+    try {
+      if (data.meta && typeof data.meta === 'object') data.meta.counts = 'x';
+      var sections = Array.isArray(data.sections) ? data.sections : [];
+      sections.forEach(function(section){
+        var steps = Array.isArray(section && section.steps) ? section.steps : [];
+        steps.forEach(function(step){
+          if (!step || typeof step !== 'object') return;
+          step.count = 'x';
+          if (typeof step.counts !== 'undefined') step.counts = 'x';
+        });
+      });
+    } catch (_) {}
+    return data;
+  }
+
   function buildCurrentDanceEntry(){
     const data = readAppData();
     if (!hasDanceContent(data)) return null;
@@ -3021,14 +3039,14 @@
       choreographer,
       country: String(meta.country || '').trim(),
       level: String(meta.level || 'Unlabelled').trim() || 'Unlabelled',
-      counts: String(meta.counts || '-').trim() || '-',
+      counts: 'x',
       walls: String(meta.walls || '-').trim() || '-',
       music: String(meta.music || '').trim(),
       sections: sections.length,
       steps: stepCount,
       updatedAt: new Date().toISOString(),
       snapshot: {
-        data: data,
+        data: normalizeSnapshotCountsToAuto(clone(data)),
         phrasedTools: readJson(PHR_TOOLS_KEY, {})
       }
     };
@@ -3648,10 +3666,11 @@
       return false;
     }
     try {
+      const payloadWithAutoCounts = Object.assign({}, payload || {}, { counts: 'x' });
       const data = await authFetch('/api/glossary/request', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ step: payload })
+        body: JSON.stringify({ step: payloadWithAutoCounts })
       });
       alert(data && data.message ? data.message : 'Glossary step request sent to Admin.');
       return true;
