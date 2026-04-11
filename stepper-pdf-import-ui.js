@@ -356,24 +356,40 @@
   function row(label, val) { return `<div class="meta-row"><span class="meta-label">${label}</span><span class="meta-value">${esc(val)}</span></div>`; }
   function esc(str) { const d = document.createElement('div'); d.textContent = String(str || ''); return d.innerHTML; }
 
-  function applyToEditor(data) {
-    const importCore = getImportCore();
-    const snapshot = importCore.buildEditorSnapshot(data);
-    importCore.writeEditorSnapshot(snapshot);
+  function suspendBackgroundWork(active) {
     try {
-      localStorage.setItem('stepper_last_loaded_source', JSON.stringify({
-        source: 'pdf-import',
-        title: String((data && data.title) || 'Untitled'),
-        updatedAt: new Date().toISOString()
-      }));
-    } catch {}
-    window.__STEPPER_PDF_DATA = data;
-    window.dispatchEvent(new CustomEvent('stepper-pdf-import', { detail: data }));
-    window.dispatchEvent(new CustomEvent('stepper:worksheet-loaded', { detail: { data: snapshot } }));
-    window.dispatchEvent(new CustomEvent('stepper-pdf-live-apply', { detail: snapshot }));
-    try { if (typeof window.__stepperRefreshWorksheetFromStorage === 'function') window.__stepperRefreshWorksheetFromStorage(); } catch (_) {}
-    tryDirectPopulate(data);
-    setStatus('success', 'Imported into the editor live. No reload needed.');
+      window.__stepperBackgroundSuspend = !!active;
+      document.documentElement.setAttribute('data-stepper-background-suspend', active ? '1' : '0');
+      window.dispatchEvent(new CustomEvent('stepper-background-suspend', { detail: { active: !!active, source: 'pdf-import' } }));
+    } catch (_) {}
+  }
+
+  function applyToEditor(data) {
+    suspendBackgroundWork(true);
+    setStatus('loading', 'Applying import (pausing background tasks)…');
+    const run = () => {
+      try {
+        const importCore = getImportCore();
+        const snapshot = importCore.buildEditorSnapshot(data);
+        importCore.writeEditorSnapshot(snapshot);
+        try {
+          localStorage.setItem('stepper_last_loaded_source', JSON.stringify({
+            source: 'pdf-import',
+            title: String((data && data.title) || 'Untitled'),
+            updatedAt: new Date().toISOString()
+          }));
+        } catch {}
+        window.__STEPPER_PDF_DATA = data;
+        window.dispatchEvent(new CustomEvent('stepper-pdf-import', { detail: data }));
+        window.dispatchEvent(new CustomEvent('stepper:worksheet-loaded', { detail: { data: snapshot } }));
+        window.dispatchEvent(new CustomEvent('stepper-pdf-live-apply', { detail: snapshot }));
+        try { if (typeof window.__stepperRefreshWorksheetFromStorage === 'function') window.__stepperRefreshWorksheetFromStorage(); } catch (_) {}
+        setStatus('success', 'Imported into the editor live. No reload needed.');
+      } finally {
+        window.setTimeout(() => suspendBackgroundWork(false), 350);
+      }
+    };
+    window.requestAnimationFrame ? window.requestAnimationFrame(() => window.requestAnimationFrame(run)) : window.setTimeout(run, 0);
   }
 
   function tryDirectPopulate(data) {

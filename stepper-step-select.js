@@ -86,6 +86,10 @@
     } catch (_) { return false; }
   }
 
+  function isBackgroundSuspended() {
+    return !!window.__stepperBackgroundSuspend;
+  }
+
   /* ══════════════════════════ CSS Injection ═══════════════════════════════ */
 
   function injectStyles() {
@@ -402,6 +406,7 @@
   }
 
   function scheduleRemap() {
+    if (isBackgroundSuspended()) return;
     if (remapTimer) clearTimeout(remapTimer);
     remapTimer = setTimeout(function () {
       remapTimer = null;
@@ -511,6 +516,7 @@
   /* ═══════════════════════ Click Handler ══════════════════════════════════ */
 
   function handleStepClick(e) {
+    if (isBackgroundSuspended()) return;
     if (dragState.justDropped) {
       dragState.justDropped = false;
       e.preventDefault();
@@ -1146,6 +1152,7 @@
   }
 
   function handleKeydown(e) {
+    if (isBackgroundSuspended()) return;
     // Allow Find/Replace panel-specific shortcuts to pass through
     if (e.target && e.target.closest('#' + FR_PANEL_ID)) return;
 

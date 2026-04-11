@@ -3795,6 +3795,11 @@
   }
 
   function renderCommunityGlossary(){
+    if (window.__stepperBackgroundSuspend) {
+      let suspendedHost = document.getElementById('stepper-community-glossary-host');
+      if (suspendedHost) { suspendedHost.style.display = 'none'; suspendedHost.innerHTML = ''; }
+      return;
+    }
     let host = document.getElementById('stepper-community-glossary-host');
     if (!host) {
       host = document.createElement('div');
@@ -4004,6 +4009,12 @@
   }
 
   function renderSiteHelper(){
+    if (window.__stepperBackgroundSuspend) {
+      const suspendedHost = ensureSiteHelperHost();
+      suspendedHost.style.display = 'none';
+      suspendedHost.innerHTML = '';
+      return;
+    }
     /* ── Skip render when the user is typing ── */
     const activeInput = document.activeElement;
     if (state.chatOpen && activeInput && activeInput.matches && activeInput.matches('[data-chat-input="1"]')) return;
@@ -4267,6 +4278,11 @@
   }
 
   function renderQuickActions(){
+    if (window.__stepperBackgroundSuspend) {
+      let suspendedHost = document.getElementById('stepper-google-quick-actions');
+      if (suspendedHost) { suspendedHost.style.display = 'none'; suspendedHost.innerHTML = ''; }
+      return;
+    }
     let host = document.getElementById('stepper-google-quick-actions');
     if (!host) {
       host = document.createElement('div');
@@ -4292,6 +4308,14 @@
     host.querySelector('[data-quick="site"]').addEventListener('click', ()=>requestModeration('site'));
     host.querySelector('[data-quick="invite"]').addEventListener('click', ()=>showInviteFriendsOverlay());
   }
+
+  window.addEventListener('stepper-background-suspend', function () {
+    if (window.__stepperBackgroundSuspend) return;
+    state._helperSignature = '';
+    renderCommunityGlossary();
+    renderSiteHelper();
+    renderQuickActions();
+  });
 
   /* ── Invite friends to current project overlay ── */
   function showInviteFriendsOverlay(){
