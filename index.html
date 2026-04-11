@@ -393,6 +393,26 @@ const levelRank={Beginner:0,Improver:1,Intermediate:2,Advanced:3},levels=["Begin
     }catch{}
   };
 
+  const TURN_CLOCK_RIGHT={
+    "1/8":"1:30","1/4":"3:00","3/8":"4:30","1/2":"6:00","5/8":"7:30","3/4":"9:00","7/8":"10:30","full":"12:00"
+  };
+  const TURN_CLOCK_LEFT={
+    "1/8":"10:30","1/4":"9:00","3/8":"7:30","1/2":"6:00","5/8":"4:30","3/4":"3:00","7/8":"1:30","full":"12:00"
+  };
+  const turnFacingTags=(text)=>{
+    const src=String(text||"");
+    const tags=[];
+    const re=/(1\/8|1\/4|3\/8|1\/2|5\/8|3\/4|7\/8|full)\s*turn(?:ing)?(?:\s*(left|right))?/ig;
+    let m;
+    while((m=re.exec(src))){
+      const frac=String(m[1]||"").toLowerCase();
+      const dir=String(m[2]||"").toLowerCase();
+      const wall=(dir==="left"?TURN_CLOCK_LEFT:TURN_CLOCK_RIGHT)[frac];
+      if(wall) tags.push(`[${wall}]`);
+    }
+    return Array.from(new Set(tags));
+  };
+
   const s=(c)=>{
     if(c.type==="marker"){
       const h=c.markerType==="restart";
@@ -403,13 +423,15 @@ const levelRank={Beginner:0,Improver:1,Intermediate:2,Advanced:3},levels=["Begin
     const N=(c.foot||"").trim();
     const z=(c.note||"").trim();
     const j=[];
-    if(c.count) j.push(`${c.count}:`);
-    if(v&&L) j.push(`${v}: ${L}`);
-    else if(v) j.push(v);
-    else if(L) j.push(L);
+    const body=(L||v||"").trim();
+    if(c.count&&body) j.push(`${c.count} ${body}`);
+    else if(c.count) j.push(String(c.count).trim());
+    else if(body) j.push(body);
     if(N) j.push(`[${N}]`);
-    if(c.showNote&&z) j.push(`(Note: ${z})`);
-    return j.join(" ").replace(/\s+/g," ").trim();
+    const facing=turnFacingTags(`${v} ${L}`);
+    if(facing.length) j.push(facing.join(" "));
+    if(c.showNote&&z) j.push(`\n(Note: ${z})`);
+    return j.join(" ").replace(/[ \t]+/g," ").trim();
   };
 
   const a=(c,h)=>{
@@ -419,7 +441,8 @@ const levelRank={Beginner:0,Improver:1,Intermediate:2,Advanced:3},levels=["Begin
       L+=1;
       const z=(N?.name)||`${h} ${L}`;
       const j=(N?.steps)||[];
-      v.push(z);
+      const stepNames=j.map(V=>String((V&&V.name)||"").trim()).filter(Boolean);
+      v.push(`${h} ${L}: ${stepNames.length?stepNames.join(", "):z}`);
       for(const V of j) v.push(s(V));
       v.push("");
     }
@@ -431,12 +454,9 @@ const levelRank={Beginner:0,Improver:1,Intermediate:2,Advanced:3},levels=["Begin
     const h=(e.title||"Untitled Dance").trim();
     c.push(h);
 
-    const v=[];
-    if(e.counts) v.push(`Count: ${e.counts}`);
-    if(e.walls) v.push(`Wall: ${e.walls}`);
-    if(e.level) v.push(`Level: ${e.level}`);
-    if(v.length) c.push(v.join(" | "));
-
+    if(e.counts) c.push(`Count: ${e.counts}`);
+    if(e.walls) c.push(`Wall: ${e.walls}`);
+    if(e.level) c.push(`Level: ${e.level}`);
     const L=Sg(e);
     if(L) c.push(`Choreographer: ${L}`);
     if(e.music) c.push(`Music: ${e.music}`);
