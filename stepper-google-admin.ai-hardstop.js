@@ -576,8 +576,14 @@
     host.style.zIndex = side === 'right' ? '8700' : '8600';
     /* If user has dragged the helper, honour that position */
     if (_helperDragPos.dragged && _helperDragPos.x !== null && _helperDragPos.y !== null) {
-      host.style.left = _helperDragPos.x + 'px';
-      host.style.top  = _helperDragPos.y + 'px';
+      var maxX = Math.max(12, window.innerWidth - 72);
+      var maxY = Math.max(12, window.innerHeight - 72);
+      var safeX = Math.max(12, Math.min(maxX, Number(_helperDragPos.x) || 12));
+      var safeY = Math.max(12, Math.min(maxY, Number(_helperDragPos.y) || 12));
+      _helperDragPos.x = safeX;
+      _helperDragPos.y = safeY;
+      host.style.left = safeX + 'px';
+      host.style.top  = safeY + 'px';
       host.style.right  = 'auto';
       host.style.bottom = 'auto';
       return;

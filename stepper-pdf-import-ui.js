@@ -327,6 +327,8 @@
     }
   }
 
+  var MAX_PREVIEW_STEPS = 140;
+
   function renderResults(data) {
     const results = document.getElementById('stepper-pdf-results');
     let html = '';
@@ -337,10 +339,15 @@
     if (data.level) html += row('Level', data.level);
 
     if (data.steps && data.steps.length > 0) {
-      html += `<div class="steps-header">Extracted Steps (${data.steps.length})</div>`;
-      data.steps.forEach((step, i) => {
+      const total = data.steps.length;
+      const preview = data.steps.slice(0, MAX_PREVIEW_STEPS);
+      html += `<div class="steps-header">Extracted Steps (${total})</div>`;
+      preview.forEach((step, i) => {
         html += `<div class="step-item"><span class="step-count">${esc(step.counts || String(i + 1))}</span><span class="step-desc">${esc(step.description || step.name)}</span><span class="step-foot">${esc(step.foot)}</span></div>`;
       });
+      if (total > preview.length) {
+        html += `<div class="meta-row"><span class="meta-label">Preview</span><span class="meta-value">Showing first ${preview.length} of ${total} steps to keep this fast. All steps will still import.</span></div>`;
+      }
     }
     results.innerHTML = html;
     results.style.display = 'block';
