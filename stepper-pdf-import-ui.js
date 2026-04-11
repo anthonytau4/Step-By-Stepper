@@ -306,6 +306,8 @@
     if (!file.name.toLowerCase().endsWith('.pdf')) { setStatus('error', 'Please select a PDF file.'); return; }
     if (file.size > 10 * 1024 * 1024) { setStatus('error', 'File too large (max 10MB).'); return; }
 
+    // Parsing should never pause background helpers; force resume before parse starts.
+    suspendBackgroundWork(false, 'apply-import');
     setStatus('loading', 'Parsing PDF...');
     document.getElementById('stepper-pdf-results').style.display = 'none';
     document.getElementById('stepper-pdf-apply').style.display = 'none';
