@@ -740,10 +740,29 @@
     return match && match[1] ? compactWhitespace(String(match[1]).replace(/\bto\b/ig, '-')) : '';
   }
 
+  function extractLocalFootHint(text){
+    const source = normalizeLocalMotionText(text);
+    if (!source) return null;
+    if (/\b(?:either|any)\b/.test(source)) return '';
+    if (/\b(?:right|r)\b/.test(source)) return 'R';
+    if (/\b(?:left|l)\b/.test(source)) return 'L';
+    return null;
+  }
+
+  function stripLocalFootHintText(text){
+    return compactWhitespace(String(text || '')
+      .replace(/\((?:right|left|r|l|either|any)\)/ig, '')
+      .replace(/\b(?:start|starting|on|foot)\s*[:=-]?\s*(?:right|left|r|l|either|any)\b/ig, '')
+      .replace(/\b(?:right|left)\s+foot\b/ig, '')
+      .replace(/\s+[-–]\s*(?:right|left|r|l|either|any)\s*$/ig, '')
+      .replace(/\s+(?:right|left|r|l|either|any)\s*$/ig, ''));
+  }
+
   function inferLocalStepCount(body){
     const lowered = normalizeLocalMotionText(body);
     const repeatedWalk = parseLocalRepeatedWalk(lowered);
     if (repeatedWalk) return `1-${Number(repeatedWalk.repeats) + (repeatedWalk.touch ? 1 : 0)}`;
+    if (/\bcross\s+side\b/.test(lowered)) return '1-2';
     if (/\b(?:grapevine|vine)\b/.test(lowered)) return '1-4';
     if (/rock\s+back(?:,|\s+)recover/.test(lowered)) return '1-2';
     if (/\b(?:coaster|sailor|shuffle|triple step|triple|chasse|kick ball change|mambo)\b/.test(lowered)) return '1&2';
@@ -771,6 +790,7 @@
       [/^kick\s+ball\s+change$/i, () => ({ name:'Kick Ball Change', confident:true })],
       [/^step\s+touch$/i, () => ({ name:'Step Touch', confident:true })],
       [/^side\s+touch$/i, () => ({ name:'Side Touch', confident:true })],
+      [/^cross\s+side$/i, () => ({ name:'Cross Side', confident:true })],
       [/^step\s+lock\s+step$/i, () => ({ name:'Step Lock Step', confident:true })],
       [/^shuffle\s+(forward|back|left|right)$/i, (m) => ({ name:`Shuffle ${titleCaseWords(m[1])}`, confident:true })],
       [/^pivot(?:\s+\d+)?(?:\s*(?:1\/4|1\/2|1\/8|quarter|half))?\s*(left|right)?$/i, () => ({ name:'Pivot Turn', confident:true })],
@@ -940,6 +960,7 @@
       return repeatedWalk.touch ? `${sentence}, then touch beside with no weight change.` : `${sentence}.`;
     }
     if (/rock\s+back(?:,|\s+)recover/.test(source)) return 'Rock back onto the stepping foot and recover back onto the other foot.';
+    if (/\bcross\s+side\b/.test(source)) return 'Cross over, then step to the side.';
     if (/\b(?:grapevine|vine)\b/.test(source)) {
       const direction = /right/.test(source) ? 'right' : (/left/.test(source) ? 'left' : 'to the side');
       return `Step ${direction}, cross behind, step ${direction}, then touch or step to finish.`;
@@ -1026,12 +1047,15 @@
     let currentStart = getLocalExpectedStartFoot();
     return rawTokens.map((token) => {
       const explicitCount = extractLocalStepCountLabel(token);
-      const body = compactWhitespace(token.replace(/\(([^)]*\d[^)]*)\)\s*$/i, '').replace(/\b((?:\d+\s*[&,-]\s*)+\d+)\b\s*$/i, '').replace(/\b(?:use|put|set|on)\s+counts?\b\s*$/i, '').trim() || token);
+      const footHint = extractLocalFootHint(token);
+      const body = compactWhitespace(stripLocalFootHintText(token).replace(/\(([^)]*\d[^)]*)\)\s*$/i, '').replace(/\b((?:\d+\s*[&,-]\s*)+\d+)\b\s*$/i, '').replace(/\b(?:use|put|set|on)\s+counts?\b\s*$/i, '').trim() || token);
       if (!body) return null;
       let glossaryItem = glossaryMap.get(compactWhitespace(body).toLowerCase());
       if (!glossaryItem) glossaryItem = findBestLocalGlossaryMatch(body, glossary, currentStart);
       if (glossaryItem) {
-        const foot = /^(R|L)$/i.test(compactWhitespace(glossaryItem.foot || '')) ? compactWhitespace(glossaryItem.foot || '').toUpperCase() : currentStart;
+        const foot = footHint === 'R' || footHint === 'L'
+          ? footHint
+          : (/^(R|L)$/i.test(compactWhitespace(glossaryItem.foot || '')) ? compactWhitespace(glossaryItem.foot || '').toUpperCase() : currentStart);
         const step = {
           name: compactWhitespace(glossaryItem.name || body),
           description: compactWhitespace(glossaryItem.description || glossaryItem.desc || '') || inferLocalStepDescription(body, compactWhitespace(explicitCount || glossaryItem.counts || glossaryItem.count || inferLocalStepCount(body) || '1'), foot),
@@ -1050,7 +1074,7 @@
       const count = compactWhitespace(explicitCount || inferLocalStepCount(body));
       const needsName = singleToken && !inferredName.confident && !compactWhitespace(inferredName.name);
       const needsCount = singleToken && !count;
-      const foot = currentStart === 'R' || currentStart === 'L' ? currentStart : '';
+      const foot = footHint === 'R' || footHint === 'L' ? footHint : (currentStart === 'R' || currentStart === 'L' ? currentStart : '');
       const step = {
         name: compactWhitespace(inferredName.name || (needsName ? '' : titleCaseWords(body.split(/\s+/).slice(0, 5).join(' '))) || 'Custom Step'),
         description: inferLocalStepDescription(body, count, foot),
@@ -3613,7 +3637,7 @@
       originalTags: String(payload && payload.originalTags || (existing && existing.tags) || '').trim()
     };
     if (!merged.originalName) {
-      alert('The original glossary step could not be matched yet. Open Glossary+ once so the latest glossary list loads, then try again.');
+      alert('The original glossary step could not be matched yet. Open Community Glossary once so the latest glossary list loads, then try again.');
       return false;
     }
     return requestGlossaryStep(merged);
@@ -3718,7 +3742,7 @@
     }
     host.style.display = '';
     if (!state.communityGlossaryOpen) {
-      host.innerHTML = `<button type="button" data-open-community-glossary="1" style="border:1px solid rgba(99,102,241,.18);background:#fff;color:#111827;padding:.8rem 1rem;border-radius:999px;font-weight:900;box-shadow:0 12px 30px rgba(0,0,0,.14);">Glossary+</button>`;
+      host.innerHTML = `<button type="button" data-open-community-glossary="1" style="border:1px solid rgba(99,102,241,.18);background:#fff;color:#111827;padding:.8rem 1rem;border-radius:999px;font-weight:900;box-shadow:0 12px 30px rgba(0,0,0,.14);">Community Glossary</button>`;
       const btn = host.querySelector('[data-open-community-glossary="1"]');
       if (btn) btn.addEventListener('click', ()=>{ if (isCompactViewport()) state.chatOpen = false; state.communityGlossaryOpen = true; renderSiteHelper(); renderCommunityGlossary(); });
       return;
@@ -5006,7 +5030,7 @@
 
         <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-site-memory="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Helper memory</div><p class="mt-1 text-sm ${theme.subtle}">Add site facts or rules the AI helper should keep using for everyone. This is how the website learns approved things over time.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.siteMemories || []).length))} learned</span></div><div class="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]"><textarea data-stepper-site-memory-input="1" class="stepper-google-input" rows="3" placeholder="Example: Featured dances should feel polished but not over-written. Counts should be generated in 8-count blocks whenever possible."></textarea><button type="button" class="stepper-google-cta ${theme.button}" data-action="add-site-memory">Add memory</button></div><div class="mt-4 grid gap-3">${(state.siteMemories || []).length ? state.siteMemories.slice(0,30).map(item => `<div class="rounded-2xl border p-4 ${theme.soft}" data-stepper-site-memory-id="${escapeHtml(item.id)}"><div class="flex flex-wrap items-start justify-between gap-3"><div><div class="text-sm font-black">${escapeHtml(item.text || '')}</div><p class="mt-1 text-xs ${theme.subtle}">${escapeHtml(item.createdByName || item.createdByEmail || 'Admin')}</p></div><button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="delete-site-memory">Delete</button></div></div>`).join('') : `<p class="text-sm ${theme.subtle}">No saved helper memory yet.</p>`}</div></div>
         <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-glossary-requests="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Requested dance steps</div><p class="mt-1 text-sm ${theme.subtle}">Admin approves custom glossary steps here. If a request is clearly right-footed or left-footed, the mirrored version is created automatically too.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.glossaryRequests || []).length))} pending</span></div><div class="mt-4 grid gap-4">${(state.glossaryRequests || []).length ? state.glossaryRequests.map(item => `<article class="rounded-2xl border p-4 ${theme.soft}" data-stepper-glossary-request-id="${escapeHtml(item.id)}"><div class="flex flex-wrap items-start justify-between gap-3"><div><div class="text-base font-black">${escapeHtml(item.name || 'Requested Step')}</div><p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.ownerName || item.ownerEmail || 'Member')} • ${escapeHtml(item.counts || '1')} • ${escapeHtml(item.foot || 'Either')}</p></div><div class="flex flex-wrap gap-3"><button type="button" class="stepper-google-cta ${theme.button}" data-action="approve-glossary-request">Approve</button><button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="reject-glossary-request">Decline</button></div></div><div class="mt-4 grid gap-3 sm:grid-cols-2"><div class="rounded-2xl border p-4 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">${item.requestType === 'edit' ? 'Current glossary step' : 'Requested step'}</div><p class="mt-3 text-sm font-bold">${escapeHtml(item.requestType === 'edit' ? (item.originalName || '') : (item.name || ''))}</p><p class="mt-2 text-sm ${theme.subtle}">${escapeHtml(item.requestType === 'edit' ? (item.originalDescription || '') : (item.description || ''))}</p><p class="mt-2 text-xs font-semibold ${theme.subtle}">${escapeHtml(item.requestType === 'edit' ? (item.originalFoot || item.foot || '') : (item.foot || ''))} • ${escapeHtml(item.requestType === 'edit' ? (item.originalCounts || item.counts || '') : (item.counts || ''))}</p>${(item.requestType === 'edit' ? item.originalTags : item.tags) ? `<p class="mt-2 text-xs font-semibold ${theme.subtle}">Tags: ${escapeHtml(item.requestType === 'edit' ? item.originalTags : item.tags)}</p>` : ''}</div><div class="rounded-2xl border p-4 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">${item.requestType === 'edit' ? 'Suggested replacement' : 'Auto twin preview'}</div>${item.requestType === 'edit' ? `<p class="mt-3 text-sm font-bold">${escapeHtml(item.name || '')}</p><p class="mt-2 text-sm ${theme.subtle}">${escapeHtml(item.description || '')}</p><p class="mt-2 text-xs font-semibold ${theme.subtle}">${escapeHtml(item.foot || '')} • ${escapeHtml(item.counts || '')}</p>${item.tags ? `<p class="mt-2 text-xs font-semibold ${theme.subtle}">Tags: ${escapeHtml(item.tags)}</p>` : ''}` : (item.autoMirror ? `<p class="mt-3 text-sm font-bold">${escapeHtml(item.autoMirror.name || '')}</p><p class="mt-2 text-sm ${theme.subtle}">${escapeHtml(item.autoMirror.description || '')}</p><p class="mt-2 text-xs font-semibold ${theme.subtle}">${escapeHtml(item.autoMirror.foot || '')} • ${escapeHtml(item.autoMirror.counts || '')}</p>` : `<p class="mt-3 text-sm ${theme.subtle}">No forced opposite-foot twin for this request.</p>`)}</div></div></article>`).join('') : `<p class="text-sm ${theme.subtle}">No pending dance step requests.</p>`}</div></div>
-        <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-approved-glossary="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Approved community glossary</div><p class="mt-1 text-sm ${theme.subtle}">These are the admin-approved custom steps everyone can apply from Glossary+ while building.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.glossaryApproved || []).length))} live</span></div><div class="mt-4 grid gap-3">${(state.glossaryApproved || []).length ? state.glossaryApproved.slice(0, 20).map(item => `<div class="rounded-2xl border p-4 ${theme.soft}"><div class="flex flex-wrap items-start justify-between gap-3"><div><div class="text-base font-black">${escapeHtml(item.name || 'Step')}</div><p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.foot || 'Either')} • ${escapeHtml(item.counts || '1')}</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(item.status || 'approved')}</span></div><p class="mt-3 text-sm ${theme.subtle}">${escapeHtml(item.description || '')}</p></div>`).join('') : `<p class="text-sm ${theme.subtle}">No approved custom glossary steps yet.</p>`}</div></div>
+        <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-approved-glossary="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Approved community glossary</div><p class="mt-1 text-sm ${theme.subtle}">These are the admin-approved custom steps everyone can apply from Community Glossary while building.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.glossaryApproved || []).length))} live</span></div><div class="mt-4 grid gap-3">${(state.glossaryApproved || []).length ? state.glossaryApproved.slice(0, 20).map(item => `<div class="rounded-2xl border p-4 ${theme.soft}"><div class="flex flex-wrap items-start justify-between gap-3"><div><div class="text-base font-black">${escapeHtml(item.name || 'Step')}</div><p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.foot || 'Either')} • ${escapeHtml(item.counts || '1')}</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(item.status || 'approved')}</span></div><p class="mt-3 text-sm ${theme.subtle}">${escapeHtml(item.description || '')}</p></div>`).join('') : `<p class="text-sm ${theme.subtle}">No approved custom glossary steps yet.</p>`}</div></div>
         ${cards}
       </div>
     `;
