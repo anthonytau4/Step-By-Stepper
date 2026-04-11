@@ -275,8 +275,10 @@
     dropzone.addEventListener('drop', (e) => { e.preventDefault(); dropzone.classList.remove('dragover'); if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]); });
     fileInput.addEventListener('change', () => { if (fileInput.files.length > 0) handleFile(fileInput.files[0]); });
 
-    applyBtn.addEventListener('click', () => {
-      if (parsedData) { applyToEditor(parsedData); overlay.classList.remove('active'); }
+    applyBtn.addEventListener('click', async () => {
+      if (!parsedData) return;
+      const ok = await applyToEditor(parsedData);
+      if (ok) overlay.classList.remove('active');
     });
   }
 
@@ -370,29 +372,39 @@
   function applyToEditor(data) {
     suspendBackgroundWork(true, 'apply-import');
     setStatus('loading', 'Applying import (pausing background tasks)…');
-    const run = () => {
-      try {
-        const importCore = getImportCore();
-        const snapshot = importCore.buildEditorSnapshot(data);
-        importCore.writeEditorSnapshot(snapshot);
+    return new Promise((resolve) => {
+      const run = () => {
         try {
-          localStorage.setItem('stepper_last_loaded_source', JSON.stringify({
-            source: 'pdf-import',
-            title: String((data && data.title) || 'Untitled'),
-            updatedAt: new Date().toISOString()
-          }));
-        } catch {}
-        window.__STEPPER_PDF_DATA = data;
-        window.dispatchEvent(new CustomEvent('stepper-pdf-import', { detail: data }));
-        window.dispatchEvent(new CustomEvent('stepper:worksheet-loaded', { detail: { data: snapshot } }));
-        window.dispatchEvent(new CustomEvent('stepper-pdf-live-apply', { detail: snapshot }));
-        try { if (typeof window.__stepperRefreshWorksheetFromStorage === 'function') window.__stepperRefreshWorksheetFromStorage(); } catch (_) {}
-        setStatus('success', 'Imported into the editor live. No reload needed.');
-      } finally {
-        window.setTimeout(() => suspendBackgroundWork(false, 'apply-import'), 350);
-      }
-    };
-    window.requestAnimationFrame ? window.requestAnimationFrame(() => window.requestAnimationFrame(run)) : window.setTimeout(run, 0);
+          const importCore = getImportCore();
+          if (!data || typeof data !== 'object') throw new Error('No parsed import data was available to apply.');
+          const snapshot = importCore.buildEditorSnapshot(data);
+          if (!snapshot || !Array.isArray(snapshot.sections)) throw new Error('Imported snapshot could not be built.');
+          importCore.writeEditorSnapshot(snapshot);
+          try {
+            localStorage.setItem('stepper_last_loaded_source', JSON.stringify({
+              source: 'pdf-import',
+              title: String((data && data.title) || 'Untitled'),
+              updatedAt: new Date().toISOString()
+            }));
+          } catch {}
+          window.__STEPPER_PDF_DATA = data;
+          window.dispatchEvent(new CustomEvent('stepper-pdf-import', { detail: data }));
+          window.dispatchEvent(new CustomEvent('stepper:worksheet-loaded', { detail: { data: snapshot } }));
+          window.dispatchEvent(new CustomEvent('stepper-pdf-live-apply', { detail: snapshot }));
+          try { if (typeof window.__stepperRefreshWorksheetFromStorage === 'function') window.__stepperRefreshWorksheetFromStorage(); } catch (_) {}
+          setStatus('success', 'Imported into the editor live. No reload needed.');
+          resolve(true);
+        } catch (err) {
+          const msg = err && err.message ? err.message : 'Import apply failed unexpectedly.';
+          console.error('[Stepper PDF Import] applyToEditor failed', err);
+          setStatus('error', msg);
+          resolve(false);
+        } finally {
+          window.setTimeout(() => suspendBackgroundWork(false, 'apply-import'), 350);
+        }
+      };
+      window.requestAnimationFrame ? window.requestAnimationFrame(() => window.requestAnimationFrame(run)) : window.setTimeout(run, 0);
+    });
   }
 
   function tryDirectPopulate(data) {
