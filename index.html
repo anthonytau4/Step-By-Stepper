@@ -439,10 +439,15 @@ const levelRank={Beginner:0,Improver:1,Intermediate:2,Advanced:3},levels=["Begin
     let L=0;
     for(const N of c||[]){
       L+=1;
-      const z=(N?.name)||`${h} ${L}`;
       const j=(N?.steps)||[];
-      const stepNames=j.map(V=>String((V&&V.name)||"").trim()).filter(Boolean);
-      v.push(`${h} ${L}: ${stepNames.length?stepNames.join(", "):z}`);
+      const stepNames=j.map((V,idx)=>{
+        const byName=String((V&&V.name)||"").trim();
+        if(byName) return byName;
+        const byDesc=String((V&&V.description)||"").trim();
+        if(byDesc) return byDesc.split(/\s+/).slice(0,4).join(" ");
+        return `Step ${idx+1}`;
+      }).filter(Boolean);
+      v.push(`${h} ${L}: ${stepNames.join(", ")}`);
       for(const V of j) v.push(s(V));
       v.push("");
     }
