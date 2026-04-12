@@ -961,11 +961,14 @@
     const source = normalizeLocalMotionText(body);
     const repeatedWalk = parseLocalRepeatedWalk(source);
     if (repeatedWalk) {
-      const sequence = buildLocalWalkSequence(repeatedWalk.repeats, repeatedWalk.direction, startFoot);
+      const hintedFoot = extractLocalFootHint(source);
+      const sequenceStart = (hintedFoot === 'R' || hintedFoot === 'L') ? hintedFoot : startFoot;
+      const sequence = buildLocalWalkSequence(repeatedWalk.repeats, repeatedWalk.direction, sequenceStart);
       const sentence = sequence ? `${sequence.charAt(0).toUpperCase()}${sequence.slice(1)}` : 'Walk forward.';
       return repeatedWalk.touch ? `${sentence}, then touch beside with no weight change.` : `${sentence}.`;
     }
-    if (/rock\s+back(?:,|\s+)recover/.test(source)) return 'Rock back onto the stepping foot and recover back onto the other foot.';
+    if (/rock\s+back(?:,|\s+)recover/.test(source)) return 'Rock back onto the stepping foot and recover forward onto the other foot.';
+    if (/rock\s+forward(?:,|\s+)recover/.test(source)) return 'Rock forward onto the stepping foot and recover back onto the other foot.';
     if (/\bcross\s+side\b/.test(source)) return 'Cross over, then step to the side.';
     if (/\b(?:grapevine|vine)\b/.test(source)) {
       const direction = /right/.test(source) ? 'right' : (/left/.test(source) ? 'left' : 'to the side');
