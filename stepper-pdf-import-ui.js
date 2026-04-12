@@ -353,7 +353,7 @@
     if (data.music) html += row('Music', data.music);
     if (data.count) html += row('Counts', data.count);
     if (data.level) html += row('Level', data.level);
-    const sections = Array.isArray(data && data.sections) ? data.sections : [];
+    const sections = getCommitSections(data);
     if (sections.length) {
       html += `<div class="steps-header">Sections (${sections.length}) — commit one section at a time</div>`;
       sections.forEach((section, idx) => {
@@ -381,7 +381,7 @@
   function row(label, val) { return `<div class="meta-row"><span class="meta-label">${label}</span><span class="meta-value">${esc(val)}</span></div>`; }
   function esc(str) { const d = document.createElement('div'); d.textContent = String(str || ''); return d.innerHTML; }
   function buildSectionPayload(data, index) {
-    const sections = Array.isArray(data && data.sections) ? data.sections : [];
+    const sections = getCommitSections(data);
     const source = sections[index];
     if (!source) return null;
     const steps = Array.isArray(source.steps) ? source.steps : [];
@@ -391,6 +391,25 @@
       sections: [Object.assign({}, source, { steps })],
       steps
     });
+  }
+  function getCommitSections(data) {
+    const explicitSections = Array.isArray(data && data.sections) ? data.sections.filter(Boolean) : [];
+    if (explicitSections.length) return explicitSections;
+    const steps = Array.isArray(data && data.steps) ? data.steps : [];
+    if (!steps.length) return [];
+    const chunks = [];
+    let current = [];
+    for (let i = 0; i < steps.length; i += 1) {
+      const step = steps[i];
+      current.push(step);
+      const counts = String(step && step.counts || '').trim();
+      if (/\b8\b/.test(counts)) {
+        chunks.push(current);
+        current = [];
+      }
+    }
+    if (current.length) chunks.push(current);
+    return chunks.map((sectionSteps, idx) => ({ title: `Section ${idx + 1}`, kind: 'section', steps: sectionSteps }));
   }
 
   function suspendBackgroundWork(active, reason) {
