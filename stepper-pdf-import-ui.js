@@ -244,7 +244,7 @@
           <div id="stepper-pdf-results" data-testid="pdf-results"></div>
           <div class="stepper-pdf-btn-row">
             <button class="stepper-pdf-btn stepper-pdf-btn-cancel" id="stepper-pdf-cancel" data-testid="pdf-cancel-button">Cancel</button>
-            <button class="stepper-pdf-btn stepper-pdf-btn-apply" id="stepper-pdf-apply" data-testid="pdf-apply-button">Apply to Editor</button>
+            <button class="stepper-pdf-btn stepper-pdf-btn-apply" id="stepper-pdf-apply" data-testid="pdf-apply-button">Apply All Sections</button>
           </div>
         </div>
       </div>
@@ -274,9 +274,23 @@
     dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
     dropzone.addEventListener('drop', (e) => { e.preventDefault(); dropzone.classList.remove('dragover'); if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]); });
     fileInput.addEventListener('change', () => { if (fileInput.files.length > 0) handleFile(fileInput.files[0]); });
+    document.getElementById('stepper-pdf-results').addEventListener('click', async (e) => {
+      const btn = e.target && e.target.closest ? e.target.closest('[data-commit-section]') : null;
+      if (!btn || !parsedData) return;
+      const index = Number(btn.getAttribute('data-commit-section'));
+      if (!Number.isFinite(index) || index < 0) return;
+      const sectionPayload = buildSectionPayload(parsedData, index);
+      if (!sectionPayload) { setStatus('error', 'Could not load that section.'); return; }
+      btn.disabled = true;
+      const ok = await applyToEditor(sectionPayload);
+      if (ok) setStatus('success', `Committed section ${index + 1} into the editor.`);
+      btn.disabled = false;
+    });
 
-    applyBtn.addEventListener('click', () => {
-      if (parsedData) { applyToEditor(parsedData); overlay.classList.remove('active'); }
+    applyBtn.addEventListener('click', async () => {
+      if (!parsedData) return;
+      const ok = await applyToEditor(parsedData);
+      if (ok) overlay.classList.remove('active');
     });
   }
 
@@ -306,6 +320,8 @@
     if (!file.name.toLowerCase().endsWith('.pdf')) { setStatus('error', 'Please select a PDF file.'); return; }
     if (file.size > 10 * 1024 * 1024) { setStatus('error', 'File too large (max 10MB).'); return; }
 
+    // Parsing should never pause background helpers; force resume before parse starts.
+    suspendBackgroundWork(false, 'apply-import');
     setStatus('loading', 'Parsing PDF...');
     document.getElementById('stepper-pdf-results').style.display = 'none';
     document.getElementById('stepper-pdf-apply').style.display = 'none';
@@ -327,6 +343,8 @@
     }
   }
 
+  var MAX_PREVIEW_STEPS = 140;
+
   function renderResults(data) {
     const results = document.getElementById('stepper-pdf-results');
     let html = '';
@@ -335,12 +353,26 @@
     if (data.music) html += row('Music', data.music);
     if (data.count) html += row('Counts', data.count);
     if (data.level) html += row('Level', data.level);
+    const sections = Array.isArray(data && data.sections) ? data.sections : [];
+    if (sections.length) {
+      html += `<div class="steps-header">Sections (${sections.length}) — commit one section at a time</div>`;
+      sections.forEach((section, idx) => {
+        const sectionSteps = Array.isArray(section && section.steps) ? section.steps : [];
+        const sectionLabel = String(section && (section.title || section.name) || `Section ${idx + 1}`);
+        html += `<div class="meta-row"><span class="meta-label">${esc(sectionLabel)}</span><span class="meta-value">${sectionSteps.length} steps <button type="button" class="stepper-pdf-btn stepper-pdf-btn-apply" data-commit-section="${idx}" style="padding:6px 10px;font-size:11px;margin-left:8px;">Commit</button></span></div>`;
+      });
+    }
 
     if (data.steps && data.steps.length > 0) {
-      html += `<div class="steps-header">Extracted Steps (${data.steps.length})</div>`;
-      data.steps.forEach((step, i) => {
+      const total = data.steps.length;
+      const preview = data.steps.slice(0, MAX_PREVIEW_STEPS);
+      html += `<div class="steps-header">Extracted Steps (${total})</div>`;
+      preview.forEach((step, i) => {
         html += `<div class="step-item"><span class="step-count">${esc(step.counts || String(i + 1))}</span><span class="step-desc">${esc(step.description || step.name)}</span><span class="step-foot">${esc(step.foot)}</span></div>`;
       });
+      if (total > preview.length) {
+        html += `<div class="meta-row"><span class="meta-label">Preview</span><span class="meta-value">Showing first ${preview.length} of ${total} steps to keep this fast. All steps will still import.</span></div>`;
+      }
     }
     results.innerHTML = html;
     results.style.display = 'block';
@@ -348,25 +380,64 @@
 
   function row(label, val) { return `<div class="meta-row"><span class="meta-label">${label}</span><span class="meta-value">${esc(val)}</span></div>`; }
   function esc(str) { const d = document.createElement('div'); d.textContent = String(str || ''); return d.innerHTML; }
+  function buildSectionPayload(data, index) {
+    const sections = Array.isArray(data && data.sections) ? data.sections : [];
+    const source = sections[index];
+    if (!source) return null;
+    const steps = Array.isArray(source.steps) ? source.steps : [];
+    const sectionName = String(source.title || source.name || `Section ${index + 1}`).trim();
+    return Object.assign({}, data, {
+      title: sectionName || String(data && data.title || 'Imported PDF'),
+      sections: [Object.assign({}, source, { steps })],
+      steps
+    });
+  }
+
+  function suspendBackgroundWork(active, reason) {
+    if (reason !== 'apply-import') return;
+    try {
+      window.__stepperBackgroundSuspend = !!active;
+      document.documentElement.setAttribute('data-stepper-background-suspend', active ? '1' : '0');
+      window.dispatchEvent(new CustomEvent('stepper-background-suspend', { detail: { active: !!active, source: 'pdf-import-apply' } }));
+    } catch (_) {}
+  }
 
   function applyToEditor(data) {
-    const importCore = getImportCore();
-    const snapshot = importCore.buildEditorSnapshot(data);
-    importCore.writeEditorSnapshot(snapshot);
-    try {
-      localStorage.setItem('stepper_last_loaded_source', JSON.stringify({
-        source: 'pdf-import',
-        title: String((data && data.title) || 'Untitled'),
-        updatedAt: new Date().toISOString()
-      }));
-    } catch {}
-    window.__STEPPER_PDF_DATA = data;
-    window.dispatchEvent(new CustomEvent('stepper-pdf-import', { detail: data }));
-    window.dispatchEvent(new CustomEvent('stepper:worksheet-loaded', { detail: { data: snapshot } }));
-    window.dispatchEvent(new CustomEvent('stepper-pdf-live-apply', { detail: snapshot }));
-    try { if (typeof window.__stepperRefreshWorksheetFromStorage === 'function') window.__stepperRefreshWorksheetFromStorage(); } catch (_) {}
-    tryDirectPopulate(data);
-    setStatus('success', 'Imported into the editor live. No reload needed.');
+    suspendBackgroundWork(true, 'apply-import');
+    setStatus('loading', 'Applying import (pausing background tasks)…');
+    return new Promise((resolve) => {
+      const run = () => {
+        try {
+          const importCore = getImportCore();
+          if (!data || typeof data !== 'object') throw new Error('No parsed import data was available to apply.');
+          const snapshot = importCore.buildEditorSnapshot(data);
+          if (!snapshot || !Array.isArray(snapshot.sections)) throw new Error('Imported snapshot could not be built.');
+          importCore.writeEditorSnapshot(snapshot);
+          try {
+            localStorage.setItem('stepper_last_loaded_source', JSON.stringify({
+              source: 'pdf-import',
+              title: String((data && data.title) || 'Untitled'),
+              updatedAt: new Date().toISOString()
+            }));
+          } catch {}
+          window.__STEPPER_PDF_DATA = data;
+          window.dispatchEvent(new CustomEvent('stepper-pdf-import', { detail: data }));
+          window.dispatchEvent(new CustomEvent('stepper:worksheet-loaded', { detail: { data: snapshot } }));
+          window.dispatchEvent(new CustomEvent('stepper-pdf-live-apply', { detail: snapshot }));
+          try { if (typeof window.__stepperRefreshWorksheetFromStorage === 'function') window.__stepperRefreshWorksheetFromStorage(); } catch (_) {}
+          setStatus('success', 'Imported into the editor live. No reload needed.');
+          resolve(true);
+        } catch (err) {
+          const msg = err && err.message ? err.message : 'Import apply failed unexpectedly.';
+          console.error('[Stepper PDF Import] applyToEditor failed', err);
+          setStatus('error', msg);
+          resolve(false);
+        } finally {
+          window.setTimeout(() => suspendBackgroundWork(false, 'apply-import'), 350);
+        }
+      };
+      window.requestAnimationFrame ? window.requestAnimationFrame(() => window.requestAnimationFrame(run)) : window.setTimeout(run, 0);
+    });
   }
 
   function tryDirectPopulate(data) {
