@@ -576,8 +576,14 @@
     host.style.zIndex = side === 'right' ? '8700' : '8600';
     /* If user has dragged the helper, honour that position */
     if (_helperDragPos.dragged && _helperDragPos.x !== null && _helperDragPos.y !== null) {
-      host.style.left = _helperDragPos.x + 'px';
-      host.style.top  = _helperDragPos.y + 'px';
+      var maxX = Math.max(12, window.innerWidth - 72);
+      var maxY = Math.max(12, window.innerHeight - 72);
+      var safeX = Math.max(12, Math.min(maxX, Number(_helperDragPos.x) || 12));
+      var safeY = Math.max(12, Math.min(maxY, Number(_helperDragPos.y) || 12));
+      _helperDragPos.x = safeX;
+      _helperDragPos.y = safeY;
+      host.style.left = safeX + 'px';
+      host.style.top  = safeY + 'px';
       host.style.right  = 'auto';
       host.style.bottom = 'auto';
       return;
@@ -955,11 +961,14 @@
     const source = normalizeLocalMotionText(body);
     const repeatedWalk = parseLocalRepeatedWalk(source);
     if (repeatedWalk) {
-      const sequence = buildLocalWalkSequence(repeatedWalk.repeats, repeatedWalk.direction, startFoot);
+      const hintedFoot = extractLocalFootHint(source);
+      const sequenceStart = (hintedFoot === 'R' || hintedFoot === 'L') ? hintedFoot : startFoot;
+      const sequence = buildLocalWalkSequence(repeatedWalk.repeats, repeatedWalk.direction, sequenceStart);
       const sentence = sequence ? `${sequence.charAt(0).toUpperCase()}${sequence.slice(1)}` : 'Walk forward.';
       return repeatedWalk.touch ? `${sentence}, then touch beside with no weight change.` : `${sentence}.`;
     }
-    if (/rock\s+back(?:,|\s+)recover/.test(source)) return 'Rock back onto the stepping foot and recover back onto the other foot.';
+    if (/rock\s+back(?:,|\s+)recover/.test(source)) return 'Rock back onto the stepping foot and recover forward onto the other foot.';
+    if (/rock\s+forward(?:,|\s+)recover/.test(source)) return 'Rock forward onto the stepping foot and recover back onto the other foot.';
     if (/\bcross\s+side\b/.test(source)) return 'Cross over, then step to the side.';
     if (/\b(?:grapevine|vine)\b/.test(source)) {
       const direction = /right/.test(source) ? 'right' : (/left/.test(source) ? 'left' : 'to the side');
@@ -1763,6 +1772,8 @@
 
     /* Use curated high-flow step combos if glossary is sparse */
     var PERFECT_FLOW_8 = [
+      { name:'Cross Side', count:'1-2', foot:'R', description:'Cross right over left, step left to side.' },
+      { name:'Sailor Heel Step', count:'1&2&', foot:'R', description:'Cross right behind left, step left to side, touch right heel forward diagonal, step right together.' },
       { name:'Vine Right', count:'1-2', foot:'R', description:'Step right, cross left behind, step right, touch left beside.' },
       { name:'Vine Left', count:'3-4', foot:'L', description:'Step left, cross right behind, step left, touch right beside.' },
       { name:'Rock Forward', count:'5-6', foot:'R', description:'Rock forward on right foot, recover weight back onto left.' },
@@ -3007,6 +3018,24 @@
     return !!(title || choreographer || sections.some(section => Array.isArray(section && section.steps) && section.steps.length));
   }
 
+
+  function normalizeSnapshotCountsToAuto(data){
+    if (!data || typeof data !== 'object') return data;
+    try {
+      if (data.meta && typeof data.meta === 'object') data.meta.counts = 'x';
+      var sections = Array.isArray(data.sections) ? data.sections : [];
+      sections.forEach(function(section){
+        var steps = Array.isArray(section && section.steps) ? section.steps : [];
+        steps.forEach(function(step){
+          if (!step || typeof step !== 'object') return;
+          step.count = 'x';
+          if (typeof step.counts !== 'undefined') step.counts = 'x';
+        });
+      });
+    } catch (_) {}
+    return data;
+  }
+
   function buildCurrentDanceEntry(){
     const data = readAppData();
     if (!hasDanceContent(data)) return null;
@@ -3021,14 +3050,14 @@
       choreographer,
       country: String(meta.country || '').trim(),
       level: String(meta.level || 'Unlabelled').trim() || 'Unlabelled',
-      counts: String(meta.counts || '-').trim() || '-',
+      counts: 'x',
       walls: String(meta.walls || '-').trim() || '-',
       music: String(meta.music || '').trim(),
       sections: sections.length,
       steps: stepCount,
       updatedAt: new Date().toISOString(),
       snapshot: {
-        data: data,
+        data: normalizeSnapshotCountsToAuto(clone(data)),
         phrasedTools: readJson(PHR_TOOLS_KEY, {})
       }
     };
@@ -3648,10 +3677,11 @@
       return false;
     }
     try {
+      const payloadWithAutoCounts = Object.assign({}, payload || {}, { counts: 'x' });
       const data = await authFetch('/api/glossary/request', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ step: payload })
+        body: JSON.stringify({ step: payloadWithAutoCounts })
       });
       alert(data && data.message ? data.message : 'Glossary step request sent to Admin.');
       return true;
@@ -3768,6 +3798,11 @@
   }
 
   function renderCommunityGlossary(){
+    if (window.__stepperBackgroundSuspend) {
+      let suspendedHost = document.getElementById('stepper-community-glossary-host');
+      if (suspendedHost) { suspendedHost.style.display = 'none'; suspendedHost.innerHTML = ''; }
+      return;
+    }
     let host = document.getElementById('stepper-community-glossary-host');
     if (!host) {
       host = document.createElement('div');
@@ -3977,6 +4012,12 @@
   }
 
   function renderSiteHelper(){
+    if (window.__stepperBackgroundSuspend) {
+      const suspendedHost = ensureSiteHelperHost();
+      suspendedHost.style.display = 'none';
+      suspendedHost.innerHTML = '';
+      return;
+    }
     /* ── Skip render when the user is typing ── */
     const activeInput = document.activeElement;
     if (state.chatOpen && activeInput && activeInput.matches && activeInput.matches('[data-chat-input="1"]')) return;
@@ -4240,6 +4281,11 @@
   }
 
   function renderQuickActions(){
+    if (window.__stepperBackgroundSuspend) {
+      let suspendedHost = document.getElementById('stepper-google-quick-actions');
+      if (suspendedHost) { suspendedHost.style.display = 'none'; suspendedHost.innerHTML = ''; }
+      return;
+    }
     let host = document.getElementById('stepper-google-quick-actions');
     if (!host) {
       host = document.createElement('div');
@@ -4265,6 +4311,14 @@
     host.querySelector('[data-quick="site"]').addEventListener('click', ()=>requestModeration('site'));
     host.querySelector('[data-quick="invite"]').addEventListener('click', ()=>showInviteFriendsOverlay());
   }
+
+  window.addEventListener('stepper-background-suspend', function () {
+    if (window.__stepperBackgroundSuspend) return;
+    state._helperSignature = '';
+    renderCommunityGlossary();
+    renderSiteHelper();
+    renderQuickActions();
+  });
 
   /* ── Invite friends to current project overlay ── */
   function showInviteFriendsOverlay(){
