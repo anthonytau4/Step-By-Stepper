@@ -41,6 +41,31 @@
   const PRESENCE_INTERVAL_MS = 30000;
   const FEATURED_SYNC_INTERVAL_MS = 18000;
   const LIVE_QUEUE_SYNC_INTERVAL_MS = 4000;
+  const EXTRA_PAGE_PATHS = {
+    signin: '/signin',
+    subscription: '/subscription',
+    admin: '/admin',
+    friends: '/friends',
+    glossary: '/glossary',
+    pdfimport: '/pdf-import',
+    settings: '/settings',
+    music: '/music',
+    templates: '/templates',
+    notifications: '/notifications',
+    moderator: '/moderator'
+  };
+  const LOADING_SPLASH_LINES = [
+    'Every tab is negotiating snack rights with the loading bar...',
+    'Polishing invisible cowboy boots with quantum glitter...',
+    'Translating dance counts into dolphin legalese...',
+    'Rehearsing with three polite raccoons and a fog machine...',
+    'Calibrating moonwalk gravity to exactly 87% noodle...',
+    'Summoning BPM from a haunted toaster oven...',
+    'Checking if penguins approve this layout update...',
+    'Aligning disco lasers with certified banana geometry...',
+    'Teaching pixels how to yeehaw responsibly...',
+    'Any tab you open is powered by dramatic jazz hands and glitter math...'
+  ];
 
   const state = {
     activePage: null,
@@ -551,8 +576,14 @@
     host.style.zIndex = side === 'right' ? '8700' : '8600';
     /* If user has dragged the helper, honour that position */
     if (_helperDragPos.dragged && _helperDragPos.x !== null && _helperDragPos.y !== null) {
-      host.style.left = _helperDragPos.x + 'px';
-      host.style.top  = _helperDragPos.y + 'px';
+      var maxX = Math.max(12, window.innerWidth - 72);
+      var maxY = Math.max(12, window.innerHeight - 72);
+      var safeX = Math.max(12, Math.min(maxX, Number(_helperDragPos.x) || 12));
+      var safeY = Math.max(12, Math.min(maxY, Number(_helperDragPos.y) || 12));
+      _helperDragPos.x = safeX;
+      _helperDragPos.y = safeY;
+      host.style.left = safeX + 'px';
+      host.style.top  = safeY + 'px';
       host.style.right  = 'auto';
       host.style.bottom = 'auto';
       return;
@@ -715,10 +746,29 @@
     return match && match[1] ? compactWhitespace(String(match[1]).replace(/\bto\b/ig, '-')) : '';
   }
 
+  function extractLocalFootHint(text){
+    const source = normalizeLocalMotionText(text);
+    if (!source) return null;
+    if (/\b(?:either|any)\b/.test(source)) return '';
+    if (/\b(?:right|r)\b/.test(source)) return 'R';
+    if (/\b(?:left|l)\b/.test(source)) return 'L';
+    return null;
+  }
+
+  function stripLocalFootHintText(text){
+    return compactWhitespace(String(text || '')
+      .replace(/\((?:right|left|r|l|either|any)\)/ig, '')
+      .replace(/\b(?:start|starting|on|foot)\s*[:=-]?\s*(?:right|left|r|l|either|any)\b/ig, '')
+      .replace(/\b(?:right|left)\s+foot\b/ig, '')
+      .replace(/\s+[-–]\s*(?:right|left|r|l|either|any)\s*$/ig, '')
+      .replace(/\s+(?:right|left|r|l|either|any)\s*$/ig, ''));
+  }
+
   function inferLocalStepCount(body){
     const lowered = normalizeLocalMotionText(body);
     const repeatedWalk = parseLocalRepeatedWalk(lowered);
     if (repeatedWalk) return `1-${Number(repeatedWalk.repeats) + (repeatedWalk.touch ? 1 : 0)}`;
+    if (/\bcross\s+side\b/.test(lowered)) return '1-2';
     if (/\b(?:grapevine|vine)\b/.test(lowered)) return '1-4';
     if (/rock\s+back(?:,|\s+)recover/.test(lowered)) return '1-2';
     if (/\b(?:coaster|sailor|shuffle|triple step|triple|chasse|kick ball change|mambo)\b/.test(lowered)) return '1&2';
@@ -746,6 +796,7 @@
       [/^kick\s+ball\s+change$/i, () => ({ name:'Kick Ball Change', confident:true })],
       [/^step\s+touch$/i, () => ({ name:'Step Touch', confident:true })],
       [/^side\s+touch$/i, () => ({ name:'Side Touch', confident:true })],
+      [/^cross\s+side$/i, () => ({ name:'Cross Side', confident:true })],
       [/^step\s+lock\s+step$/i, () => ({ name:'Step Lock Step', confident:true })],
       [/^shuffle\s+(forward|back|left|right)$/i, (m) => ({ name:`Shuffle ${titleCaseWords(m[1])}`, confident:true })],
       [/^pivot(?:\s+\d+)?(?:\s*(?:1\/4|1\/2|1\/8|quarter|half))?\s*(left|right)?$/i, () => ({ name:'Pivot Turn', confident:true })],
@@ -910,11 +961,15 @@
     const source = normalizeLocalMotionText(body);
     const repeatedWalk = parseLocalRepeatedWalk(source);
     if (repeatedWalk) {
-      const sequence = buildLocalWalkSequence(repeatedWalk.repeats, repeatedWalk.direction, startFoot);
+      const hintedFoot = extractLocalFootHint(source);
+      const sequenceStart = (hintedFoot === 'R' || hintedFoot === 'L') ? hintedFoot : startFoot;
+      const sequence = buildLocalWalkSequence(repeatedWalk.repeats, repeatedWalk.direction, sequenceStart);
       const sentence = sequence ? `${sequence.charAt(0).toUpperCase()}${sequence.slice(1)}` : 'Walk forward.';
       return repeatedWalk.touch ? `${sentence}, then touch beside with no weight change.` : `${sentence}.`;
     }
-    if (/rock\s+back(?:,|\s+)recover/.test(source)) return 'Rock back onto the stepping foot and recover back onto the other foot.';
+    if (/rock\s+back(?:,|\s+)recover/.test(source)) return 'Rock back onto the stepping foot and recover forward onto the other foot.';
+    if (/rock\s+forward(?:,|\s+)recover/.test(source)) return 'Rock forward onto the stepping foot and recover back onto the other foot.';
+    if (/\bcross\s+side\b/.test(source)) return 'Cross over, then step to the side.';
     if (/\b(?:grapevine|vine)\b/.test(source)) {
       const direction = /right/.test(source) ? 'right' : (/left/.test(source) ? 'left' : 'to the side');
       return `Step ${direction}, cross behind, step ${direction}, then touch or step to finish.`;
@@ -1001,12 +1056,15 @@
     let currentStart = getLocalExpectedStartFoot();
     return rawTokens.map((token) => {
       const explicitCount = extractLocalStepCountLabel(token);
-      const body = compactWhitespace(token.replace(/\(([^)]*\d[^)]*)\)\s*$/i, '').replace(/\b((?:\d+\s*[&,-]\s*)+\d+)\b\s*$/i, '').replace(/\b(?:use|put|set|on)\s+counts?\b\s*$/i, '').trim() || token);
+      const footHint = extractLocalFootHint(token);
+      const body = compactWhitespace(stripLocalFootHintText(token).replace(/\(([^)]*\d[^)]*)\)\s*$/i, '').replace(/\b((?:\d+\s*[&,-]\s*)+\d+)\b\s*$/i, '').replace(/\b(?:use|put|set|on)\s+counts?\b\s*$/i, '').trim() || token);
       if (!body) return null;
       let glossaryItem = glossaryMap.get(compactWhitespace(body).toLowerCase());
       if (!glossaryItem) glossaryItem = findBestLocalGlossaryMatch(body, glossary, currentStart);
       if (glossaryItem) {
-        const foot = /^(R|L)$/i.test(compactWhitespace(glossaryItem.foot || '')) ? compactWhitespace(glossaryItem.foot || '').toUpperCase() : currentStart;
+        const foot = footHint === 'R' || footHint === 'L'
+          ? footHint
+          : (/^(R|L)$/i.test(compactWhitespace(glossaryItem.foot || '')) ? compactWhitespace(glossaryItem.foot || '').toUpperCase() : currentStart);
         const step = {
           name: compactWhitespace(glossaryItem.name || body),
           description: compactWhitespace(glossaryItem.description || glossaryItem.desc || '') || inferLocalStepDescription(body, compactWhitespace(explicitCount || glossaryItem.counts || glossaryItem.count || inferLocalStepCount(body) || '1'), foot),
@@ -1025,7 +1083,7 @@
       const count = compactWhitespace(explicitCount || inferLocalStepCount(body));
       const needsName = singleToken && !inferredName.confident && !compactWhitespace(inferredName.name);
       const needsCount = singleToken && !count;
-      const foot = currentStart === 'R' || currentStart === 'L' ? currentStart : '';
+      const foot = footHint === 'R' || footHint === 'L' ? footHint : (currentStart === 'R' || currentStart === 'L' ? currentStart : '');
       const step = {
         name: compactWhitespace(inferredName.name || (needsName ? '' : titleCaseWords(body.split(/\s+/).slice(0, 5).join(' '))) || 'Custom Step'),
         description: inferLocalStepDescription(body, count, foot),
@@ -1714,6 +1772,8 @@
 
     /* Use curated high-flow step combos if glossary is sparse */
     var PERFECT_FLOW_8 = [
+      { name:'Cross Side', count:'1-2', foot:'R', description:'Cross right over left, step left to side.' },
+      { name:'Sailor Heel Step', count:'1&2&', foot:'R', description:'Cross right behind left, step left to side, touch right heel forward diagonal, step right together.' },
       { name:'Vine Right', count:'1-2', foot:'R', description:'Step right, cross left behind, step right, touch left beside.' },
       { name:'Vine Left', count:'3-4', foot:'L', description:'Step left, cross right behind, step left, touch right beside.' },
       { name:'Rock Forward', count:'5-6', foot:'R', description:'Rock forward on right foot, recover weight back onto left.' },
@@ -2609,6 +2669,7 @@
     showNativeExtraHost();
     if (state.ui.mainEl) state.ui.mainEl.style.display = '';
     if (state.ui.footerWrap) state.ui.footerWrap.style.display = '';
+    syncBrowserPathForActivePage();
     updateTabButtons();
   }
 
@@ -2621,11 +2682,44 @@
     hideNativeExtraHost();
     if (state.ui.mainEl) state.ui.mainEl.style.display = 'none';
     if (state.ui.footerWrap) state.ui.footerWrap.style.display = 'none';
+    syncBrowserPathForActivePage();
     renderPages(true);
     updateTabButtons();
     refreshLiveQueues().then(() => {
       if (state.activePage) scheduleRenderPages(2000);
     }).catch(() => {});
+  }
+
+  function pathToExtraPage(pathname){
+    const clean = String(pathname || '/').replace(/\/+$/, '') || '/';
+    const entries = Object.entries(EXTRA_PAGE_PATHS);
+    for (let i = 0; i < entries.length; i++) {
+      if (entries[i][1] === clean) return entries[i][0];
+    }
+    return null;
+  }
+
+  function syncBrowserPathForActivePage(){
+    const target = state.activePage ? (EXTRA_PAGE_PATHS[state.activePage] || '/') : '/';
+    const current = String(location.pathname || '/').replace(/\/+$/, '') || '/';
+    if (target === current) return;
+    try { history.pushState({ stepperPage: state.activePage || null }, '', target + location.search + location.hash); } catch (e) { /* ignore */ }
+  }
+
+  function openPageFromCurrentPathIfNeeded(){
+    const page = pathToExtraPage(location.pathname);
+    if (!page) return;
+    openPage(page);
+  }
+
+  function installPathRouting(){
+    if (window.__stepperExtraPathRoutingInstalled) return;
+    window.__stepperExtraPathRoutingInstalled = true;
+    window.addEventListener('popstate', function () {
+      const page = pathToExtraPage(location.pathname);
+      if (page) openPage(page);
+      else closePages();
+    });
   }
 
   function updateAdminTabVisibility(){
@@ -2924,6 +3018,24 @@
     return !!(title || choreographer || sections.some(section => Array.isArray(section && section.steps) && section.steps.length));
   }
 
+
+  function normalizeSnapshotCountsToAuto(data){
+    if (!data || typeof data !== 'object') return data;
+    try {
+      if (data.meta && typeof data.meta === 'object') data.meta.counts = 'x';
+      var sections = Array.isArray(data.sections) ? data.sections : [];
+      sections.forEach(function(section){
+        var steps = Array.isArray(section && section.steps) ? section.steps : [];
+        steps.forEach(function(step){
+          if (!step || typeof step !== 'object') return;
+          step.count = 'x';
+          if (typeof step.counts !== 'undefined') step.counts = 'x';
+        });
+      });
+    } catch (_) {}
+    return data;
+  }
+
   function buildCurrentDanceEntry(){
     const data = readAppData();
     if (!hasDanceContent(data)) return null;
@@ -2938,14 +3050,14 @@
       choreographer,
       country: String(meta.country || '').trim(),
       level: String(meta.level || 'Unlabelled').trim() || 'Unlabelled',
-      counts: String(meta.counts || '-').trim() || '-',
+      counts: 'x',
       walls: String(meta.walls || '-').trim() || '-',
       music: String(meta.music || '').trim(),
       sections: sections.length,
       steps: stepCount,
       updatedAt: new Date().toISOString(),
       snapshot: {
-        data: data,
+        data: normalizeSnapshotCountsToAuto(clone(data)),
         phrasedTools: readJson(PHR_TOOLS_KEY, {})
       }
     };
@@ -3455,11 +3567,51 @@
     try {
       const data = await fetchJson('/api/glossary/steps');
       state.glossaryApproved = Array.isArray(data.items) ? data.items : [];
+      syncApprovedStepsIntoMainDictionary(state.glossaryApproved);
       return state.glossaryApproved;
     } catch {
       state.glossaryApproved = [];
+      syncApprovedStepsIntoMainDictionary([]);
       return [];
     }
+  }
+
+  function parseGlossaryCountsToNumber(countsLabel){
+    const label = String(countsLabel || '').trim();
+    if (!label) return 1;
+    const numbers = label.match(/\d+/g);
+    if (!numbers || !numbers.length) return 1;
+    const values = numbers.map((item) => Number(item)).filter((item) => Number.isFinite(item));
+    if (!values.length) return 1;
+    if (values.length >= 2) return Math.max(1, values[values.length - 1] - values[0] + 1);
+    return Math.max(1, values[0]);
+  }
+
+  function syncApprovedStepsIntoMainDictionary(approvedSteps){
+    const dict = window.__stepperStepDictionary;
+    if (!dict || !Array.isArray(dict.STEPS)) return;
+    const base = dict.STEPS.filter((step) => !(step && step.__fromCommunityGlossary));
+    const injected = (Array.isArray(approvedSteps) ? approvedSteps : []).map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const name = String(item.name || '').trim();
+      const description = String(item.description || item.desc || '').trim();
+      if (!name || !description) return null;
+      const tags = String(item.tags || '').toLowerCase();
+      const category = /\b(cross|vine|touch|side|rock|turn|jazz|kick|stomp|slide|sway|hold|syncopated|triple)\b/.test(tags)
+        ? (tags.match(/\b(cross|vine|touch|side|rock|turn|jazz|kick|stomp|slide|sway|hold|syncopated|triple)\b/) || [])[1]
+        : 'specialty';
+      return {
+        name,
+        aliases: [name.toLowerCase()],
+        counts: parseGlossaryCountsToNumber(item.counts || item.count),
+        feet: String(item.foot || 'Either').trim() || 'Either',
+        description,
+        category,
+        __fromCommunityGlossary: true
+      };
+    }).filter(Boolean);
+    dict.STEPS.length = 0;
+    base.concat(injected).forEach((step) => dict.STEPS.push(step));
   }
 
 
@@ -3525,10 +3677,11 @@
       return false;
     }
     try {
+      const payloadWithAutoCounts = Object.assign({}, payload || {}, { counts: 'x' });
       const data = await authFetch('/api/glossary/request', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ step: payload })
+        body: JSON.stringify({ step: payloadWithAutoCounts })
       });
       alert(data && data.message ? data.message : 'Glossary step request sent to Admin.');
       return true;
@@ -3554,7 +3707,7 @@
       originalTags: String(payload && payload.originalTags || (existing && existing.tags) || '').trim()
     };
     if (!merged.originalName) {
-      alert('The original glossary step could not be matched yet. Open Glossary+ once so the latest glossary list loads, then try again.');
+      alert('The original glossary step could not be matched yet. Open Community Glossary once so the latest glossary list loads, then try again.');
       return false;
     }
     return requestGlossaryStep(merged);
@@ -3645,6 +3798,11 @@
   }
 
   function renderCommunityGlossary(){
+    if (window.__stepperBackgroundSuspend) {
+      let suspendedHost = document.getElementById('stepper-community-glossary-host');
+      if (suspendedHost) { suspendedHost.style.display = 'none'; suspendedHost.innerHTML = ''; }
+      return;
+    }
     let host = document.getElementById('stepper-community-glossary-host');
     if (!host) {
       host = document.createElement('div');
@@ -3659,7 +3817,7 @@
     }
     host.style.display = '';
     if (!state.communityGlossaryOpen) {
-      host.innerHTML = `<button type="button" data-open-community-glossary="1" style="border:1px solid rgba(99,102,241,.18);background:#fff;color:#111827;padding:.8rem 1rem;border-radius:999px;font-weight:900;box-shadow:0 12px 30px rgba(0,0,0,.14);">Glossary+</button>`;
+      host.innerHTML = `<button type="button" data-open-community-glossary="1" style="border:1px solid rgba(99,102,241,.18);background:#fff;color:#111827;padding:.8rem 1rem;border-radius:999px;font-weight:900;box-shadow:0 12px 30px rgba(0,0,0,.14);">Community Glossary</button>`;
       const btn = host.querySelector('[data-open-community-glossary="1"]');
       if (btn) btn.addEventListener('click', ()=>{ if (isCompactViewport()) state.chatOpen = false; state.communityGlossaryOpen = true; renderSiteHelper(); renderCommunityGlossary(); });
       return;
@@ -3854,6 +4012,12 @@
   }
 
   function renderSiteHelper(){
+    if (window.__stepperBackgroundSuspend) {
+      const suspendedHost = ensureSiteHelperHost();
+      suspendedHost.style.display = 'none';
+      suspendedHost.innerHTML = '';
+      return;
+    }
     /* ── Skip render when the user is typing ── */
     const activeInput = document.activeElement;
     if (state.chatOpen && activeInput && activeInput.matches && activeInput.matches('[data-chat-input="1"]')) return;
@@ -4117,6 +4281,11 @@
   }
 
   function renderQuickActions(){
+    if (window.__stepperBackgroundSuspend) {
+      let suspendedHost = document.getElementById('stepper-google-quick-actions');
+      if (suspendedHost) { suspendedHost.style.display = 'none'; suspendedHost.innerHTML = ''; }
+      return;
+    }
     let host = document.getElementById('stepper-google-quick-actions');
     if (!host) {
       host = document.createElement('div');
@@ -4142,6 +4311,14 @@
     host.querySelector('[data-quick="site"]').addEventListener('click', ()=>requestModeration('site'));
     host.querySelector('[data-quick="invite"]').addEventListener('click', ()=>showInviteFriendsOverlay());
   }
+
+  window.addEventListener('stepper-background-suspend', function () {
+    if (window.__stepperBackgroundSuspend) return;
+    state._helperSignature = '';
+    renderCommunityGlossary();
+    renderSiteHelper();
+    renderQuickActions();
+  });
 
   /* ── Invite friends to current project overlay ── */
   function showInviteFriendsOverlay(){
@@ -4947,7 +5124,7 @@
 
         <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-site-memory="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Helper memory</div><p class="mt-1 text-sm ${theme.subtle}">Add site facts or rules the AI helper should keep using for everyone. This is how the website learns approved things over time.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.siteMemories || []).length))} learned</span></div><div class="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]"><textarea data-stepper-site-memory-input="1" class="stepper-google-input" rows="3" placeholder="Example: Featured dances should feel polished but not over-written. Counts should be generated in 8-count blocks whenever possible."></textarea><button type="button" class="stepper-google-cta ${theme.button}" data-action="add-site-memory">Add memory</button></div><div class="mt-4 grid gap-3">${(state.siteMemories || []).length ? state.siteMemories.slice(0,30).map(item => `<div class="rounded-2xl border p-4 ${theme.soft}" data-stepper-site-memory-id="${escapeHtml(item.id)}"><div class="flex flex-wrap items-start justify-between gap-3"><div><div class="text-sm font-black">${escapeHtml(item.text || '')}</div><p class="mt-1 text-xs ${theme.subtle}">${escapeHtml(item.createdByName || item.createdByEmail || 'Admin')}</p></div><button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="delete-site-memory">Delete</button></div></div>`).join('') : `<p class="text-sm ${theme.subtle}">No saved helper memory yet.</p>`}</div></div>
         <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-glossary-requests="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Requested dance steps</div><p class="mt-1 text-sm ${theme.subtle}">Admin approves custom glossary steps here. If a request is clearly right-footed or left-footed, the mirrored version is created automatically too.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.glossaryRequests || []).length))} pending</span></div><div class="mt-4 grid gap-4">${(state.glossaryRequests || []).length ? state.glossaryRequests.map(item => `<article class="rounded-2xl border p-4 ${theme.soft}" data-stepper-glossary-request-id="${escapeHtml(item.id)}"><div class="flex flex-wrap items-start justify-between gap-3"><div><div class="text-base font-black">${escapeHtml(item.name || 'Requested Step')}</div><p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.ownerName || item.ownerEmail || 'Member')} • ${escapeHtml(item.counts || '1')} • ${escapeHtml(item.foot || 'Either')}</p></div><div class="flex flex-wrap gap-3"><button type="button" class="stepper-google-cta ${theme.button}" data-action="approve-glossary-request">Approve</button><button type="button" class="stepper-google-cta stepper-google-danger ${theme.button}" data-action="reject-glossary-request">Decline</button></div></div><div class="mt-4 grid gap-3 sm:grid-cols-2"><div class="rounded-2xl border p-4 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">${item.requestType === 'edit' ? 'Current glossary step' : 'Requested step'}</div><p class="mt-3 text-sm font-bold">${escapeHtml(item.requestType === 'edit' ? (item.originalName || '') : (item.name || ''))}</p><p class="mt-2 text-sm ${theme.subtle}">${escapeHtml(item.requestType === 'edit' ? (item.originalDescription || '') : (item.description || ''))}</p><p class="mt-2 text-xs font-semibold ${theme.subtle}">${escapeHtml(item.requestType === 'edit' ? (item.originalFoot || item.foot || '') : (item.foot || ''))} • ${escapeHtml(item.requestType === 'edit' ? (item.originalCounts || item.counts || '') : (item.counts || ''))}</p>${(item.requestType === 'edit' ? item.originalTags : item.tags) ? `<p class="mt-2 text-xs font-semibold ${theme.subtle}">Tags: ${escapeHtml(item.requestType === 'edit' ? item.originalTags : item.tags)}</p>` : ''}</div><div class="rounded-2xl border p-4 ${theme.panel}"><div class="text-[10px] font-black uppercase tracking-widest ${theme.subtle}">${item.requestType === 'edit' ? 'Suggested replacement' : 'Auto twin preview'}</div>${item.requestType === 'edit' ? `<p class="mt-3 text-sm font-bold">${escapeHtml(item.name || '')}</p><p class="mt-2 text-sm ${theme.subtle}">${escapeHtml(item.description || '')}</p><p class="mt-2 text-xs font-semibold ${theme.subtle}">${escapeHtml(item.foot || '')} • ${escapeHtml(item.counts || '')}</p>${item.tags ? `<p class="mt-2 text-xs font-semibold ${theme.subtle}">Tags: ${escapeHtml(item.tags)}</p>` : ''}` : (item.autoMirror ? `<p class="mt-3 text-sm font-bold">${escapeHtml(item.autoMirror.name || '')}</p><p class="mt-2 text-sm ${theme.subtle}">${escapeHtml(item.autoMirror.description || '')}</p><p class="mt-2 text-xs font-semibold ${theme.subtle}">${escapeHtml(item.autoMirror.foot || '')} • ${escapeHtml(item.autoMirror.counts || '')}</p>` : `<p class="mt-3 text-sm ${theme.subtle}">No forced opposite-foot twin for this request.</p>`)}</div></div></article>`).join('') : `<p class="text-sm ${theme.subtle}">No pending dance step requests.</p>`}</div></div>
-        <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-approved-glossary="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Approved community glossary</div><p class="mt-1 text-sm ${theme.subtle}">These are the admin-approved custom steps everyone can apply from Glossary+ while building.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.glossaryApproved || []).length))} live</span></div><div class="mt-4 grid gap-3">${(state.glossaryApproved || []).length ? state.glossaryApproved.slice(0, 20).map(item => `<div class="rounded-2xl border p-4 ${theme.soft}"><div class="flex flex-wrap items-start justify-between gap-3"><div><div class="text-base font-black">${escapeHtml(item.name || 'Step')}</div><p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.foot || 'Either')} • ${escapeHtml(item.counts || '1')}</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(item.status || 'approved')}</span></div><p class="mt-3 text-sm ${theme.subtle}">${escapeHtml(item.description || '')}</p></div>`).join('') : `<p class="text-sm ${theme.subtle}">No approved custom glossary steps yet.</p>`}</div></div>
+        <div class="rounded-3xl border p-5 sm:p-6 ${theme.panel}" data-stepper-approved-glossary="1"><div class="flex flex-wrap items-center justify-between gap-4"><div><div class="text-lg font-black tracking-tight">Approved community glossary</div><p class="mt-1 text-sm ${theme.subtle}">These are the admin-approved custom steps everyone can apply from Community Glossary while building.</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(String((state.glossaryApproved || []).length))} live</span></div><div class="mt-4 grid gap-3">${(state.glossaryApproved || []).length ? state.glossaryApproved.slice(0, 20).map(item => `<div class="rounded-2xl border p-4 ${theme.soft}"><div class="flex flex-wrap items-start justify-between gap-3"><div><div class="text-base font-black">${escapeHtml(item.name || 'Step')}</div><p class="mt-1 text-sm ${theme.subtle}">${escapeHtml(item.foot || 'Either')} • ${escapeHtml(item.counts || '1')}</p></div><span class="stepper-google-pill ${theme.orange}">${escapeHtml(item.status || 'approved')}</span></div><p class="mt-3 text-sm ${theme.subtle}">${escapeHtml(item.description || '')}</p></div>`).join('') : `<p class="text-sm ${theme.subtle}">No approved custom glossary steps yet.</p>`}</div></div>
         ${cards}
       </div>
     `;
@@ -5180,36 +5357,59 @@
     return true;
   }
 
+  function showWeirdLoadingSplash() {
+    if (document.getElementById('stepper-weird-loading-splash')) return function () {};
+    const splash = document.createElement('div');
+    splash.id = 'stepper-weird-loading-splash';
+    splash.style.cssText = 'position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#0f172a,#312e81);color:#fff;font-family:Inter,system-ui,sans-serif;';
+    const line = LOADING_SPLASH_LINES[Math.floor(Math.random() * LOADING_SPLASH_LINES.length)];
+    splash.innerHTML = '<div style="text-align:center;padding:24px;max-width:min(680px,92vw);"><div style="font-size:22px;font-weight:900;letter-spacing:.04em;margin-bottom:12px;">Step By Stepper is booting every tab...</div><div style="font-size:15px;opacity:.92;">' + escapeHtml(line) + '</div></div>';
+    document.body.appendChild(splash);
+    return function hide() {
+      if (!splash || !splash.parentNode) return;
+      splash.style.transition = 'opacity .25s ease';
+      splash.style.opacity = '0';
+      setTimeout(function () { try { splash.remove(); } catch (e) { /* ignore */ } }, 260);
+    };
+  }
+
   async function prime(){
-    ensureStyles();
-    if (location.protocol === 'http:' || location.protocol === 'https:') {
-      const savedBase = normalizeApiBase(localStorage.getItem(API_BASE_KEY) || '');
-      const preferredBase = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') ? 'http://localhost:3000' : DEFAULT_BACKEND_BASE;
-      if (!savedBase || savedBase === 'http://localhost:3000' || savedBase === 'https://localhost:3000' || savedBase === normalizeApiBase(location.origin)) saveApiBase(preferredBase);
-      await chooseWorkingApiBase(state.apiBase || preferredBase);
+    const hideLoadingSplash = showWeirdLoadingSplash();
+    installPathRouting();
+    try {
+      ensureStyles();
+      if (location.protocol === 'http:' || location.protocol === 'https:') {
+        const savedBase = normalizeApiBase(localStorage.getItem(API_BASE_KEY) || '');
+        const preferredBase = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') ? 'http://localhost:3000' : DEFAULT_BACKEND_BASE;
+        if (!savedBase || savedBase === 'http://localhost:3000' || savedBase === 'https://localhost:3000' || savedBase === normalizeApiBase(location.origin)) saveApiBase(preferredBase);
+        await chooseWorkingApiBase(state.apiBase || preferredBase);
+      }
+      if (!locateUi()) return;
+      ensureHost();
+      _initSectionContextMenu();
+      wireStartupBackendBase();
+      wireSecurityDeterrent();
+      await refreshConfig();
+      await refreshPresence();
+      if (state.session && state.session.credential) {
+        await refreshSession();
+        await heartbeat();
+        await refreshCloudSaves();
+      state.savedDancesUiSignature = '';
+        await restoreLatestCloudSaveIfNeeded();
+        await syncCurrentDanceToBackend(false);
+        await refreshNotifications();
+        await refreshSubscription();
+        await confirmCheckoutIfPresent();
+        if (isAdminSession()) { await refreshAdminDances(); await refreshSubmissions(); await refreshGlossaryRequests(); }
+      }
+      await refreshGlossaryApproved();
+      await syncFeaturedFromBackend();
+      renderPages();
+      openPageFromCurrentPathIfNeeded();
+    } finally {
+      hideLoadingSplash();
     }
-    if (!locateUi()) return;
-    ensureHost();
-    _initSectionContextMenu();
-    wireStartupBackendBase();
-    wireSecurityDeterrent();
-    await refreshConfig();
-    await refreshPresence();
-    if (state.session && state.session.credential) {
-      await refreshSession();
-      await heartbeat();
-      await refreshCloudSaves();
-    state.savedDancesUiSignature = '';
-      await restoreLatestCloudSaveIfNeeded();
-      await syncCurrentDanceToBackend(false);
-      await refreshNotifications();
-      await refreshSubscription();
-      await confirmCheckoutIfPresent();
-      if (isAdminSession()) { await refreshAdminDances(); await refreshSubmissions(); await refreshGlossaryRequests(); }
-    }
-    await refreshGlossaryApproved();
-    await syncFeaturedFromBackend();
-    renderPages();
   }
 
   if (document.readyState === 'loading') {

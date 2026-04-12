@@ -95,6 +95,7 @@
     /* ── Crosses ───────────────────────────────────────── */
     { name: 'Cross Right Over Left',   aliases: ['cross right','cross r over l','cross over right','right cross'], counts: 1, feet: 'R', description: 'Cross right foot over left', category: 'cross' },
     { name: 'Cross Left Over Right',   aliases: ['cross left','cross l over r','cross over left','left cross'], counts: 1, feet: 'L', description: 'Cross left foot over right', category: 'cross' },
+    { name: 'Cross Side',              aliases: ['cross side','cross to side','cross then side'], counts: 2, feet: 'Either', description: 'Cross over, then step to the side', category: 'cross' },
     { name: 'Cross Behind Right',      aliases: ['cross right behind','cross r behind','behind right'], counts: 1, feet: 'R', description: 'Cross right foot behind left', category: 'cross' },
     { name: 'Cross Behind Left',       aliases: ['cross left behind','cross l behind','behind left'], counts: 1, feet: 'L', description: 'Cross left foot behind right', category: 'cross' },
     { name: 'Cross Shuffle Right',     aliases: ['cross shuffle r','crossing shuffle right'], counts: 2, feet: 'R', description: 'Cross right over left, step left to side, cross right over left (1&2)', category: 'syncopated' },
