@@ -9,6 +9,7 @@
 
   let injected = false;
   let parsedData = null;
+  let visibilityRaf = 0;
 
   // --- Tab / page awareness ---
   const PAGE_IDS = [
@@ -45,11 +46,11 @@
       let btn = document.getElementById('stepper-pdf-import-btn');
       if (!btn && typeof injectUi === 'function') { try { injectUi(); } catch (_) {} btn = document.getElementById('stepper-pdf-import-btn'); }
       if (btn) { btn.style.display = 'inline-flex'; btn.style.visibility = 'visible'; }
-      updateButtonVisibility();
+      scheduleVisibilityRefresh();
     };
     ensure();
     try { new MutationObserver(() => ensure()).observe(document.body, { childList:true, subtree:true }); } catch (_) {}
-    setInterval(ensure, 1200);
+    setInterval(ensure, 2400);
   }
 
   function updateButtonVisibility() {
@@ -61,9 +62,21 @@
     btn.style.transform = show ? 'translateY(0)' : 'translateY(20px)';
   }
 
+  function scheduleVisibilityRefresh() {
+    if (visibilityRaf) return;
+    const run = () => {
+      visibilityRaf = 0;
+      updateButtonVisibility();
+    };
+    visibilityRaf = window.requestAnimationFrame ? window.requestAnimationFrame(run) : window.setTimeout(run, 16);
+  }
+
   // Poll for tab changes (React state isn't accessible from outside)
   function startTabWatcher() {
-    setInterval(updateButtonVisibility, 400);
+    ['visibilitychange', 'focus', 'resize', 'pageshow', 'popstate'].forEach((eventName) => {
+      window.addEventListener(eventName, scheduleVisibilityRefresh, { passive: true });
+    });
+    setInterval(scheduleVisibilityRefresh, 1800);
   }
 
   // --- Wait for app ---
@@ -240,6 +253,14 @@
             <div class="sublabel">Supports standard line-dance stepsheets (max 10MB)</div>
           </div>
           <input type="file" id="stepper-pdf-file-input" accept=".pdf" data-testid="pdf-file-input" />
+          <div class="mt-3 mb-3 p-3 rounded-xl border border-indigo-400/20 bg-indigo-500/10">
+            <div class="text-sm font-bold text-indigo-200 mb-2">Paste dance page</div>
+            <p style="margin:0 0 8px;font-size:12px;color:#9ca3af;line-height:1.5;">Paste your dance text below and import it directly. You must seperate sections with a double slash (<code>//</code>).</p>
+            <textarea id="stepper-pdf-paste-input" rows="6" placeholder="Section 1 title&#10;1-8 Walk forward right, left, right, kick //&#10;Section 2 title&#10;1-8 Back rock, recover, side close side" style="width:100%;border:1px solid rgba(129,140,248,0.35);border-radius:10px;background:rgba(0,0,0,0.25);color:#e5e7eb;padding:10px;font-size:12px;line-height:1.45;resize:vertical;"></textarea>
+            <div style="margin-top:8px;display:flex;justify-content:flex-end;">
+              <button class="stepper-pdf-btn stepper-pdf-btn-apply" id="stepper-pdf-paste-apply" type="button" style="display:inline-block;">Apply Pasted Dance</button>
+            </div>
+          </div>
           <div id="stepper-pdf-status"></div>
           <div id="stepper-pdf-results" data-testid="pdf-results"></div>
           <div class="stepper-pdf-btn-row">
@@ -264,6 +285,8 @@
     const fileInput = document.getElementById('stepper-pdf-file-input');
     const cancelBtn = document.getElementById('stepper-pdf-cancel');
     const applyBtn = document.getElementById('stepper-pdf-apply');
+    const pasteApplyBtn = document.getElementById('stepper-pdf-paste-apply');
+    const pasteInput = document.getElementById('stepper-pdf-paste-input');
 
     btn.addEventListener('click', () => { overlay.classList.add('active'); resetModal(); });
     cancelBtn.addEventListener('click', () => overlay.classList.remove('active'));
@@ -292,6 +315,23 @@
       const ok = await applyToEditor(parsedData);
       if (ok) overlay.classList.remove('active');
     });
+
+    if (pasteApplyBtn) {
+      pasteApplyBtn.addEventListener('click', async () => {
+        const raw = String((pasteInput && pasteInput.value) || '').trim();
+        if (!raw) {
+          setStatus('error', 'Paste some dance text first.');
+          return;
+        }
+        const pasted = parsePastedDance(raw);
+        if (!pasted.steps.length) {
+          setStatus('error', 'Could not find any steps in that pasted dance.');
+          return;
+        }
+        const ok = await applyToEditor(pasted);
+        if (ok) overlay.classList.remove('active');
+      });
+    }
   }
 
   function resetModal() {
@@ -303,6 +343,8 @@
     results.style.display = 'none'; results.innerHTML = '';
     applyBtn.style.display = 'none';
     document.getElementById('stepper-pdf-file-input').value = '';
+    const pasteInput = document.getElementById('stepper-pdf-paste-input');
+    if (pasteInput) pasteInput.value = '';
   }
 
   function setStatus(type, msg) {
@@ -392,6 +434,47 @@
       steps
     });
   }
+
+  function parsePastedDance(text) {
+    const cleaned = String(text || '').replace(/\r\n/g, '\n').trim();
+    const blocks = cleaned.split(/\s*\/\/\s*/g).map((part) => part.trim()).filter(Boolean);
+    const sections = [];
+    const allSteps = [];
+    blocks.forEach((block, index) => {
+      const lines = block.split('\n').map((line) => line.trim()).filter(Boolean);
+      if (!lines.length) return;
+      let sectionName = `Section ${index + 1}`;
+      const steps = [];
+      lines.forEach((line, lineIndex) => {
+        const countMatch = line.match(/^(\d+(?:[&-]\d+)*)[:.)\-\s]+/);
+        if (lineIndex === 0 && !countMatch) {
+          sectionName = line.slice(0, 80) || sectionName;
+          return;
+        }
+        const counts = countMatch ? countMatch[1] : String(lineIndex + 1);
+        const description = countMatch ? line.slice(countMatch[0].length).trim() : line;
+        if (!description) return;
+        const foot = /\bleft\b/i.test(description) ? 'L' : (/\bright\b/i.test(description) ? 'R' : 'Either');
+        const name = description.split(/[.,;:]/)[0].trim().split(/\s+/).slice(0, 6).join(' ') || 'Imported Step';
+        const step = { count: counts, counts, name, description, foot };
+        steps.push(step);
+        allSteps.push(step);
+      });
+      if (steps.length) sections.push({ title: sectionName, kind: 'section', steps });
+    });
+
+    return {
+      title: sections[0] ? sections[0].title : 'Pasted Dance',
+      choreographer: '',
+      music: '',
+      count: '',
+      level: '',
+      type: '8-count',
+      steps: allSteps,
+      sections
+    };
+  }
+
   function getCommitSections(data) {
     const explicitSections = Array.isArray(data && data.sections) ? data.sections.filter(Boolean) : [];
     if (explicitSections.length) return explicitSections;
