@@ -328,7 +328,7 @@
           setStatus('error', 'Could not find any steps in that pasted dance.');
           return;
         }
-        const ok = await applyToEditor(pasted);
+        const ok = await applyToEditor(sanitizeImportData(pasted));
         if (ok) overlay.classList.remove('active');
       });
     }
@@ -445,20 +445,24 @@
       if (!lines.length) return;
       let sectionName = `Section ${index + 1}`;
       const steps = [];
+      let autoCount = 1;
       lines.forEach((line, lineIndex) => {
-        const countMatch = line.match(/^(\d+(?:[&-]\d+)*)[:.)\-\s]+/);
-        if (lineIndex === 0 && !countMatch) {
-          sectionName = line.slice(0, 80) || sectionName;
+        const strippedLine = line.replace(/^[•*\-\u2022]+\s*/, '').trim();
+        const countMatch = strippedLine.match(/^(\d+(?:\s*[a-z&]?\s*(?:[\-–—,]\s*\d+[a-z&]?)*))(?:(?:\s*[:.)\]-]\s*)|\s+)/i);
+        const looksLikeHeader = /^(section|part|verse|chorus|tag|bridge)\b/i.test(strippedLine) || (/:\s*$/.test(strippedLine) && strippedLine.length <= 60);
+        if ((lineIndex === 0 && !countMatch && looksLikeHeader) || (lineIndex === 0 && !countMatch && strippedLine.length <= 36 && !/\b(right|left|step|rock|shuffle|cross|turn|kick|touch|coaster|vine|heel|toe)\b/i.test(strippedLine))) {
+          sectionName = strippedLine.replace(/:\s*$/, '').slice(0, 80) || sectionName;
           return;
         }
-        const counts = countMatch ? countMatch[1] : String(lineIndex + 1);
-        const description = countMatch ? line.slice(countMatch[0].length).trim() : line;
+        const counts = countMatch ? countMatch[1].replace(/\s+/g, '') : String(autoCount);
+        const description = countMatch ? strippedLine.slice(countMatch[0].length).trim() : strippedLine;
         if (!description) return;
         const foot = /\bleft\b/i.test(description) ? 'L' : (/\bright\b/i.test(description) ? 'R' : 'Either');
         const name = description.split(/[.,;:]/)[0].trim().split(/\s+/).slice(0, 6).join(' ') || 'Imported Step';
         const step = { count: counts, counts, name, description, foot };
         steps.push(step);
         allSteps.push(step);
+        autoCount += 1;
       });
       if (steps.length) sections.push({ title: sectionName, kind: 'section', steps });
     });
@@ -473,6 +477,38 @@
       steps: allSteps,
       sections
     };
+  }
+
+  function sanitizeImportData(data) {
+    const source = (data && typeof data === 'object') ? data : {};
+    const safeSteps = (Array.isArray(source.steps) ? source.steps : []).map((step, index) => {
+      const description = String(step && (step.description || step.name) || '').trim();
+      const name = String(step && step.name || '').trim() || (description.split(/[.,;:]/)[0].trim().split(/\s+/).slice(0, 6).join(' ') || `Step ${index + 1}`);
+      const counts = String(step && (step.counts || step.count) || (index + 1)).trim() || String(index + 1);
+      const foot = /\bleft\b/i.test(description) ? 'L' : (/\bright\b/i.test(description) ? 'R' : String(step && step.foot || 'Either'));
+      return { count: counts, counts, name, description: description || name, foot };
+    }).filter((step) => String(step.description || '').trim() || String(step.name || '').trim());
+    const safeSections = (Array.isArray(source.sections) ? source.sections : []).map((section, index) => {
+      const sectionSteps = (Array.isArray(section && section.steps) ? section.steps : [])
+        .map((step, stepIndex) => {
+          const description = String(step && (step.description || step.name) || '').trim();
+          const name = String(step && step.name || '').trim() || (description.split(/[.,;:]/)[0].trim().split(/\s+/).slice(0, 6).join(' ') || `Step ${stepIndex + 1}`);
+          const counts = String(step && (step.counts || step.count) || (stepIndex + 1)).trim() || String(stepIndex + 1);
+          const foot = /\bleft\b/i.test(description) ? 'L' : (/\bright\b/i.test(description) ? 'R' : String(step && step.foot || 'Either'));
+          return { count: counts, counts, name, description: description || name, foot };
+        })
+        .filter((step) => String(step.description || '').trim() || String(step.name || '').trim());
+      return {
+        title: String(section && (section.title || section.name) || `Section ${index + 1}`).trim() || `Section ${index + 1}`,
+        kind: 'section',
+        steps: sectionSteps
+      };
+    }).filter((section) => section.steps.length);
+    return Object.assign({}, source, {
+      title: String(source.title || (safeSections[0] && safeSections[0].title) || 'Imported Dance').trim(),
+      steps: safeSteps,
+      sections: safeSections
+    });
   }
 
   function getCommitSections(data) {
@@ -512,18 +548,19 @@
         try {
           const importCore = getImportCore();
           if (!data || typeof data !== 'object') throw new Error('No parsed import data was available to apply.');
-          const snapshot = importCore.buildEditorSnapshot(data);
+          const safeData = sanitizeImportData(data);
+          const snapshot = importCore.buildEditorSnapshot(safeData);
           if (!snapshot || !Array.isArray(snapshot.sections)) throw new Error('Imported snapshot could not be built.');
           importCore.writeEditorSnapshot(snapshot);
           try {
             localStorage.setItem('stepper_last_loaded_source', JSON.stringify({
               source: 'pdf-import',
-              title: String((data && data.title) || 'Untitled'),
+              title: String((safeData && safeData.title) || 'Untitled'),
               updatedAt: new Date().toISOString()
             }));
           } catch {}
-          window.__STEPPER_PDF_DATA = data;
-          window.dispatchEvent(new CustomEvent('stepper-pdf-import', { detail: data }));
+          window.__STEPPER_PDF_DATA = safeData;
+          window.dispatchEvent(new CustomEvent('stepper-pdf-import', { detail: safeData }));
           window.dispatchEvent(new CustomEvent('stepper:worksheet-loaded', { detail: { data: snapshot } }));
           window.dispatchEvent(new CustomEvent('stepper-pdf-live-apply', { detail: snapshot }));
           try { if (typeof window.__stepperRefreshWorksheetFromStorage === 'function') window.__stepperRefreshWorksheetFromStorage(); } catch (_) {}
