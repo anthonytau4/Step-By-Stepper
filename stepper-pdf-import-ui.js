@@ -151,6 +151,7 @@
           background: linear-gradient(160deg, #1e1e38 0%, #161625 100%);
           border: 1px solid rgba(165,180,252,0.15);
           border-radius: 24px; padding: 32px; max-width: 540px; width: 92%;
+          max-height: min(90vh, 820px); overflow-y: auto;
           color: #e0e0e0;
           box-shadow: 0 40px 100px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.06);
           transform: translateY(20px) scale(0.97); opacity: 0;
@@ -253,7 +254,7 @@
             <div class="sublabel">Supports standard line-dance stepsheets (max 10MB)</div>
           </div>
           <input type="file" id="stepper-pdf-file-input" accept=".pdf" data-testid="pdf-file-input" />
-          <div class="mt-3 mb-3 p-3 rounded-xl border border-indigo-400/20 bg-indigo-500/10">
+          <div class="mt-3 mb-3 p-3 rounded-xl border border-indigo-400/20 bg-indigo-500/10" style="max-height:260px;overflow:auto;">
             <div class="text-sm font-bold text-indigo-200 mb-2">Paste dance page</div>
             <p style="margin:0 0 8px;font-size:12px;color:#9ca3af;line-height:1.5;">Paste your dance text below and import it directly. You must seperate sections with a double slash (<code>//</code>).</p>
             <textarea id="stepper-pdf-paste-input" rows="6" placeholder="Section 1 title&#10;1-8 Walk forward right, left, right, kick //&#10;Section 2 title&#10;1-8 Back rock, recover, side close side" style="width:100%;border:1px solid rgba(129,140,248,0.35);border-radius:10px;background:rgba(0,0,0,0.25);color:#e5e7eb;padding:10px;font-size:12px;line-height:1.45;resize:vertical;"></textarea>
@@ -323,12 +324,14 @@
           setStatus('error', 'Paste some dance text first.');
           return;
         }
+        setStatus('loading', 'Parsing pasted dance...');
         const pasted = parsePastedDance(raw);
         if (!pasted.steps.length) {
           setStatus('error', 'Could not find any steps in that pasted dance.');
           return;
         }
-        const ok = await applyToEditor(sanitizeImportData(pasted));
+        const enriched = await enrichPastedDataLikePdfParser(pasted);
+        const ok = await applyToEditor(sanitizeImportData(enriched));
         if (ok) overlay.classList.remove('active');
       });
     }
@@ -477,6 +480,16 @@
       steps: allSteps,
       sections
     };
+  }
+
+  async function enrichPastedDataLikePdfParser(data) {
+    try {
+      const importCore = getImportCore();
+      if (importCore && typeof importCore.enrichImportedData === 'function') {
+        return await importCore.enrichImportedData(data, window.STEPPER_API_BASE || '');
+      }
+    } catch (_) {}
+    return data;
   }
 
   function sanitizeImportData(data) {
