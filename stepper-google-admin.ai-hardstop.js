@@ -279,6 +279,15 @@
     }
   }
 
+  function clone(value){
+    try { return JSON.parse(JSON.stringify(value)); }
+    catch (_) {
+      if (Array.isArray(value)) return value.slice();
+      if (value && typeof value === 'object') return Object.assign({}, value);
+      return value;
+    }
+  }
+
   function writeJson(key, value){
     localStorage.setItem(key, JSON.stringify(value));
   }
@@ -429,7 +438,7 @@
       btn.addEventListener('mouseleave', function () { btn.style.background = 'none'; });
     });
 
-    var ctxState = { sectionIndex: -1, stepIndex: -1 };
+    var ctxState = { sectionIndex: -1, stepIndex: -1, context: 'step' };
 
     document.addEventListener('click', function () { menu.style.display = 'none'; }, true);
     document.addEventListener('scroll', function () { menu.style.display = 'none'; }, true);
@@ -498,8 +507,19 @@
         }
       }
 
-      if (stepIdx < 0) return null;
-      return { sectionIndex: sectionIdx, stepIndex: stepIdx };
+      if (stepIdx >= 0) return { sectionIndex: sectionIdx, stepIndex: stepIdx, context: 'step' };
+
+      /* If not a step row, try matching a gap/paste row between steps. */
+      var gapNodes = Array.prototype.slice.call(clickedSection.querySelectorAll('button')).filter(function(node){
+        var text = String(node && node.textContent || '').toLowerCase();
+        return text.indexOf('tap to paste') >= 0 || text.indexOf('paste here') >= 0;
+      });
+      var gapIdx = -1;
+      for (var gi = 0; gi < gapNodes.length; gi++) {
+        if (gapNodes[gi].contains(target)) { gapIdx = gi; break; }
+      }
+      if (gapIdx >= 0) return { sectionIndex: sectionIdx, stepIndex: gapIdx, context: 'gap' };
+      return null;
     }
 
     document.addEventListener('contextmenu', function (e) {
@@ -513,10 +533,15 @@
       e.preventDefault();
       ctxState.sectionIndex = result.sectionIndex;
       ctxState.stepIndex = result.stepIndex;
+      ctxState.context = result.context || 'step';
 
       /* Show/hide split option — only valid between steps (not the first step) */
       var splitBtn = menu.querySelector('[data-ctx-split]');
       if (splitBtn) splitBtn.style.display = ctxState.stepIndex > 0 ? 'flex' : 'none';
+      var upBtn = menu.querySelector('[data-ctx-move-up]');
+      var downBtn = menu.querySelector('[data-ctx-move-down]');
+      if (upBtn) upBtn.style.display = ctxState.context === 'step' ? 'flex' : 'none';
+      if (downBtn) downBtn.style.display = ctxState.context === 'step' ? 'flex' : 'none';
 
       menu.style.display = 'block';
       menu.style.left = Math.min(e.clientX, window.innerWidth - 200) + 'px';
@@ -531,13 +556,13 @@
     });
     menu.querySelector('[data-ctx-move-up]').addEventListener('click', function () {
       menu.style.display = 'none';
-      if (ctxState.sectionIndex >= 0 && ctxState.stepIndex >= 0) {
+      if (ctxState.context === 'step' && ctxState.sectionIndex >= 0 && ctxState.stepIndex >= 0) {
         moveStep(ctxState.sectionIndex, ctxState.stepIndex, 'up');
       }
     });
     menu.querySelector('[data-ctx-move-down]').addEventListener('click', function () {
       menu.style.display = 'none';
-      if (ctxState.sectionIndex >= 0 && ctxState.stepIndex >= 0) {
+      if (ctxState.context === 'step' && ctxState.sectionIndex >= 0 && ctxState.stepIndex >= 0) {
         moveStep(ctxState.sectionIndex, ctxState.stepIndex, 'down');
       }
     });
