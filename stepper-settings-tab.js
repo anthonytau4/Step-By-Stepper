@@ -292,6 +292,7 @@
       window.dispatchEvent(new CustomEvent('stepper-settings-changed', { detail: { key: key, value: value } }));
     } catch (e) { /* noop */ }
     applyLiveSetting(key, value);
+    if (key === 'theme') notifyThemeUpdated();
   }
 
   function getSetting(key) {
@@ -388,7 +389,7 @@
         else root.classList.remove('stepper-dyslexia-font');
         break;
       case 'theme':
-        applyTheme(value);
+        applyTheme(value, { silent: true });
         break;
       case 'accentColor':
         applyAccentColor(value);
@@ -422,7 +423,21 @@
     return ((num >> 16) & 255) + ' ' + ((num >> 8) & 255) + ' ' + (num & 255);
   }
 
-  function applyTheme(value) {
+  var __stepperThemeNotifyBusy = false;
+
+  function notifyThemeUpdated() {
+    if (__stepperThemeNotifyBusy) return;
+    __stepperThemeNotifyBusy = true;
+    try { window.dispatchEvent(new Event('stepper-theme-updated')); } catch (err) { /* noop */ }
+    setTimeout(function () { __stepperThemeNotifyBusy = false; }, 0);
+  }
+
+  function notifyBuilderStorage() {
+    try { window.dispatchEvent(new StorageEvent('storage', { key: BUILDER_DATA_KEY })); } catch (err) { /* noop */ }
+  }
+
+  function applyTheme(value, options) {
+    options = options || {};
     try {
       var data = JSON.parse(localStorage.getItem(BUILDER_DATA_KEY) || '{}');
       if (value === 'dark') data.isDarkMode = true;
@@ -434,8 +449,8 @@
       localStorage.setItem(BUILDER_DATA_KEY, JSON.stringify(data));
       document.documentElement.classList.toggle('dark', !!data.isDarkMode);
       document.body.classList.toggle('dark', !!data.isDarkMode);
-      try { window.dispatchEvent(new Event('stepper-theme-updated')); } catch (err) { /* noop */ }
-      window.dispatchEvent(new StorageEvent('storage', { key: BUILDER_DATA_KEY }));
+      if (!options.silent) notifyThemeUpdated();
+      notifyBuilderStorage();
     } catch (e) { /* noop */ }
   }
 
@@ -444,7 +459,6 @@
     for (var key in settings) {
       if (settings.hasOwnProperty(key)) applyLiveSetting(key, settings[key]);
     }
-    try { window.dispatchEvent(new Event('stepper-theme-updated')); } catch (e) { /* noop */ }
   }
 
   /* ════════════════════════════════════════════════════════════
