@@ -12,6 +12,8 @@
   const SIGNIN_PAGE_ID = 'stepper-google-signin-page';
   const ADMIN_PAGE_ID = 'stepper-google-admin-page';
   const SUBSCRIPTION_PAGE_ID = 'stepper-google-subscription-page';
+  const FLOWABILITY_SECTION_ID = 'stepper-ai-flowability-section';
+  const FLOWABILITY_POPUP_SESSION_KEY = 'stepper_flowability_popup_shown_v1';
   const HOST_ID = 'stepper-google-admin-host';
   const SIGNIN_TAB_ID = 'stepper-google-signin-tab';
   const ADMIN_TAB_ID = 'stepper-google-admin-tab';
@@ -370,15 +372,11 @@
       || !!(state.session && state.session.isAdmin);
   }
 
-  function isPremiumSession(){
-    return isAdminSession() || !!(state.subscription && state.subscription.isPremium);
-  }
+  function isPremiumSession(){ return true; }
 
   function paymentStatusLabel(){
     if (isAdminSession()) return 'Admin access';
-    if (state.subscription && state.subscription.plan === 'yearly' && isPremiumSession()) return 'Premium yearly';
-    if (state.subscription && state.subscription.plan === 'monthly' && isPremiumSession()) return 'Premium monthly';
-    return 'Free member';
+    return 'Premium active';
   }
 
   function isDarkMode(){
@@ -625,12 +623,36 @@
     }).catch(() => {});
   }
 
+  function scrollToAiFlowabilitySection(retries){
+    const section = document.getElementById(FLOWABILITY_SECTION_ID);
+    if (section) {
+      section.scrollIntoView({ behavior: 'auto', block: 'start', inline: 'nearest' });
+      return true;
+    }
+    if (retries <= 0) return false;
+    setTimeout(() => scrollToAiFlowabilitySection(retries - 1), 80);
+    return false;
+  }
+
+  function maybeShowFlowabilityPopup(){
+    try {
+      if (sessionStorage.getItem(FLOWABILITY_POPUP_SESSION_KEY) === '1') return;
+      sessionStorage.setItem(FLOWABILITY_POPUP_SESSION_KEY, '1');
+    } catch {}
+    setTimeout(() => {
+      const goNow = window.confirm("Already got a stepsheet? Check it's flowability!");
+      if (!goNow) return;
+      openPage('signin');
+      renderPages();
+      scrollToAiFlowabilitySection(25);
+    }, 220);
+  }
+
   function updateAdminTabVisibility(){
     if (state.ui.subscriptionBtn) {
-      const subVisible = !!(state.session && state.session.credential);
-      state.ui.subscriptionBtn.style.display = subVisible ? '' : 'none';
-      state.ui.subscriptionBtn.hidden = !subVisible;
-      if (!subVisible && state.activePage === 'subscription') state.activePage = 'signin';
+      state.ui.subscriptionBtn.style.display = 'none';
+      state.ui.subscriptionBtn.hidden = true;
+      if (state.activePage === 'subscription') state.activePage = 'signin';
     }
     if (!state.ui.adminBtn) return;
     const visible = isAdminSession();
@@ -2024,7 +2046,7 @@
               </div>
             </div>
           </div>
-          <div class="mx-auto max-w-3xl rounded-3xl border p-5 sm:p-6 ${theme.soft}">
+          <div id="${FLOWABILITY_SECTION_ID}" class="mx-auto max-w-3xl rounded-3xl border p-5 sm:p-6 ${theme.soft}">
             <div class="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <div class="text-lg font-black tracking-tight">AI dance judge & flowability</div>
@@ -2088,6 +2110,10 @@
             </div>
             <div id="stepper-google-button-slot" class="stepper-google-google-btn mt-6 flex justify-center"></div>
           </div>
+          <div id="${FLOWABILITY_SECTION_ID}" class="mx-auto max-w-2xl rounded-3xl border p-5 sm:p-6 ${theme.soft}">
+            <div class="text-lg font-black tracking-tight">AI dance judge & flowability</div>
+            <p class="mt-2 text-sm ${theme.subtle}">Already got a stepsheet? Sign in with Google above, then use this AI dance judge area to check flowability, tidy up clunky transitions, and generate count support.</p>
+          </div>
           <div class="mx-auto max-w-2xl rounded-3xl border p-5 sm:p-6 ${theme.soft}">
             <div class="flex flex-wrap items-center justify-between gap-4">
               <div>
@@ -2113,7 +2139,12 @@
     const uploadSiteBtn = page.querySelector('[data-stepper-action="upload-site"]');
     if (uploadSiteBtn) uploadSiteBtn.addEventListener('click', () => requestModeration('site'));
     const openSubBtn = page.querySelector('[data-stepper-action="open-subscription"]');
-    if (openSubBtn) openSubBtn.addEventListener('click', () => { openPage('subscription'); renderPages(); });
+    if (openSubBtn) {
+      openSubBtn.textContent = 'Premium active';
+      openSubBtn.disabled = true;
+      openSubBtn.style.opacity = '.65';
+      openSubBtn.style.cursor = 'not-allowed';
+    }
     const openSavedBtn = page.querySelector('[data-stepper-open-saved="1"]');
     if (openSavedBtn) openSavedBtn.addEventListener('click', () => {
       const btn = state.ui && state.ui.savedBtn;
@@ -2583,6 +2614,7 @@
     await refreshGlossaryApproved();
     await syncFeaturedFromBackend();
     renderPages();
+    maybeShowFlowabilityPopup();
   }
 
   if (document.readyState === 'loading') {
@@ -2637,88 +2669,24 @@
   });
 
   async function refreshSubscription(){
-    if (!state.session || !state.session.credential) {
-      state.subscription = { isPremium: false, plan: 'free', status: 'free', source: 'signed-out' };
-      return state.subscription;
-    }
-    try {
-      const data = await authFetch('/api/subscription/status');
-      state.subscription = Object.assign({ isPremium: false, plan: 'free', status: 'free', source: 'backend' }, data || {});
-      return state.subscription;
-    } catch (error) {
-      const existing = state.subscription && typeof state.subscription === 'object' ? state.subscription : {};
-      const keepModerator = !!((state.session && state.session.isModerator) || existing.isModerator || existing.role === 'moderator');
-      const keepAdmin = isAdminSession() || existing.role === 'admin';
-      state.subscription = Object.assign({}, existing, {
-        isPremium: keepAdmin || keepModerator || !!existing.isPremium,
-        plan: keepAdmin ? 'admin' : (keepModerator ? 'moderator' : (existing.plan || 'free')),
-        status: keepAdmin || keepModerator ? 'active' : (existing.status || 'free'),
-        source: 'fallback',
-        isModerator: keepModerator,
-        role: keepAdmin ? 'admin' : (keepModerator ? 'moderator' : (existing.role || 'member'))
-      });
-      return state.subscription;
-    }
+    state.subscription = Object.assign({}, state.subscription || {}, {
+      isPremium: true,
+      plan: isAdminSession() ? 'admin' : 'lifetime',
+      status: 'active',
+      source: 'forced-premium',
+      role: isAdminSession() ? 'admin' : ((state.subscription && state.subscription.role) || 'member')
+    });
+    return state.subscription;
   }
 
   async function createCheckout(plan){
-    if (!state.session || !state.session.credential) {
-      openPage('signin');
-      renderPages();
-      return;
-    }
-    try {
-      saveApiBase(state.apiBase || DEFAULT_BACKEND_BASE);
-      await saveChangesNow({ force:true }).catch(() => false);
-      localStorage.setItem('stepper_pending_checkout_plan_v1', String(plan || '').trim());
-      const data = await authFetch('/api/subscription/create-checkout-session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          plan,
-          returnOrigin: location.origin,
-          returnPath: location.pathname + location.search,
-          backendBase: state.apiBase || DEFAULT_BACKEND_BASE
-        })
-      });
-      if (data && data.alreadyPremium) {
-        await refreshSubscription();
-        renderPages();
-        alert('Premium is already active on this account.');
-        return;
-      }
-      if (data && data.url) {
-        location.href = data.url;
-        return;
-      }
-      throw new Error((data && data.error) || 'Checkout link could not be created.');
-    } catch (error) {
-      alert(error.message || 'Could not start checkout.');
-    }
+    await refreshSubscription().catch(() => null);
+    renderPages();
+    alert('Subscriptions are removed. Premium is active for everyone.');
   }
 
   async function confirmCheckoutIfPresent(){
-    if (!state.session || !state.session.credential) return false;
-    const url = new URL(location.href);
-    const sessionId = url.searchParams.get('checkout_session_id') || url.searchParams.get('session_id');
-    if (!sessionId) return false;
-    try {
-      await authFetch('/api/subscription/confirm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId })
-      });
-      await refreshSubscription();
-      localStorage.removeItem('stepper_pending_checkout_plan_v1');
-      await saveChangesNow({ force:true }).catch(() => false);
-      url.searchParams.delete('checkout_session_id');
-      url.searchParams.delete('session_id');
-      history.replaceState({}, '', url.toString());
-      renderPages();
-      return true;
-    } catch (error) {
-      return false;
-    }
+    return false;
   }
 
   const MODERATOR_PAGE_ID = 'stepper-google-moderator-page';

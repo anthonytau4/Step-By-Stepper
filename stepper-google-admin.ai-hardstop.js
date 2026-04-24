@@ -42,9 +42,9 @@
   const FEATURED_SYNC_INTERVAL_MS = 18000;
   const LIVE_QUEUE_SYNC_INTERVAL_MS = 4000;
   const EXTRA_PAGE_PATHS = {
-    signin: '/signin',
-    subscription: '/subscription',
-    admin: '/admin',
+    signin: '/editor/',
+    subscription: '/editor/',
+    admin: '/editor/',
     friends: '/friends',
     glossary: '/glossary',
     pdfimport: '/pdf-import',
@@ -279,6 +279,15 @@
     }
   }
 
+  function clone(value){
+    try { return JSON.parse(JSON.stringify(value)); }
+    catch (_) {
+      if (Array.isArray(value)) return value.slice();
+      if (value && typeof value === 'object') return Object.assign({}, value);
+      return value;
+    }
+  }
+
   function writeJson(key, value){
     localStorage.setItem(key, JSON.stringify(value));
   }
@@ -429,7 +438,7 @@
       btn.addEventListener('mouseleave', function () { btn.style.background = 'none'; });
     });
 
-    var ctxState = { sectionIndex: -1, stepIndex: -1 };
+    var ctxState = { sectionIndex: -1, stepIndex: -1, context: 'step' };
 
     document.addEventListener('click', function () { menu.style.display = 'none'; }, true);
     document.addEventListener('scroll', function () { menu.style.display = 'none'; }, true);
@@ -498,8 +507,19 @@
         }
       }
 
-      if (stepIdx < 0) return null;
-      return { sectionIndex: sectionIdx, stepIndex: stepIdx };
+      if (stepIdx >= 0) return { sectionIndex: sectionIdx, stepIndex: stepIdx, context: 'step' };
+
+      /* If not a step row, try matching a gap/paste row between steps. */
+      var gapNodes = Array.prototype.slice.call(clickedSection.querySelectorAll('button')).filter(function(node){
+        var text = String(node && node.textContent || '').toLowerCase();
+        return text.indexOf('tap to paste') >= 0 || text.indexOf('paste here') >= 0;
+      });
+      var gapIdx = -1;
+      for (var gi = 0; gi < gapNodes.length; gi++) {
+        if (gapNodes[gi].contains(target)) { gapIdx = gi; break; }
+      }
+      if (gapIdx >= 0) return { sectionIndex: sectionIdx, stepIndex: gapIdx, context: 'gap' };
+      return null;
     }
 
     document.addEventListener('contextmenu', function (e) {
@@ -513,10 +533,15 @@
       e.preventDefault();
       ctxState.sectionIndex = result.sectionIndex;
       ctxState.stepIndex = result.stepIndex;
+      ctxState.context = result.context || 'step';
 
       /* Show/hide split option — only valid between steps (not the first step) */
       var splitBtn = menu.querySelector('[data-ctx-split]');
       if (splitBtn) splitBtn.style.display = ctxState.stepIndex > 0 ? 'flex' : 'none';
+      var upBtn = menu.querySelector('[data-ctx-move-up]');
+      var downBtn = menu.querySelector('[data-ctx-move-down]');
+      if (upBtn) upBtn.style.display = ctxState.context === 'step' ? 'flex' : 'none';
+      if (downBtn) downBtn.style.display = ctxState.context === 'step' ? 'flex' : 'none';
 
       menu.style.display = 'block';
       menu.style.left = Math.min(e.clientX, window.innerWidth - 200) + 'px';
@@ -531,13 +556,13 @@
     });
     menu.querySelector('[data-ctx-move-up]').addEventListener('click', function () {
       menu.style.display = 'none';
-      if (ctxState.sectionIndex >= 0 && ctxState.stepIndex >= 0) {
+      if (ctxState.context === 'step' && ctxState.sectionIndex >= 0 && ctxState.stepIndex >= 0) {
         moveStep(ctxState.sectionIndex, ctxState.stepIndex, 'up');
       }
     });
     menu.querySelector('[data-ctx-move-down]').addEventListener('click', function () {
       menu.style.display = 'none';
-      if (ctxState.sectionIndex >= 0 && ctxState.stepIndex >= 0) {
+      if (ctxState.context === 'step' && ctxState.sectionIndex >= 0 && ctxState.stepIndex >= 0) {
         moveStep(ctxState.sectionIndex, ctxState.stepIndex, 'down');
       }
     });
@@ -2305,9 +2330,7 @@
       || !!(state.session && state.session.isAdmin);
   }
 
-  function isPremiumSession(){
-    return isAdminSession() || !!(state.subscription && state.subscription.isPremium);
-  }
+  function isPremiumSession(){ return true; }
 
   function hasPremiumExtensionAccess(){
     return isAdminSession() || isModeratorSession() || isPremiumSession();
@@ -2328,9 +2351,7 @@
 
   function paymentStatusLabel(){
     if (isAdminSession()) return 'Admin access';
-    if (state.subscription && state.subscription.plan === 'yearly' && isPremiumSession()) return 'Premium yearly';
-    if (state.subscription && state.subscription.plan === 'monthly' && isPremiumSession()) return 'Premium monthly';
-    return 'Free member';
+    return 'Premium active';
   }
 
   function isDarkMode(){
@@ -2724,10 +2745,9 @@
 
   function updateAdminTabVisibility(){
     if (state.ui.subscriptionBtn) {
-      const subVisible = !!(state.session && state.session.credential);
-      state.ui.subscriptionBtn.style.display = subVisible ? '' : 'none';
-      state.ui.subscriptionBtn.hidden = !subVisible;
-      if (!subVisible && state.activePage === 'subscription') state.activePage = 'signin';
+      state.ui.subscriptionBtn.style.display = 'none';
+      state.ui.subscriptionBtn.hidden = true;
+      if (state.activePage === 'subscription') state.activePage = 'signin';
     }
     if (!state.ui.adminBtn) return;
     const visible = isAdminSession();
@@ -4805,7 +4825,12 @@
     const uploadSiteBtn = page.querySelector('[data-stepper-action="upload-site"]');
     if (uploadSiteBtn) uploadSiteBtn.addEventListener('click', () => requestModeration('site'));
     const openSubBtn = page.querySelector('[data-stepper-action="open-subscription"]');
-    if (openSubBtn) openSubBtn.addEventListener('click', () => { openPage('subscription'); renderPages(); });
+    if (openSubBtn) {
+      openSubBtn.textContent = 'Premium active';
+      openSubBtn.disabled = true;
+      openSubBtn.style.opacity = '.65';
+      openSubBtn.style.cursor = 'not-allowed';
+    }
     const openSavedBtn = page.querySelector('[data-stepper-open-saved="1"]');
     if (openSavedBtn) openSavedBtn.addEventListener('click', () => {
       const btn = state.ui && state.ui.savedBtn;
@@ -5389,6 +5414,7 @@
       _initSectionContextMenu();
       wireStartupBackendBase();
       wireSecurityDeterrent();
+      wireHotkeyFallback();
       await refreshConfig();
       await refreshPresence();
       if (state.session && state.session.credential) {
@@ -5427,6 +5453,7 @@
     ensureHost();
     wireStartupBackendBase();
     wireSecurityDeterrent();
+    wireHotkeyFallback();
     updateAdminTabVisibility();
     updateTabButtons();
     renderPresenceOnly();
@@ -5483,88 +5510,24 @@
   });
 
   async function refreshSubscription(){
-    if (!state.session || !state.session.credential) {
-      state.subscription = { isPremium: false, plan: 'free', status: 'free', source: 'signed-out' };
-      return state.subscription;
-    }
-    try {
-      const data = await authFetch('/api/subscription/status');
-      state.subscription = Object.assign({ isPremium: false, plan: 'free', status: 'free', source: 'backend' }, data || {});
-      return state.subscription;
-    } catch (error) {
-      const existing = state.subscription && typeof state.subscription === 'object' ? state.subscription : {};
-      const keepModerator = !!((state.session && state.session.isModerator) || existing.isModerator || existing.role === 'moderator');
-      const keepAdmin = isAdminSession() || existing.role === 'admin';
-      state.subscription = Object.assign({}, existing, {
-        isPremium: keepAdmin || keepModerator || !!existing.isPremium,
-        plan: keepAdmin ? 'admin' : (keepModerator ? 'moderator' : (existing.plan || 'free')),
-        status: keepAdmin || keepModerator ? 'active' : (existing.status || 'free'),
-        source: 'fallback',
-        isModerator: keepModerator,
-        role: keepAdmin ? 'admin' : (keepModerator ? 'moderator' : (existing.role || 'member'))
-      });
-      return state.subscription;
-    }
+    state.subscription = Object.assign({}, state.subscription || {}, {
+      isPremium: true,
+      plan: isAdminSession() ? 'admin' : 'lifetime',
+      status: 'active',
+      source: 'forced-premium',
+      role: isAdminSession() ? 'admin' : ((state.subscription && state.subscription.role) || 'member')
+    });
+    return state.subscription;
   }
 
   async function createCheckout(plan){
-    if (!state.session || !state.session.credential) {
-      openPage('signin');
-      renderPages();
-      return;
-    }
-    try {
-      saveApiBase(state.apiBase || DEFAULT_BACKEND_BASE);
-      await saveChangesNow({ force:true }).catch(() => false);
-      localStorage.setItem('stepper_pending_checkout_plan_v1', String(plan || '').trim());
-      const data = await authFetch('/api/subscription/create-checkout-session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          plan,
-          returnOrigin: location.origin,
-          returnPath: location.pathname + location.search,
-          backendBase: state.apiBase || DEFAULT_BACKEND_BASE
-        })
-      });
-      if (data && data.alreadyPremium) {
-        await refreshSubscription();
-        renderPages();
-        alert('Premium is already active on this account.');
-        return;
-      }
-      if (data && data.url) {
-        location.href = data.url;
-        return;
-      }
-      throw new Error((data && data.error) || 'Checkout link could not be created.');
-    } catch (error) {
-      alert(error.message || 'Could not start checkout.');
-    }
+    await refreshSubscription().catch(() => null);
+    renderPages();
+    alert('Subscriptions are removed. Premium is active for everyone.');
   }
 
   async function confirmCheckoutIfPresent(){
-    if (!state.session || !state.session.credential) return false;
-    const url = new URL(location.href);
-    const sessionId = url.searchParams.get('checkout_session_id') || url.searchParams.get('session_id');
-    if (!sessionId) return false;
-    try {
-      await authFetch('/api/subscription/confirm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId })
-      });
-      await refreshSubscription();
-      localStorage.removeItem('stepper_pending_checkout_plan_v1');
-      await saveChangesNow({ force:true }).catch(() => false);
-      url.searchParams.delete('checkout_session_id');
-      url.searchParams.delete('session_id');
-      history.replaceState({}, '', url.toString());
-      renderPages();
-      return true;
-    } catch (error) {
-      return false;
-    }
+    return false;
   }
 
   const MODERATOR_PAGE_ID = 'stepper-google-moderator-page';
@@ -6129,6 +6092,43 @@
       if ((event.ctrlKey || event.metaKey) && key === 'u') strike('view-source-shortcut', 'Ctrl/Cmd+U');
     }, true);
     window.addEventListener('contextmenu', () => strike('contextmenu', 'Right click on live site'), true);
+  }
+
+  function wireHotkeyFallback(){
+    if (window.__stepperHotkeyFallbackWired) return;
+    window.__stepperHotkeyFallbackWired = true;
+    const isTextInput = (node) => {
+      if (!(node instanceof HTMLElement)) return false;
+      if (node.isContentEditable) return true;
+      const tag = String(node.tagName || '').toUpperCase();
+      if (tag === 'TEXTAREA') return true;
+      if (tag !== 'INPUT') return false;
+      const type = String(node.getAttribute('type') || 'text').toLowerCase();
+      return !['button','submit','reset','checkbox','radio','range','file','color','hidden','image'].includes(type);
+    };
+    const findTabButton = (label) => Array.from(document.querySelectorAll('button')).find((btn) => String(btn.textContent || '').trim() === label);
+    window.addEventListener('keydown', (event) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+      if (isTextInput(event.target)) return;
+      const key = String(event.key || '').toLowerCase();
+      if (key === 'z' && !event.shiftKey) {
+        if (window.StepByStepperHistory && typeof window.StepByStepperHistory.undo === 'function') {
+          event.preventDefault();
+          window.StepByStepperHistory.undo();
+        }
+        return;
+      }
+      if (key === 'y' || (key === 'z' && event.shiftKey)) {
+        if (window.StepByStepperHistory && typeof window.StepByStepperHistory.redo === 'function') {
+          event.preventDefault();
+          window.StepByStepperHistory.redo();
+        }
+        return;
+      }
+      if (key === '1') { const b1 = findTabButton('Build'); if (b1) { event.preventDefault(); b1.click(); } return; }
+      if (key === '2') { const b2 = findTabButton('Sheet'); if (b2) { event.preventDefault(); b2.click(); } return; }
+      if (key === '3') { const b3 = findTabButton("What's New"); if (b3) { event.preventDefault(); b3.click(); } return; }
+    }, true);
   }
 
 
