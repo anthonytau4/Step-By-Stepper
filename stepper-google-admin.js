@@ -12,6 +12,8 @@
   const SIGNIN_PAGE_ID = 'stepper-google-signin-page';
   const ADMIN_PAGE_ID = 'stepper-google-admin-page';
   const SUBSCRIPTION_PAGE_ID = 'stepper-google-subscription-page';
+  const FLOWABILITY_SECTION_ID = 'stepper-ai-flowability-section';
+  const FLOWABILITY_POPUP_SESSION_KEY = 'stepper_flowability_popup_shown_v1';
   const HOST_ID = 'stepper-google-admin-host';
   const SIGNIN_TAB_ID = 'stepper-google-signin-tab';
   const ADMIN_TAB_ID = 'stepper-google-admin-tab';
@@ -623,6 +625,31 @@
     refreshLiveQueues().then(() => {
       if (state.activePage) renderPages();
     }).catch(() => {});
+  }
+
+  function scrollToAiFlowabilitySection(retries){
+    const section = document.getElementById(FLOWABILITY_SECTION_ID);
+    if (section) {
+      section.scrollIntoView({ behavior: 'auto', block: 'start', inline: 'nearest' });
+      return true;
+    }
+    if (retries <= 0) return false;
+    setTimeout(() => scrollToAiFlowabilitySection(retries - 1), 80);
+    return false;
+  }
+
+  function maybeShowFlowabilityPopup(){
+    try {
+      if (sessionStorage.getItem(FLOWABILITY_POPUP_SESSION_KEY) === '1') return;
+      sessionStorage.setItem(FLOWABILITY_POPUP_SESSION_KEY, '1');
+    } catch {}
+    setTimeout(() => {
+      const goNow = window.confirm("Already got a stepsheet? Check it's flowability!");
+      if (!goNow) return;
+      openPage('signin');
+      renderPages();
+      scrollToAiFlowabilitySection(25);
+    }, 220);
   }
 
   function updateAdminTabVisibility(){
@@ -2024,7 +2051,7 @@
               </div>
             </div>
           </div>
-          <div class="mx-auto max-w-3xl rounded-3xl border p-5 sm:p-6 ${theme.soft}">
+          <div id="${FLOWABILITY_SECTION_ID}" class="mx-auto max-w-3xl rounded-3xl border p-5 sm:p-6 ${theme.soft}">
             <div class="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <div class="text-lg font-black tracking-tight">AI dance judge & flowability</div>
@@ -2087,6 +2114,10 @@
               <p class="mt-3 text-sm leading-relaxed ${theme.subtle}">Use your Google account to sign in. The admin tab appears only for <strong>${escapeHtml(ADMIN_EMAIL)}</strong>.</p>
             </div>
             <div id="stepper-google-button-slot" class="stepper-google-google-btn mt-6 flex justify-center"></div>
+          </div>
+          <div id="${FLOWABILITY_SECTION_ID}" class="mx-auto max-w-2xl rounded-3xl border p-5 sm:p-6 ${theme.soft}">
+            <div class="text-lg font-black tracking-tight">AI dance judge & flowability</div>
+            <p class="mt-2 text-sm ${theme.subtle}">Already got a stepsheet? Sign in with Google above, then use this AI dance judge area to check flowability, tidy up clunky transitions, and generate count support.</p>
           </div>
           <div class="mx-auto max-w-2xl rounded-3xl border p-5 sm:p-6 ${theme.soft}">
             <div class="flex flex-wrap items-center justify-between gap-4">
@@ -2583,6 +2614,7 @@
     await refreshGlossaryApproved();
     await syncFeaturedFromBackend();
     renderPages();
+    maybeShowFlowabilityPopup();
   }
 
   if (document.readyState === 'loading') {
