@@ -356,4 +356,5 @@
     redo,
     snapshot: pushSnapshot
   };
+  window.__stepperHistoryUndoRedo = window.StepByStepperHistory;
 })();

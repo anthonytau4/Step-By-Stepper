@@ -5414,6 +5414,7 @@
       _initSectionContextMenu();
       wireStartupBackendBase();
       wireSecurityDeterrent();
+      wireHotkeyFallback();
       await refreshConfig();
       await refreshPresence();
       if (state.session && state.session.credential) {
@@ -5452,6 +5453,7 @@
     ensureHost();
     wireStartupBackendBase();
     wireSecurityDeterrent();
+    wireHotkeyFallback();
     updateAdminTabVisibility();
     updateTabButtons();
     renderPresenceOnly();
@@ -6154,6 +6156,43 @@
       if ((event.ctrlKey || event.metaKey) && key === 'u') strike('view-source-shortcut', 'Ctrl/Cmd+U');
     }, true);
     window.addEventListener('contextmenu', () => strike('contextmenu', 'Right click on live site'), true);
+  }
+
+  function wireHotkeyFallback(){
+    if (window.__stepperHotkeyFallbackWired) return;
+    window.__stepperHotkeyFallbackWired = true;
+    const isTextInput = (node) => {
+      if (!(node instanceof HTMLElement)) return false;
+      if (node.isContentEditable) return true;
+      const tag = String(node.tagName || '').toUpperCase();
+      if (tag === 'TEXTAREA') return true;
+      if (tag !== 'INPUT') return false;
+      const type = String(node.getAttribute('type') || 'text').toLowerCase();
+      return !['button','submit','reset','checkbox','radio','range','file','color','hidden','image'].includes(type);
+    };
+    const findTabButton = (label) => Array.from(document.querySelectorAll('button')).find((btn) => String(btn.textContent || '').trim() === label);
+    window.addEventListener('keydown', (event) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+      if (isTextInput(event.target)) return;
+      const key = String(event.key || '').toLowerCase();
+      if (key === 'z' && !event.shiftKey) {
+        if (window.StepByStepperHistory && typeof window.StepByStepperHistory.undo === 'function') {
+          event.preventDefault();
+          window.StepByStepperHistory.undo();
+        }
+        return;
+      }
+      if (key === 'y' || (key === 'z' && event.shiftKey)) {
+        if (window.StepByStepperHistory && typeof window.StepByStepperHistory.redo === 'function') {
+          event.preventDefault();
+          window.StepByStepperHistory.redo();
+        }
+        return;
+      }
+      if (key === '1') { const b1 = findTabButton('Build'); if (b1) { event.preventDefault(); b1.click(); } return; }
+      if (key === '2') { const b2 = findTabButton('Sheet'); if (b2) { event.preventDefault(); b2.click(); } return; }
+      if (key === '3') { const b3 = findTabButton("What's New"); if (b3) { event.preventDefault(); b3.click(); } return; }
+    }, true);
   }
 
 
