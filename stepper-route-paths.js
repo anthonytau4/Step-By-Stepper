@@ -83,7 +83,7 @@
     try { sessionStorage.setItem(ROUTE_STORAGE_KEY, routeName); } catch {}
   }
   function normalizePath(pathname){
-    const raw = String(pathname || '/').replace(/\/+/g, '/');
+    const raw = String(pathname || '/').replace(/\/+/, '/');
     if (raw === '/') return '/';
     return raw.endsWith('/') ? raw : raw + '/';
   }
@@ -289,4 +289,36 @@
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
   else boot();
+})();
+
+(function(){
+  if (window.__stepperAutosaveUploadCacheInstalled) return;
+  window.__stepperAutosaveUploadCacheInstalled = true;
+  var DATA_KEY = 'linedance_builder_data_v13';
+  var PHR_TOOLS_KEY = 'stepper_current_phrased_tools_v1';
+  var SESSION_KEY = 'stepper_google_auth_session_v2';
+  var GOOGLE_SIGNIN_CACHE_KEY = 'stepper_google_signin_cache_v1';
+  var AUTOSAVE_CACHE_KEY = 'stepper_pending_autosaves_v1';
+  var LAST_SAVED_SIGNATURE_KEY = 'stepper_last_saved_signature_v1';
+  var API_BASE_KEY = 'stepper_api_base_v1';
+  var DEFAULT_BACKEND_BASE = 'https://step-by-stepper.onrender.com';
+  var busy = false;
+  function readJson(key, fallback){ try { var raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; } catch (_) { return fallback; } }
+  function writeJson(key, value){ try { localStorage.setItem(key, JSON.stringify(value)); } catch (_) {} }
+  function normalizeApiBase(value){ return String(value || '').trim().replace(/\/+$/, ''); }
+  function apiBase(){ var saved = normalizeApiBase(window.STEPPER_API_BASE || localStorage.getItem(API_BASE_KEY) || ''); if (saved) return saved; if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') return 'http://localhost:3000'; return DEFAULT_BACKEND_BASE; }
+  function normalizePending(list){ var map = {}; (Array.isArray(list) ? list : []).forEach(function(item){ if (!item || !item.entry || !item.signature) return; map[String(item.signature)] = { entry:item.entry, signature:String(item.signature), reason:String(item.reason || 'autosave'), autosavedAt:String(item.autosavedAt || new Date().toISOString()), uploadAttempts:Math.max(0, Number(item.uploadAttempts || 0) || 0) }; }); return Object.keys(map).map(function(key){ return map[key]; }).sort(function(a,b){ return new Date(b.autosavedAt || 0) - new Date(a.autosavedAt || 0); }).slice(0, 24); }
+  function readSession(){ var active = readJson(SESSION_KEY, null); if (active && active.credential) { writeJson(GOOGLE_SIGNIN_CACHE_KEY, Object.assign({}, active, { cachedAt:new Date().toISOString() })); return active; } var cached = readJson(GOOGLE_SIGNIN_CACHE_KEY, null); if (cached && cached.credential) { writeJson(SESSION_KEY, cached); return cached; } return null; }
+  function readDanceEntry(){ var data = readJson(DATA_KEY, null); if (!data || !data.meta) return null; var meta = data.meta || {}; var sections = Array.isArray(data.sections) ? data.sections : []; var steps = sections.reduce(function(sum, section){ return sum + (section && Array.isArray(section.steps) ? section.steps.length : 0); }, 0); var title = String(meta.title || '').trim(); var choreographer = String(meta.choreographer || '').trim(); if (!title && !choreographer && !steps) return null; title = title || 'Untitled Dance'; choreographer = choreographer || 'Uncredited'; return { id:title.toLowerCase() + '|' + choreographer.toLowerCase(), title:title, choreographer:choreographer, country:String(meta.country || '').trim(), level:String(meta.level || 'Unlabelled').trim() || 'Unlabelled', counts:String(meta.counts || '-').trim() || '-', walls:String(meta.walls || '-').trim() || '-', music:String(meta.music || '').trim(), sections:sections.length, steps:steps, updatedAt:new Date().toISOString(), snapshot:{ data:data, phrasedTools:readJson(PHR_TOOLS_KEY, {}) } }; }
+  function signature(entry){ if (!entry) return ''; try { return JSON.stringify({ title:entry.title, choreographer:entry.choreographer, counts:entry.counts, walls:entry.walls, steps:entry.steps, sections:entry.sections, data:entry.snapshot && entry.snapshot.data ? entry.snapshot.data : {} }); } catch (_) { return entry.id + '|' + entry.updatedAt; } }
+  function writePending(list){ var normalized = normalizePending(list); if (normalized.length) writeJson(AUTOSAVE_CACHE_KEY, normalized); else localStorage.removeItem(AUTOSAVE_CACHE_KEY); try { window.dispatchEvent(new CustomEvent('stepper:pending-autosaves-changed', { detail:{ count:normalized.length } })); } catch (_) {} }
+  function cacheCurrent(reason){ var entry = readDanceEntry(); var sig = signature(entry); if (!entry || !sig) return false; var session = readSession(); var profile = session && session.profile ? session.profile : {}; entry.ownerEmail = String(entry.ownerEmail || profile.email || '').trim(); entry.ownerName = String(entry.ownerName || (session && session.displayName) || profile.name || '').trim(); entry.autosavedAt = new Date().toISOString(); var next = normalizePending(readJson(AUTOSAVE_CACHE_KEY, [])).filter(function(item){ return item.signature !== sig; }); next.unshift({ entry:entry, signature:sig, reason:String(reason || 'autosave'), autosavedAt:entry.autosavedAt, uploadAttempts:0 }); writePending(next); return true; }
+  async function uploadPending(){ if (busy) return false; var session = readSession(); if (!session || !session.credential) return false; var pending = normalizePending(readJson(AUTOSAVE_CACHE_KEY, [])); if (!pending.length) return false; busy = true; var remaining = []; var uploaded = false; try { for (var i = pending.length - 1; i >= 0; i -= 1) { var item = pending[i]; try { var response = await fetch(apiBase() + '/api/cloud-saves/upsert', { method:'POST', mode:'cors', credentials:'omit', headers:{ 'Content-Type':'application/json', Authorization:'Bearer ' + session.credential }, body:JSON.stringify({ entry:item.entry }) }); if (!response.ok) throw new Error('Upload failed'); uploaded = true; if (item.signature) localStorage.setItem(LAST_SAVED_SIGNATURE_KEY, item.signature); } catch (_) { remaining.push(Object.assign({}, item, { uploadAttempts:Math.max(0, Number(item.uploadAttempts || 0) || 0) + 1 })); } } writePending(remaining.reverse()); return uploaded; } finally { busy = false; } }
+  function maybeCacheDirty(reason){ var entry = readDanceEntry(); var sig = signature(entry); if (!sig) return false; if (sig === String(localStorage.getItem(LAST_SAVED_SIGNATURE_KEY) || '')) return false; return cacheCurrent(reason); }
+  window.StepperAutosaveUploadCache = { cacheCurrent:cacheCurrent, uploadPending:uploadPending, pending:function(){ return normalizePending(readJson(AUTOSAVE_CACHE_KEY, [])); } };
+  readSession();
+  window.addEventListener('beforeunload', function(){ maybeCacheDirty('before-close'); });
+  window.addEventListener('storage', function(){ maybeCacheDirty('local-change'); uploadPending(); });
+  window.addEventListener('stepper:access-changed', function(){ readSession(); uploadPending(); });
+  window.setInterval(function(){ maybeCacheDirty('autosave'); uploadPending(); }, 6000);
 })();
