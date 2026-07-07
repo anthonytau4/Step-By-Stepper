@@ -283,14 +283,83 @@ html.stepper-focus-mode body {
 /* ── Smooth scroll ───────────────────────────────────────── */
 html.stepper-smooth-scroll { scroll-behavior: smooth; }
 
-/* ── Page transition helper class ────────────────────────── */
-.stepper-page-exit {
-  transition: opacity .2s ease-out, transform .2s ease-out;
-  opacity: .95; transform: translateY(-4px);
+/* ── Fun page transitions ────────────────────────────────── */
+.stepper-page-fx {
+  position: fixed; inset: 0; z-index: 10490;
+  pointer-events: none; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
 }
+.stepper-page-fx-panel {
+  position: absolute; inset: 0;
+  background: linear-gradient(135deg, #6366f1 0%, #7c3aed 45%, #ec4899 100%);
+  will-change: transform, clip-path, opacity;
+}
+${dark ? '.stepper-page-fx-panel { background: linear-gradient(135deg, #4338ca 0%, #6d28d9 45%, #be185d 100%); }' : ''}
+/* Style A — diagonal wipe */
+.stepper-page-fx[data-fx="wipe"] .stepper-page-fx-panel {
+  animation: stepper-fx-wipe .62s cubic-bezier(.7,0,.2,1) forwards;
+}
+@keyframes stepper-fx-wipe {
+  0%   { transform: translateX(-110%) skewX(-12deg); }
+  42%  { transform: translateX(0) skewX(-12deg); }
+  58%  { transform: translateX(0) skewX(-12deg); }
+  100% { transform: translateX(110%) skewX(-12deg); }
+}
+/* Style B — circular iris reveal */
+.stepper-page-fx[data-fx="iris"] .stepper-page-fx-panel {
+  animation: stepper-fx-iris .68s cubic-bezier(.65,0,.35,1) forwards;
+}
+@keyframes stepper-fx-iris {
+  0%   { clip-path: circle(0% at 50% 50%); }
+  46%  { clip-path: circle(75% at 50% 50%); }
+  56%  { clip-path: circle(75% at 50% 50%); }
+  100% { clip-path: circle(0% at 50% 50%); }
+}
+/* Style C — vertical shutter */
+.stepper-page-fx[data-fx="shutter"] .stepper-page-fx-panel {
+  animation: stepper-fx-shutter .6s cubic-bezier(.7,0,.2,1) forwards;
+}
+@keyframes stepper-fx-shutter {
+  0%   { transform: translateY(-110%); }
+  44%  { transform: translateY(0); }
+  56%  { transform: translateY(0); }
+  100% { transform: translateY(110%); }
+}
+/* Route badge that pops while the panel covers the screen */
+.stepper-page-fx-badge {
+  position: relative; z-index: 1;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  color: #fff; font-weight: 800; letter-spacing: .3px;
+  text-shadow: 0 2px 10px rgba(0,0,0,.25);
+  opacity: 0; transform: scale(.6);
+  animation: stepper-fx-badge .62s cubic-bezier(.34,1.56,.64,1) forwards;
+}
+.stepper-page-fx-badge .stepper-page-fx-emoji {
+  font-size: 56px; line-height: 1;
+  filter: drop-shadow(0 6px 14px rgba(0,0,0,.3));
+  animation: stepper-fx-emoji-spin .62s cubic-bezier(.34,1.56,.64,1);
+}
+.stepper-page-fx-badge .stepper-page-fx-label {
+  font-size: 17px; text-transform: uppercase;
+}
+@keyframes stepper-fx-badge {
+  0%   { opacity: 0; transform: scale(.4) translateY(10px); }
+  38%  { opacity: 1; transform: scale(1.08) translateY(0); }
+  60%  { opacity: 1; transform: scale(1) translateY(0); }
+  100% { opacity: 0; transform: scale(.92) translateY(-6px); }
+}
+@keyframes stepper-fx-emoji-spin {
+  0%   { transform: rotate(-25deg) scale(.5); }
+  45%  { transform: rotate(8deg)  scale(1.15); }
+  100% { transform: rotate(0deg)  scale(1); }
+}
+/* Incoming page content springs in behind the panel */
 .stepper-page-enter {
-  transition: opacity .2s ease-out, transform .2s ease-out;
-  opacity: 1; transform: translateY(0);
+  animation: stepper-fx-content-in .5s cubic-bezier(.34,1.4,.5,1) both;
+}
+@keyframes stepper-fx-content-in {
+  0%   { opacity: 0; transform: translateY(14px) scale(.985); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 /* ── Responsive: mobile ≤480px ───────────────────────────── */
@@ -309,9 +378,11 @@ html.stepper-smooth-scroll { scroll-behavior: smooth; }
   .stepper-shortcuts-box,
   .stepper-scroll-progress,
   .stepper-focus-pill,
-  .stepper-page-exit,
-  .stepper-page-enter,
   .stepper-status-bar { transition: none !important; }
+  .stepper-page-fx-panel,
+  .stepper-page-fx-badge,
+  .stepper-page-fx-emoji,
+  .stepper-page-enter { animation: none !important; }
   html.stepper-smooth-scroll { scroll-behavior: auto; }
 }
 `;
@@ -497,6 +568,26 @@ html.stepper-smooth-scroll { scroll-behavior: smooth; }
   (function initPageTransitions() {
     if (prefersReducedMotion()) return;
 
+    /* Destination flair: emoji + label shown on the sweeping panel. */
+    var ROUTE_FLAIR = {
+      editor:     { emoji: '🏗️', label: 'Build' },
+      preview:    { emoji: '📄', label: 'Sheet' },
+      whatsnew:   { emoji: '🆕', label: "What's New" },
+      saveddances:{ emoji: '💾', label: 'Saved Dances' },
+      featured:   { emoji: '⭐', label: 'Featured' },
+      friends:    { emoji: '👥', label: 'Friends' },
+      glossary:   { emoji: '📖', label: 'Glossary' },
+      pdfimport:  { emoji: '📑', label: 'PDF Import' },
+      settings:   { emoji: '⚙️', label: 'Settings' },
+      music:      { emoji: '🎵', label: 'Music' },
+      templates:  { emoji: '🧩', label: 'Templates' },
+      tips:       { emoji: '💡', label: 'Tips & Tricks' },
+      notifications: { emoji: '🔔', label: 'Notifications' }
+    };
+    var FX_STYLES = ['wipe', 'iris', 'shutter'];
+    var fxIndex = 0;
+    var animating = false;
+
     var lastRoute = document.documentElement.getAttribute('data-stepper-route');
     var observer = new MutationObserver(function(mutations) {
       mutations.forEach(function(m) {
@@ -504,28 +595,59 @@ html.stepper-smooth-scroll { scroll-behavior: smooth; }
         var newRoute = document.documentElement.getAttribute('data-stepper-route');
         if (newRoute === lastRoute) return;
         lastRoute = newRoute;
-        animatePageTransition();
+        animatePageTransition(newRoute);
       });
     });
     observer.observe(document.documentElement, { attributes: true });
 
-    function animatePageTransition() {
-      var main = document.querySelector('main') || document.querySelector('.main-content') || document.body;
-      // Phase 1: exit
-      main.classList.add('stepper-page-exit');
-      main.classList.remove('stepper-page-enter');
+    function findMain() {
+      return document.querySelector('main') || document.querySelector('.main-content') || document.body;
+    }
+
+    function animatePageTransition(route) {
+      if (animating) return;
+      animating = true;
+
+      var flair = ROUTE_FLAIR[route] || { emoji: '💃', label: route || '' };
+      var fx = FX_STYLES[fxIndex % FX_STYLES.length];
+      fxIndex += 1;
+
+      /* Sweeping colour panel with a popping route badge. */
+      var fxLayer = document.createElement('div');
+      fxLayer.className = 'stepper-page-fx';
+      fxLayer.setAttribute('data-fx', fx);
+      fxLayer.setAttribute('aria-hidden', 'true');
+      fxLayer.innerHTML =
+        '<div class="stepper-page-fx-panel"></div>' +
+        '<div class="stepper-page-fx-badge">' +
+        '  <span class="stepper-page-fx-emoji">' + flair.emoji + '</span>' +
+        '  <span class="stepper-page-fx-label">' + escapeHtml(flair.label) + '</span>' +
+        '</div>';
+      document.body.appendChild(fxLayer);
+
+      /* Spring the freshly-shown page content in while the panel covers it. */
       setTimeout(function() {
-        // Phase 2: enter
-        main.classList.remove('stepper-page-exit');
-        main.style.opacity = '0.95';
-        main.style.transform = 'translateY(4px)';
-        // Force reflow
-        void main.offsetHeight;
+        var main = findMain();
+        main.classList.remove('stepper-page-enter');
+        void main.offsetHeight; // restart the animation if repeated quickly
         main.classList.add('stepper-page-enter');
-        main.style.opacity = '';
-        main.style.transform = '';
-        setTimeout(function() { main.classList.remove('stepper-page-enter'); }, 220);
-      }, 200);
+        setTimeout(function() { main.classList.remove('stepper-page-enter'); }, 520);
+      }, 280);
+
+      /* Tear down the overlay once the sweep finishes. */
+      var cleanup = function() {
+        if (fxLayer && fxLayer.parentNode) fxLayer.parentNode.removeChild(fxLayer);
+        animating = false;
+      };
+      fxLayer.addEventListener('animationend', function(e) {
+        if (e.target && e.target.classList.contains('stepper-page-fx-panel')) cleanup();
+      });
+      setTimeout(cleanup, 900); // safety net if animationend never fires
+    }
+
+    function escapeHtml(str) {
+      return String(str == null ? '' : str)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
   })();
 
