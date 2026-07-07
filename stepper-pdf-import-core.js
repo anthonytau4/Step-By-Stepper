@@ -285,13 +285,48 @@
     return matches.length ? Math.max(...matches) : 0;
   }
 
+  /* Estimate how many musical counts a single step spans, based on its
+     count label. Examples:
+       "5"        → 1 count
+       "1 & 2"    → 2 counts (two numeric beats)
+       "1-4"      → 4 counts (an inclusive range)
+       "" / "&a"  → 1 count (fallback so a step never counts as zero) */
+  function countBeatsForStep(step) {
+    const raw = String(step && (step.count || step.counts) || '').trim();
+    if (!raw) return 1;
+    const rangeMatch = raw.match(/(\d+)\s*(?:-|–|—|to|through)\s*(\d+)/i);
+    if (rangeMatch) {
+      const span = Math.abs(Number(rangeMatch[2]) - Number(rangeMatch[1])) + 1;
+      return span > 0 ? span : 1;
+    }
+    const tokens = raw.match(/\d+/g);
+    return tokens && tokens.length ? tokens.length : 1;
+  }
+
   function autoSectionizeImportedSteps(steps, phraseCounts) {
     const source = Array.isArray(steps) ? steps.slice() : [];
     if (!source.length) return [];
-    /* ── Place all imported steps into a single section.
-       Users can split sections manually via the right-click
-       "Split Section Here" option in the editor. ── */
-    return [{ id: makeId(), name: '', steps: source.map((item, index) => toEditorStep(item, index + 1)) }];
+    /* ── Split imported steps into phrase-sized sections: a new section
+       starts after every 8 counts (or 6 counts for a waltz). Users can
+       still re-split manually via the right-click "Split Section Here"
+       option in the editor. ── */
+    const perSection = Number(phraseCounts) > 0 ? Number(phraseCounts) : 8;
+    const sections = [];
+    let current = null;
+    let beatsInSection = 0;
+    let runningCount = 0;
+    source.forEach((item) => {
+      if (!current) {
+        current = { id: makeId(), name: '', steps: [] };
+        sections.push(current);
+        beatsInSection = 0;
+      }
+      runningCount += 1;
+      current.steps.push(toEditorStep(item, runningCount));
+      beatsInSection += countBeatsForStep(item);
+      if (beatsInSection >= perSection) current = null;
+    });
+    return sections;
   }
 
   function buildImportedSections(data, importedSteps) {
