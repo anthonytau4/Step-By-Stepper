@@ -16,7 +16,6 @@
   const STARTUP_MIN_MS = 8400;
   const STARTUP_FALLBACK_MS = 9800;
   const STARTUP_FADE_MS = 340;
-  const STARTUP_AUTOSTART_MS = 2200;
   const STARTUP_HARD_CAP_MS = 20000;
   const STARTUP_POST_BEGIN_HARD_CAP_MS = 12000;
   const STARTUP_AUDIO_FALLBACK_DURATION_MS = 8411;
@@ -73,6 +72,7 @@
     const splash = document.getElementById('stepper-static-startup');
     if (!splash) return;
     const button = splash.querySelector('.stepper-static-startup__button');
+    const skipButton = splash.querySelector('.stepper-static-startup__skip');
     const audio = buildStartupAudio();
     try { if (!audio.parentNode) document.body.appendChild(audio); } catch {}
     window.__stepperStartupAudio = audio;
@@ -83,12 +83,10 @@
     let started = false;
     let audioPrimed = false;
     let firstPlaySucceeded = false;
-    const initStartedAt = Date.now();
     let beginAt = 0;
     let hardCapTimer = null;
     let postBeginHardCapTimer = null;
     let forcePollTimer = null;
-    let autostartTimer = null;
     let lastQueueReason = 'init';
     let audioUnlockBound = false;
     function prewarmAudio(){
@@ -125,7 +123,6 @@
       if (fallbackTimer) { window.clearTimeout(fallbackTimer); fallbackTimer = null; }
       if (hardCapTimer) { window.clearTimeout(hardCapTimer); hardCapTimer = null; }
       if (postBeginHardCapTimer) { window.clearTimeout(postBeginHardCapTimer); postBeginHardCapTimer = null; }
-      if (autostartTimer) { window.clearTimeout(autostartTimer); autostartTimer = null; }
       if (forcePollTimer) { window.clearInterval(forcePollTimer); forcePollTimer = null; }
     }
     function detachUnlockListeners(){
@@ -150,14 +147,11 @@
         splash.remove();
       }, STARTUP_FADE_MS);
     }
+    /* Safety nets only run once the intro has actually begun — until the
+       user presses start, the splash waits patiently. */
     function forceLeaveIfLagging(){
-      if (leaving) return;
-      const now = Date.now();
-      const postBeginElapsed = beginAt ? (now - beginAt) : 0;
-      const initElapsed = now - initStartedAt;
-      if (initElapsed >= STARTUP_HARD_CAP_MS || (beginAt && postBeginElapsed >= STARTUP_POST_BEGIN_HARD_CAP_MS)) {
-        leave();
-      }
+      if (leaving || !beginAt) return;
+      if (Date.now() - beginAt >= STARTUP_POST_BEGIN_HARD_CAP_MS) leave();
     }
     function getDurationMs(){
       const duration = Number(audio.duration);
@@ -219,17 +213,13 @@
     window.addEventListener('touchstart', unlockAudio, true);
     window.addEventListener('keydown', unlockAudio, true);
     audioUnlockBound = true;
-    window.addEventListener('pointerdown', function(){
-      if (!started) begin();
-    }, { once: true, capture: true });
-    window.addEventListener('keydown', function(){
-      if (!started) begin();
-    }, { once: true, capture: true });
+    /* The intro only starts when the user presses the start button —
+       no autostart, no starting on stray clicks or keypresses. */
     if (button) button.addEventListener('click', begin, { once: true });
-    autostartTimer = window.setTimeout(function(){
-      if (!started) begin();
-    }, STARTUP_AUTOSTART_MS);
-    armSafetyNets();
+    if (skipButton) skipButton.addEventListener('click', function(){
+      started = true;
+      leave();
+    }, { once: true });
     document.addEventListener('visibilitychange', function(){
       if (document.visibilityState === 'hidden' && started && !leaving) {
         window.setTimeout(function(){

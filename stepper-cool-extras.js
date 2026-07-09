@@ -6,7 +6,7 @@
  *
  *  1. Command Palette  (Ctrl+K)
  *  2. Animated Page Transitions
- *  3. Particle Ambient Background
+ *  3. Particle Ambient Background (+ parchment scroll backdrop)
  *  4. Status Bar
  *  5. Confetti on Save
  *  6. Theme Presets
@@ -728,6 +728,60 @@ ${dark ? '.stepper-page-fx-panel { background: linear-gradient(135deg, #4338ca 0
       requestAnimationFrame(draw);
     }
     requestAnimationFrame(draw);
+  })();
+
+  /* ================================================================
+   * 3b. PARCHMENT SCROLL BACKGROUND
+   * The page background looks like an olden-day paper scroll: warm
+   * parchment base, mottled stains, SVG-turbulence paper grain, and
+   * a vignette that darkens toward the document's ends. It lives on
+   * the <body> background itself: the app's containers are
+   * transparent and body's opaque background paints over any
+   * negative z-index layer, so body's own background-image is the
+   * only slot guaranteed to sit above the flat colour and below all
+   * content. !important because other injected styles (e.g.
+   * phrased-tools-fix) set the `background` shorthand on body, which
+   * would reset the image. Dark mode comes from the html.dark class
+   * so it updates live.
+   * ============================================================= */
+  (function initScrollBackground() {
+    if (document.getElementById('stepper-scroll-bg-style')) return;
+
+    /* Seamlessly tiling paper-grain texture (r/g/b 0..1, a = strength). */
+    function grainUrl(r, g, b, a) {
+      var svg = "<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'>" +
+        "<filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.11 0.14' numOctaves='3' seed='11' stitchTiles='stitch'/>" +
+        "<feColorMatrix type='matrix' values='0 0 0 0 " + r + " 0 0 0 0 " + g + " 0 0 0 0 " + b + " 0 0 0 " + a + " 0'/></filter>" +
+        "<rect width='240' height='240' filter='url(%23n)'/></svg>";
+      return 'url("data:image/svg+xml,' + svg.replace(/</g, '%3C').replace(/>/g, '%3E').replace(/#/g, '%23') + '")';
+    }
+
+    var style = document.createElement('style');
+    style.id = 'stepper-scroll-bg-style';
+    style.textContent = [
+      'html { background-color: #efe3c6 !important; }',
+      'body {',
+      '  background-color: #efe3c6 !important;',
+      '  background-image:',
+      '    radial-gradient(ellipse at center, rgba(0,0,0,0) 52%, rgba(92,61,26,.16) 100%),',
+      '    ' + grainUrl(0.35, 0.24, 0.11, 0.07) + ',',
+      '    radial-gradient(circle, rgba(122,86,42,.05) 0 26%, transparent 52%),',
+      '    radial-gradient(circle, rgba(122,86,42,.04) 0 20%, transparent 46%) !important;',
+      '  background-size: 100% 100%, 240px 240px, 340px 340px, 340px 340px !important;',
+      '  background-position: center, 0 0, 0 0, 170px 170px !important;',
+      '  background-repeat: no-repeat, repeat, repeat, repeat !important;',
+      '}',
+      'html.dark { background-color: #241b11 !important; }',
+      'html.dark body {',
+      '  background-color: #241b11 !important;',
+      '  background-image:',
+      '    radial-gradient(ellipse at center, rgba(0,0,0,0) 52%, rgba(0,0,0,.38) 100%),',
+      '    ' + grainUrl(0.85, 0.72, 0.5, 0.05) + ',',
+      '    radial-gradient(circle, rgba(214,178,116,.045) 0 26%, transparent 52%),',
+      '    radial-gradient(circle, rgba(214,178,116,.03) 0 20%, transparent 46%) !important;',
+      '}'
+    ].join('\n');
+    document.head.appendChild(style);
   })();
 
   /* ================================================================
