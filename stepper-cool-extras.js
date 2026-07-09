@@ -6,7 +6,7 @@
  *
  *  1. Command Palette  (Ctrl+K)
  *  2. Animated Page Transitions
- *  3. Particle Ambient Background
+ *  3. Particle Ambient Background (+ scrolling dot-grid backdrop)
  *  4. Status Bar
  *  5. Confetti on Save
  *  6. Theme Presets
@@ -728,6 +728,50 @@ ${dark ? '.stepper-page-fx-panel { background: linear-gradient(135deg, #4338ca 0
       requestAnimationFrame(draw);
     }
     requestAnimationFrame(draw);
+  })();
+
+  /* ================================================================
+   * 3b. SCROLLING AMBIENT BACKGROUND
+   * A faint dot-grid that drifts diagonally forever. It lives on the
+   * <body> background itself: the app's containers are transparent
+   * and body's opaque background paints over any negative z-index
+   * layer, so body's own background-image is the only slot that is
+   * guaranteed to sit above the flat colour and below all content.
+   * Injected in its own <style> tag (not injectCSS) so the periodic
+   * re-injection never restarts the animation; dark mode comes from
+   * the html.dark class so it updates live.
+   * ============================================================= */
+  (function initScrollBackground() {
+    if (document.getElementById('stepper-scroll-bg-style')) return;
+
+    var style = document.createElement('style');
+    style.id = 'stepper-scroll-bg-style';
+    style.textContent = [
+      /* !important because other injected styles (e.g. phrased-tools-fix)
+         set the `background` shorthand on body, which resets the image. */
+      'body {',
+      '  background-image:',
+      '    radial-gradient(rgba(99,102,241,.16) 1.4px, transparent 1.5px),',
+      '    radial-gradient(rgba(99,102,241,.09) 1px, transparent 1.1px) !important;',
+      '  background-size: 64px 64px, 64px 64px !important;',
+      '  background-repeat: repeat, repeat !important;',
+      '  animation: stepper-bg-scroll 60s linear infinite;',
+      '}',
+      'html.dark body {',
+      '  background-image:',
+      '    radial-gradient(rgba(165,180,252,.15) 1.4px, transparent 1.5px),',
+      '    radial-gradient(rgba(148,163,184,.10) 1px, transparent 1.1px) !important;',
+      '}',
+      /* Shift by exact tile multiples (64px, 128px) so the loop is seamless. */
+      '@keyframes stepper-bg-scroll {',
+      '  from { background-position: 0 0, 32px 32px; }',
+      '  to   { background-position: 64px 128px, 96px 160px; }',
+      '}',
+      '@media (prefers-reduced-motion: reduce) {',
+      '  body { animation: none !important; }',
+      '}'
+    ].join('\n');
+    document.head.appendChild(style);
   })();
 
   /* ================================================================
