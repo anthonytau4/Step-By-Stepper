@@ -61,12 +61,13 @@
       btn.style.pointerEvents = show ? 'auto' : 'none';
       btn.style.transform = show ? 'translateY(0)' : 'translateY(20px)';
     }
-    // The Remaster button lives on the Sheet tab (preview route) only.
+    // The Remaster and Add-ending buttons live on the Sheet tab (preview) only.
+    const route = (document.documentElement.getAttribute('data-stepper-route') || '').toLowerCase();
+    const onSheet = show && route === 'preview';
     const remaster = document.getElementById('stepper-remaster-btn');
-    if (remaster) {
-      const route = (document.documentElement.getAttribute('data-stepper-route') || '').toLowerCase();
-      remaster.classList.toggle('stepper-remaster-visible', show && route === 'preview');
-    }
+    if (remaster) remaster.classList.toggle('stepper-remaster-visible', onSheet);
+    const addEnding = document.getElementById('stepper-add-ending-btn');
+    if (addEnding) addEnding.classList.toggle('stepper-remaster-visible', onSheet);
   }
 
   function scheduleVisibilityRefresh() {
@@ -171,8 +172,36 @@
         #stepper-remaster-btn:active { transform: translateY(0) scale(0.98); }
         #stepper-remaster-btn[disabled] { opacity: 0.7; cursor: default; transform: none; }
         #stepper-remaster-btn svg { width: 18px; height: 18px; fill: currentColor; flex-shrink: 0; }
+        /* Add-ending button (Sheet tab only) */
+        #stepper-add-ending-btn {
+          position: fixed;
+          bottom: 194px;
+          right: 20px;
+          z-index: 9998;
+          display: none;
+          align-items: center;
+          gap: 8px;
+          padding: 12px 22px;
+          border: none;
+          border-radius: 999px;
+          background: linear-gradient(135deg, #0ea5e9 0%, #14b8a6 50%, #22c55e 100%);
+          color: #fff;
+          font-size: 14px;
+          font-weight: 700;
+          letter-spacing: 0.04em;
+          cursor: pointer;
+          box-shadow: 0 8px 28px rgba(20,184,166,0.45), inset 0 1px 0 rgba(255,255,255,0.2);
+          transition: transform 0.25s cubic-bezier(.4,0,.2,1), box-shadow 0.25s, opacity 0.35s;
+          overflow: hidden;
+        }
+        #stepper-add-ending-btn.stepper-remaster-visible { display: flex; }
+        #stepper-add-ending-btn:hover { transform: translateY(-3px) scale(1.03); box-shadow: 0 14px 40px rgba(20,184,166,0.55), inset 0 1px 0 rgba(255,255,255,0.25); }
+        #stepper-add-ending-btn:active { transform: translateY(0) scale(0.98); }
+        #stepper-add-ending-btn[disabled] { opacity: 0.7; cursor: default; transform: none; }
+        #stepper-add-ending-btn svg { width: 18px; height: 18px; fill: currentColor; flex-shrink: 0; }
+
         #stepper-remaster-toast {
-          position: fixed; bottom: 200px; right: 20px; z-index: 10001;
+          position: fixed; bottom: 252px; right: 20px; z-index: 10001;
           max-width: 320px; padding: 12px 16px; border-radius: 12px;
           background: rgba(17,17,27,0.95); color: #e5e7eb; font-size: 13px; line-height: 1.5;
           box-shadow: 0 10px 30px rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.12);
@@ -293,6 +322,11 @@
       <button id="stepper-remaster-btn" data-testid="remaster-button" title="Use AI to reformat this dance into a clean, correctly-structured stepsheet">
         <svg viewBox="0 0 24 24"><path d="M12 2l1.9 4.6L18.5 8l-4.6 1.9L12 14.5l-1.9-4.6L5.5 8l4.6-1.4L12 2zm6 10l1 2.4 2.4 1-2.4 1-1 2.4-1-2.4-2.4-1 2.4-1L18 12zM6 13l.8 2 2 .8-2 .8L6 19l-.8-2.4-2-.8 2-.8L6 13z"/></svg>
         Remaster
+      </button>
+
+      <button id="stepper-add-ending-btn" data-testid="add-ending-button" title="Add an Ending section to the end of this dance">
+        <svg viewBox="0 0 24 24"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5z"/></svg>
+        Add ending?
       </button>
 
       <div id="stepper-remaster-toast" role="status" aria-live="polite"></div>
@@ -462,6 +496,42 @@
           remasterBtn.removeAttribute('disabled');
           remasterBtn.dataset.busy = '';
           remasterBtn.innerHTML = originalHtml;
+        }
+      });
+    }
+
+    const addEndingBtn = document.getElementById('stepper-add-ending-btn');
+    if (addEndingBtn) {
+      addEndingBtn.addEventListener('click', () => {
+        const snapshot = readCurrentSnapshot();
+        if (!snapshot || !Array.isArray(snapshot.sections)) {
+          showRemasterToast('Build or import a dance first, then add an ending.', 'err');
+          return;
+        }
+        const hasEnding = snapshot.sections.some((s) => s && (
+          String(s.kind || '').toLowerCase() === 'ending' ||
+          /^(?:ending|final|finale|finish|big finish)\b/i.test(String((s.name || s.title) || ''))
+        ));
+        if (hasEnding) {
+          showRemasterToast('This dance already has an ending section.', 'err');
+          return;
+        }
+        const mk = () => Math.random().toString(36).slice(2, 11);
+        snapshot.sections.push({
+          id: mk(),
+          name: 'Ending',
+          kind: 'ending',
+          steps: [{ id: mk(), type: 'step', count: '', name: '', description: '', foot: 'Either', weight: false, showNote: false, note: '' }]
+        });
+        try {
+          const importCore = getImportCore();
+          importCore.writeEditorSnapshot(snapshot);
+          window.dispatchEvent(new CustomEvent('stepper:worksheet-loaded', { detail: { data: snapshot } }));
+          window.dispatchEvent(new CustomEvent('stepper-pdf-live-apply', { detail: snapshot }));
+          if (typeof window.__stepperRefreshWorksheetFromStorage === 'function') window.__stepperRefreshWorksheetFromStorage();
+          showRemasterToast('✨ Added an "Ending" section — fill it in on the Build tab.', 'ok');
+        } catch (err) {
+          showRemasterToast('Could not add the ending: ' + (err && err.message ? err.message : 'unknown error'), 'err');
         }
       });
     }
