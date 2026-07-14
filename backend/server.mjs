@@ -2051,6 +2051,21 @@ app.post('/api/pdf/parse', async (req, res) => {
     return res.status(error.status || 500).json({ ok:false, error: error?.message || 'Could not parse that PDF.' });
   }
 });
+/* Parse pasted stepsheet text through the same heuristic + AI pipeline as a
+   PDF upload, so the "Paste dance page" gets the same smart parsing. */
+app.post('/api/pdf/parse-text', async (req, res) => {
+  try {
+    const text = String(req.body?.text || '').trim();
+    if (!text) return res.status(400).json({ ok:false, error:'Paste some dance text first.' });
+    if (text.length > 200000) return res.status(413).json({ ok:false, error:'That pasted dance is too long. Max 200,000 characters.' });
+    const parsed = await enhanceParsedPdfDance(parsePdfTextToDance(text), text);
+    parsed.sourceTextLength = text.length;
+    parsed.source = 'pasted-text';
+    return res.json(parsed);
+  } catch (error) {
+    return res.status(error.status || 500).json({ ok:false, error: error?.message || 'Could not parse that pasted dance.' });
+  }
+});
 app.get("/api/cloud-saves", requireGoogleUser, async (req, res) => {
   const db = await readDb();
   const key = userKeyFromClaims(req.stepperClaims);
