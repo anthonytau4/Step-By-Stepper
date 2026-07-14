@@ -8,8 +8,19 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { execFile } from "child_process";
 import { promisify } from "util";
+import {
+  buildStepVocabularyRegex,
+  extractHeaderFields,
+  normalizeCountNotation,
+  classifyDanceFeel,
+  buildCorrectionSystemPrompt,
+  buildCorrectionUserPrompt
+} from "./stepsheet-knowledge.mjs";
 
 dotenv.config();
+
+/* Shared step-name matcher built from the top-100 stepsheet vocabulary. */
+const STEP_NAME_PATTERN = buildStepVocabularyRegex();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1482,7 +1493,7 @@ function parseStepLine(line, fallbackIndex) {
   let counts = '';
   const countMatch = rest.match(/^((?:counts?\s*)?(?:\d+(?:\s*[&-]\s*\d+)*|[&a-z](?:\s*[&-]\s*\d+)*))(?:\s*[:.)-]|\s{2,}|\s+(?=[A-Z]))/i);
   if (countMatch) {
-    counts = cleanPdfLine(countMatch[1].replace(/^counts?\s*/i, ''));
+    counts = normalizeCountNotation(countMatch[1]);
     rest = cleanPdfLine(rest.slice(countMatch[0].length));
   }
   let name = '';
@@ -1509,13 +1520,7 @@ function parseStepLine(line, fallbackIndex) {
 }
 
 function guessDanceFeel(meta, rawText) {
-  const blob = `${String(meta?.title || '')}
-${String(meta?.music || '')}
-${String(meta?.level || '')}
-${String(rawText || '')}`.toLowerCase();
-  if (/waltz|vals|viennese/.test(blob)) return 'Waltz';
-  if (/6\s*\/\s*8|3\s*\/\s*4/.test(blob)) return 'Waltz';
-  return '8-count';
+  return classifyDanceFeel({ title: meta?.title, music: meta?.music, level: meta?.level, rawText });
 }
 
 function parseCountCeiling(value) {
@@ -1578,7 +1583,7 @@ function detectPdfSections(lines, parsedSteps, meta = {}, rawText = '') {
   const partPattern = /^\s*part/i;
   const markerPattern = /(tag|restart)s?/i;
   const stepishPattern = /^(\d|[&])/.test.bind(/^(\d|[&])/);
-  const namedStepPattern = /^((side|step|walk|rock|cross|behind|together|touch|tap|point|heel|toe|kick|shuffle|sailor|mambo|weave|vine|nightclub|lunge|lock|scissor|scissors|coaster|skate|pivot|turn|charleston|monterey|stomp|swivel|twinkle|roll|drag|brush|flick|hitch|run|slide|ball|hold|syncopated|wizard|diamond))/i;
+  const namedStepPattern = STEP_NAME_PATTERN;
 
   function ensureCurrent(kind = 'section', title = '') {
     if (!current) {
@@ -1719,6 +1724,12 @@ function parsePdfTextToDance(rawText) {
     const match = joined.match(/(absolute beginner|beginner|improver|intermediate|advanced)/i);
     if (match) meta.level = titleCaseWords(match[1]);
   }
+  const headerFields = extractHeaderFields(lines);
+  if (!meta.choreographer && headerFields.choreographer) meta.choreographer = headerFields.choreographer;
+  if (!meta.music && headerFields.music) meta.music = headerFields.music;
+  if (!meta.level && headerFields.level) meta.level = headerFields.level;
+  if (!meta.count && headerFields.count) { meta.count = headerFields.count; meta.counts = headerFields.count; }
+  if (!meta.wall && headerFields.wall) { meta.wall = headerFields.wall; meta.walls = headerFields.wall; }
   const steps = [];
   let inSteps = false;
   for (const line of lines) {
@@ -1726,7 +1737,9 @@ function parsePdfTextToDance(rawText) {
     if (/^steps?/i.test(line)) { inSteps = true; continue; }
     if (!inSteps && /^(count|counts|wall|walls|level|music|song|choreographer|choreographed by)/i.test(line)) continue;
     if (!inSteps && line === title) continue;
-    const stepish = /^(\d|[&])/.test(line) || /^((side|step|walk|rock|cross|behind|together|touch|tap|point|heel|toe|kick|shuffle|sailor|mambo|weave|vine|nightclub|lunge|lock|scissor|scissors|coaster|skate|pivot|turn|charleston|monterey|stomp|swivel|twinkle|roll|drag|brush|flick|hitch|run|slide|ball|hold|syncopated|wizard|diamond))/i.test(line);
+    if (/^(?:tag|restart|bridge)\b/i.test(line)) { steps.push(buildPdfMarker(line)); inSteps = true; continue; }
+    if (/\bcounts?\b/i.test(line) && /\bwalls?\b/i.test(line)) continue;
+    const stepish = /^(\d|[&])/.test(line) || STEP_NAME_PATTERN.test(line);
     if (!stepish) continue;
     inSteps = true;
     const parsed = parseStepLine(line, steps.length);
@@ -1739,12 +1752,11 @@ function parsePdfTextToDance(rawText) {
 async function enhanceParsedPdfDance(parsed, rawText) {
   const base = parsed && typeof parsed === 'object' ? JSON.parse(JSON.stringify(parsed)) : { ok: true, title: 'Imported PDF', steps: [] };
   if (!rawText || (!openaiClient && !geminiApiKey)) return base;
-  const trimmedText = String(rawText || '').slice(0, 24000);
-  const prompt = `Clean this imported line-dance PDF parse into strict JSON only. Keep it factual and based on the supplied text.\nReturn an object with keys: title, choreographer, music, level, count, counts, wall, walls, steps, sections, importLog, danceType, danceFeel, phraseCounts, partCount, sectionCount.\nEach step must be an object with keys: counts, count, name, description, foot.\nNever invent steps that are not supported by the PDF text. Merge broken lines when obvious.\nIf something is unknown, leave it as an empty string.\nPDF text:\n${trimmedText}\n\nCurrent heuristic parse:\n${JSON.stringify(base).slice(0, 12000)}`;
+  const prompt = buildCorrectionUserPrompt({ base, rawText });
   try {
     const ai = await runSiteHelperAI({
       preferredModel: 'gemini',
-      system: 'You repair imported line-dance worksheet data. Output JSON only. No markdown. No commentary.',
+      system: buildCorrectionSystemPrompt(),
       prompt
     });
     const cleanedText = String(ai && ai.text || '').trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
