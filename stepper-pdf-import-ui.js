@@ -324,14 +324,32 @@
           setStatus('error', 'Paste some dance text first.');
           return;
         }
-        setStatus('loading', 'Parsing pasted dance...');
-        const pasted = parsePastedDance(raw);
-        if (!pasted.steps.length) {
-          setStatus('error', 'Could not find any steps in that pasted dance.');
-          return;
+        setStatus('loading', 'Parsing pasted dance with AI...');
+        let data = null;
+        // Prefer the same smart backend parser the PDF upload uses so pasted
+        // dances get the top-100 stepsheet knowledge + AI correction.
+        try {
+          const importCore = getImportCore();
+          if (importCore && typeof importCore.requestTextParse === 'function') {
+            const result = await importCore.requestTextParse(raw);
+            if (result && result.data && Array.isArray(result.data.steps) && result.data.steps.length) {
+              data = await importCore.enrichImportedData(result.data, result.base);
+            }
+          }
+        } catch (_) {
+          // Backend unreachable / "failed to fetch" — fall through to local parse.
+          setStatus('loading', 'Backend unavailable — parsing pasted dance locally...');
         }
-        const enriched = await enrichPastedDataLikePdfParser(pasted);
-        const ok = await applyToEditor(sanitizeImportData(enriched));
+        // Local fallback so a network error never blocks a paste import.
+        if (!data || !((data.steps || []).length)) {
+          const pasted = parsePastedDance(raw);
+          if (!pasted.steps.length) {
+            setStatus('error', 'Could not find any steps in that pasted dance.');
+            return;
+          }
+          data = await enrichPastedDataLikePdfParser(pasted);
+        }
+        const ok = await applyToEditor(sanitizeImportData(data));
         if (ok) overlay.classList.remove('active');
       });
     }
@@ -384,7 +402,9 @@
     } catch (err) {
       const message = err && err.message ? err.message : 'Could not reach the server.';
       const isNetworkError = !err || !err.status;
-      setStatus('error', isNetworkError ? ('Network error: ' + message) : message);
+      setStatus('error', isNetworkError
+        ? ('Network error: ' + message + ' If this keeps happening, paste the dance text into the box below instead.')
+        : message);
     }
   }
 
