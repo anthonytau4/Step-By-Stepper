@@ -54,12 +54,19 @@
   }
 
   function updateButtonVisibility() {
-    const btn = document.getElementById('stepper-pdf-import-btn');
-    if (!btn) return;
     const show = isEditorVisible();
-    btn.style.opacity = show ? '1' : '0';
-    btn.style.pointerEvents = show ? 'auto' : 'none';
-    btn.style.transform = show ? 'translateY(0)' : 'translateY(20px)';
+    const btn = document.getElementById('stepper-pdf-import-btn');
+    if (btn) {
+      btn.style.opacity = show ? '1' : '0';
+      btn.style.pointerEvents = show ? 'auto' : 'none';
+      btn.style.transform = show ? 'translateY(0)' : 'translateY(20px)';
+    }
+    // The Remaster button lives on the Sheet tab (preview route) only.
+    const remaster = document.getElementById('stepper-remaster-btn');
+    if (remaster) {
+      const route = (document.documentElement.getAttribute('data-stepper-route') || '').toLowerCase();
+      remaster.classList.toggle('stepper-remaster-visible', show && route === 'preview');
+    }
   }
 
   function scheduleVisibilityRefresh() {
@@ -136,6 +143,45 @@
         }
         #stepper-pdf-import-btn:active { transform: translateY(0) scale(0.98); }
         #stepper-pdf-import-btn svg { width: 18px; height: 18px; fill: currentColor; flex-shrink: 0; }
+
+        /* Remaster button (Sheet tab only) */
+        #stepper-remaster-btn {
+          position: fixed;
+          bottom: 142px;
+          right: 20px;
+          z-index: 9998;
+          display: none;
+          align-items: center;
+          gap: 8px;
+          padding: 12px 22px;
+          border: none;
+          border-radius: 999px;
+          background: linear-gradient(135deg, #f59e0b 0%, #ec4899 50%, #8b5cf6 100%);
+          color: #fff;
+          font-size: 14px;
+          font-weight: 700;
+          letter-spacing: 0.04em;
+          cursor: pointer;
+          box-shadow: 0 8px 28px rgba(236,72,153,0.45), inset 0 1px 0 rgba(255,255,255,0.2);
+          transition: transform 0.25s cubic-bezier(.4,0,.2,1), box-shadow 0.25s, opacity 0.35s;
+          overflow: hidden;
+        }
+        #stepper-remaster-btn.stepper-remaster-visible { display: flex; }
+        #stepper-remaster-btn:hover { transform: translateY(-3px) scale(1.03); box-shadow: 0 14px 40px rgba(236,72,153,0.55), inset 0 1px 0 rgba(255,255,255,0.25); }
+        #stepper-remaster-btn:active { transform: translateY(0) scale(0.98); }
+        #stepper-remaster-btn[disabled] { opacity: 0.7; cursor: default; transform: none; }
+        #stepper-remaster-btn svg { width: 18px; height: 18px; fill: currentColor; flex-shrink: 0; }
+        #stepper-remaster-toast {
+          position: fixed; bottom: 200px; right: 20px; z-index: 10001;
+          max-width: 320px; padding: 12px 16px; border-radius: 12px;
+          background: rgba(17,17,27,0.95); color: #e5e7eb; font-size: 13px; line-height: 1.5;
+          box-shadow: 0 10px 30px rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.12);
+          opacity: 0; transform: translateY(8px); transition: opacity .25s, transform .25s;
+          pointer-events: none;
+        }
+        #stepper-remaster-toast.stepper-remaster-toast-show { opacity: 1; transform: translateY(0); }
+        #stepper-remaster-toast.err { border-color: rgba(248,113,113,0.5); }
+        #stepper-remaster-toast.ok { border-color: rgba(74,222,128,0.5); }
 
         /* Modal overlay */
         #stepper-pdf-modal-overlay {
@@ -244,6 +290,13 @@
         Import PDF
       </button>
 
+      <button id="stepper-remaster-btn" data-testid="remaster-button" title="Use AI to reformat this dance into a clean, correctly-structured stepsheet">
+        <svg viewBox="0 0 24 24"><path d="M12 2l1.9 4.6L18.5 8l-4.6 1.9L12 14.5l-1.9-4.6L5.5 8l4.6-1.4L12 2zm6 10l1 2.4 2.4 1-2.4 1-1 2.4-1-2.4-2.4-1 2.4-1L18 12zM6 13l.8 2 2 .8-2 .8L6 19l-.8-2.4-2-.8 2-.8L6 13z"/></svg>
+        Remaster
+      </button>
+
+      <div id="stepper-remaster-toast" role="status" aria-live="polite"></div>
+
       <div id="stepper-pdf-modal-overlay" data-testid="pdf-import-modal">
         <div id="stepper-pdf-modal">
           <h2>Import from PDF</h2>
@@ -277,6 +330,28 @@
     startTabWatcher();
     startImportUiWatcher();
     updateButtonVisibility();
+  }
+
+  const REMASTER_DATA_KEY = 'linedance_builder_data_v13';
+  function readCurrentSnapshot() {
+    try { const raw = localStorage.getItem(REMASTER_DATA_KEY); return raw ? JSON.parse(raw) : null; }
+    catch (_) { return null; }
+  }
+  function countSnapshotSteps(snap) {
+    if (!snap || !Array.isArray(snap.sections)) return 0;
+    return snap.sections.reduce((sum, s) => sum + (s && Array.isArray(s.steps) ? s.steps.length : 0), 0);
+  }
+  let remasterToastTimer = 0;
+  function showRemasterToast(message, type) {
+    const el = document.getElementById('stepper-remaster-toast');
+    if (!el) return;
+    el.textContent = String(message || '');
+    el.className = type ? type : '';
+    el.classList.add('stepper-remaster-toast-show');
+    if (remasterToastTimer) clearTimeout(remasterToastTimer);
+    if (type === 'ok' || type === 'err') {
+      remasterToastTimer = window.setTimeout(() => el.classList.remove('stepper-remaster-toast-show'), 4500);
+    }
   }
 
   function bindEvents() {
@@ -351,6 +426,43 @@
         }
         const ok = await applyToEditor(sanitizeImportData(data));
         if (ok) overlay.classList.remove('active');
+      });
+    }
+
+    const remasterBtn = document.getElementById('stepper-remaster-btn');
+    if (remasterBtn) {
+      remasterBtn.addEventListener('click', async () => {
+        if (remasterBtn.dataset.busy === '1') return;
+        const snapshot = readCurrentSnapshot();
+        if (!snapshot || !countSnapshotSteps(snapshot)) {
+          showRemasterToast('Nothing to remaster yet — build or import a dance first.', 'err');
+          return;
+        }
+        remasterBtn.dataset.busy = '1';
+        remasterBtn.setAttribute('disabled', 'disabled');
+        const originalHtml = remasterBtn.innerHTML;
+        remasterBtn.innerHTML = originalHtml.replace('Remaster', 'Remastering…');
+        showRemasterToast('Remastering your dance with AI, using the top-5 stepsheet formats…', '');
+        try {
+          const importCore = getImportCore();
+          if (!importCore || typeof importCore.requestRemaster !== 'function') throw new Error('Remaster is unavailable in this build.');
+          const result = await importCore.requestRemaster(snapshot);
+          if (!result || !result.data || !Array.isArray(result.data.steps) || !result.data.steps.length) {
+            throw new Error('The remaster came back empty.');
+          }
+          const ok = await applyToEditor(sanitizeImportData(result.data));
+          showRemasterToast(ok
+            ? '✨ Remastered! Your sheet is cleaned up, re-sectioned and consistently formatted.'
+            : 'Could not apply the remastered dance.', ok ? 'ok' : 'err');
+        } catch (err) {
+          const msg = err && err.message ? err.message : 'Remaster failed.';
+          const isNetwork = !err || !err.status;
+          showRemasterToast((isNetwork ? 'Network error: ' : '') + msg, 'err');
+        } finally {
+          remasterBtn.removeAttribute('disabled');
+          remasterBtn.dataset.busy = '';
+          remasterBtn.innerHTML = originalHtml;
+        }
       });
     }
   }

@@ -13,8 +13,11 @@ import {
   extractHeaderFields,
   normalizeCountNotation,
   classifyDanceFeel,
+  countBeatsForStep,
   buildCorrectionSystemPrompt,
-  buildCorrectionUserPrompt
+  buildCorrectionUserPrompt,
+  buildRemasterSystemPrompt,
+  buildRemasterUserPrompt
 } from "./stepsheet-knowledge.mjs";
 
 dotenv.config();
@@ -1550,27 +1553,26 @@ function autoSectionizeSteps(parsedSteps, size) {
   const steps = Array.isArray(parsedSteps) ? parsedSteps.slice() : [];
   const sectionSize = Math.max(1, Number(size) || 8);
   if (!steps.length) return [{ id: 'pdfsec_1', title: '', kind: 'section', steps: [] }];
+  /* Split by counts *accumulated per section*, resetting each time a section
+     fills up. This keeps working when a sheet restarts its counts every
+     phrase (1-8, 1-8, ...) instead of numbering straight through — the old
+     approach used an ever-growing absolute boundary and dumped everything
+     after the first phrase into one giant section. */
   const sections = [];
-  let current = { id: 'pdfsec_1', title: '', kind: 'section', steps: [] };
-  let currentBoundary = sectionSize;
+  let current = null;
+  let beatsInSection = 0;
   for (let i = 0; i < steps.length; i += 1) {
     const step = steps[i];
-    current.steps.push(step);
-    if (step && step.marker) continue;
-    const ceiling = parseCountCeiling(step?.counts || step?.count || '');
-    const countsText = String(step?.counts || step?.count || '');
-    const reachedBoundary = current.steps.length > 0 && (
-      ceiling >= currentBoundary ||
-      new RegExp(`(?:^|\D)${currentBoundary}(?:\D|$)`).test(countsText)
-    );
-    const isLast = i === steps.length - 1;
-    if ((reachedBoundary || isLast) && current.steps.length) {
+    if (!current) {
+      current = { id: `pdfsec_${sections.length + 1}`, title: '', kind: 'section', steps: [] };
       sections.push(current);
-      currentBoundary += sectionSize;
-      if (!isLast) current = { id: `pdfsec_${sections.length + 1}`, title: '', kind: 'section', steps: [] };
+      beatsInSection = 0;
     }
+    current.steps.push(step);
+    if (step && step.marker) continue; // markers ride along but don't advance the count
+    beatsInSection += countBeatsForStep(step);
+    if (beatsInSection >= sectionSize) current = null;
   }
-  if (current.steps.length && sections[sections.length - 1] !== current) sections.push(current);
   return sections.filter((section) => Array.isArray(section.steps) && section.steps.length);
 }
 
@@ -1749,14 +1751,15 @@ function parsePdfTextToDance(rawText) {
   return { ok: true, ...meta, title: meta.title || 'Imported PDF', steps, sections: sectionMeta.sections, importLog: buildPdfImportLog(meta, sectionMeta), danceType: sectionMeta.danceType, danceFeel: sectionMeta.danceFeel, phraseCounts: sectionMeta.phraseCounts, partCount: sectionMeta.partCount, sectionCount: sectionMeta.sectionCount, tagCount: sectionMeta.tagCount, restartCount: sectionMeta.restartCount };
 }
 
-async function enhanceParsedPdfDance(parsed, rawText) {
+async function enhanceParsedPdfDance(parsed, rawText, opts = {}) {
   const base = parsed && typeof parsed === 'object' ? JSON.parse(JSON.stringify(parsed)) : { ok: true, title: 'Imported PDF', steps: [] };
   if (!rawText || (!openaiClient && !geminiApiKey)) return base;
-  const prompt = buildCorrectionUserPrompt({ base, rawText });
+  const prompt = opts.userPrompt || buildCorrectionUserPrompt({ base, rawText });
+  const system = opts.system || buildCorrectionSystemPrompt();
   try {
     const ai = await runSiteHelperAI({
       preferredModel: 'gemini',
-      system: buildCorrectionSystemPrompt(),
+      system,
       prompt
     });
     const cleanedText = String(ai && ai.text || '').trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
@@ -2064,6 +2067,67 @@ app.post('/api/pdf/parse-text', async (req, res) => {
     return res.json(parsed);
   } catch (error) {
     return res.status(error.status || 500).json({ ok:false, error: error?.message || 'Could not parse that pasted dance.' });
+  }
+});
+/* Flatten an editor snapshot ({ meta, sections:[{ name, steps }] }) back into
+   plain stepsheet text so it can be re-run through the parser/remaster pass. */
+function danceSnapshotToText(dance) {
+  if (!dance || typeof dance !== 'object') return '';
+  const meta = dance.meta && typeof dance.meta === 'object' ? dance.meta : dance;
+  const lines = [];
+  const title = String(meta.title || '').trim();
+  if (title) lines.push(title);
+  const choreographer = String(meta.choreographer || '').trim();
+  if (choreographer) lines.push('Choreographed by: ' + choreographer);
+  const stats = [];
+  const totalCounts = String(meta.counts || meta.count || '').trim();
+  const walls = String(meta.walls || meta.wall || '').trim();
+  const level = String(meta.level || '').trim();
+  if (totalCounts) stats.push(totalCounts + ' Count');
+  if (walls) stats.push(walls + ' Wall');
+  if (level) stats.push(level);
+  if (stats.length) lines.push(stats.join('  '));
+  const music = String(meta.music || '').trim();
+  if (music) lines.push('Music: ' + music);
+  lines.push('');
+  const sections = Array.isArray(dance.sections) ? dance.sections : [];
+  sections.forEach((section) => {
+    const name = String((section && (section.name || section.title)) || '').trim();
+    if (name) lines.push(name);
+    const steps = Array.isArray(section && section.steps) ? section.steps : [];
+    steps.forEach((step) => {
+      if (step && (step.type === 'marker' || step.marker || step.markerType)) {
+        const kind = titleCaseWords(step.markerType || 'tag');
+        const note = String((step.note || step.description) || '').trim();
+        lines.push(note ? `${kind}: ${note}` : kind);
+        return;
+      }
+      const count = String((step && (step.count || step.counts)) || '').trim();
+      const description = String((step && (step.description || step.name)) || '').trim();
+      if (!count && !description) return;
+      lines.push((count ? count + ' ' : '') + description);
+    });
+    lines.push('');
+  });
+  return lines.join('\n').trim();
+}
+/* Remaster: rewrite an existing dance into one clean, correctly-formatted
+   stepsheet using AI grounded in the top-5 stepsheet formats. Falls back to
+   the heuristic reformat (count normalisation + re-sectioning) with no key. */
+app.post('/api/dance/remaster', async (req, res) => {
+  try {
+    const text = danceSnapshotToText(req.body?.dance || req.body || {});
+    if (!text) return res.status(400).json({ ok:false, error:'There is no dance to remaster yet.' });
+    const base = parsePdfTextToDance(text);
+    const remastered = await enhanceParsedPdfDance(base, text, {
+      system: buildRemasterSystemPrompt(),
+      userPrompt: buildRemasterUserPrompt({ base, rawText: text })
+    });
+    remastered.remastered = true;
+    remastered.source = 'remaster';
+    return res.json(remastered);
+  } catch (error) {
+    return res.status(error.status || 500).json({ ok:false, error: error?.message || 'Could not remaster that dance.' });
   }
 });
 app.get("/api/cloud-saves", requireGoogleUser, async (req, res) => {

@@ -177,6 +177,27 @@ export function phraseCountsForFeel(feel) {
   return String(feel || '').trim().toLowerCase() === 'waltz' ? 6 : 8;
 }
 
+/**
+ * Estimate how many counts a single step spans from its count label, so
+ * sections can be split by accumulated beats rather than by an absolute
+ * running total. This is what makes sectioning robust to sheets that
+ * restart their counts every phrase (1-8, 1-8, ...) instead of numbering
+ * straight through (1..32).
+ *   "5"        -> 1     "1 & 2" -> 2 (two beats)
+ *   "1-4"      -> 4     ""/"&a" -> 1 (never zero)
+ */
+export function countBeatsForStep(step) {
+  const raw = String((step && (step.count || step.counts)) || '').trim();
+  if (!raw) return 1;
+  const rangeMatch = raw.match(/(\d+)\s*(?:-|–|—|to|through)\s*(\d+)/i);
+  if (rangeMatch) {
+    const span = Math.abs(Number(rangeMatch[2]) - Number(rangeMatch[1])) + 1;
+    return span > 0 ? span : 1;
+  }
+  const tokens = raw.match(/\d+/g);
+  return tokens && tokens.length ? tokens.length : 1;
+}
+
 /* ── AI correction knowledge ───────────────────────────────────────────
  * The layout guide is the "knowledge of the top 100 stepsheets" that the
  * model reads before repairing an extraction. */
@@ -299,6 +320,59 @@ export function buildCorrectionUserPrompt({ base, rawText, maxTextChars = 24000,
     trimmedText,
     '',
     'CURRENT HEURISTIC PARSE (correct and complete this):',
+    baseJson
+  ].join('\n');
+}
+
+/* ── Remaster knowledge ────────────────────────────────────────────────
+ * The 5 stepsheet formats that cover almost every published line-dance
+ * sheet. The remaster pass rewrites a messy/inconsistent dance into one
+ * clean sheet that follows these conventions. */
+export const TOP_5_STEPSHEET_FORMATS = `THE 5 MOST COMMON LINE-DANCE STEPSHEET FORMATS:
+
+1. COPPERKNOB CLASSIC — a header block (Title, Choreographer, Count/Wall/Level, Music) then left-aligned count blocks ("1-2", "3&4", "5-6-7-8"), one action phrase per line, 8-count phrases with no explicit section labels.
+2. SECTION-HEADED (Kickit style) — the same header block, then explicit section headings like "Section 1 (1-8)", "[9-16]" or a short bold title, each followed by its steps.
+3. PHRASED / PART DANCE (AABBC...) — named parts ("Part A", "Part B"), a stated sequence, and Tags/Restarts/Bridges called out at their walls.
+4. TWO-COLUMN — counts in a left column and the description on the right, sometimes with wall-facing notes; reads the same as classic once flattened.
+5. WALTZ / 6-COUNT — phrases of 6 (1,2,3 / 4,5,6) in 3/4 timing, gentler cross/step/together wording.
+
+REMASTERING RULES (apply regardless of the original format):
+- Keep the choreography exactly as given — never add, remove or reorder moves. Only reformat, merge broken lines and clarify wording.
+- Give every step a concise Title-Case move name plus a clean, full description.
+- Normalise counts ("1 - 2" -> "1-2", "1&2" -> "1 & 2") and set foot (R/L/Both/Either) from the wording.
+- Re-split into correct 8-count phrases (6 for a waltz) when the sections are uneven, unless the dance is clearly a named-part dance (then keep the parts).
+- Keep Tags, Restarts and Bridges as markers in their original positions.`;
+
+export function buildRemasterSystemPrompt() {
+  return [
+    'You are an expert line-dance stepsheet editor. You know the 5 most common stepsheet formats and how a clean, teachable sheet should read.',
+    'Your job: take one existing dance (which may be messy, unevenly sectioned, or inconsistently worded) and REMASTER it into a single clean, correctly-formatted stepsheet.',
+    'Never change the choreography itself — do not invent, drop or reorder steps. Only reformat, merge broken lines, normalise counts, name moves consistently, fix sectioning and clarify descriptions.',
+    'Output JSON ONLY. No markdown, no code fences, no commentary.',
+    '',
+    TOP_5_STEPSHEET_FORMATS
+  ].join('\n');
+}
+
+export function buildRemasterUserPrompt({ base, rawText, maxTextChars = 24000, maxBaseChars = 12000 } = {}) {
+  const trimmedText = String(rawText || '').slice(0, maxTextChars);
+  const baseJson = (() => {
+    try { return JSON.stringify(base || {}).slice(0, maxBaseChars); }
+    catch { return '{}'; }
+  })();
+  return [
+    'Return a single JSON object with these keys:',
+    '  title, choreographer, music, level, count, counts, wall, walls,',
+    '  steps, sections, importLog, danceType, danceFeel, phraseCounts, partCount, sectionCount.',
+    'Each step object: { counts, count, name, description, foot }.',
+    'Each section object: { title, kind, steps }. "kind" is "part" for a named part, otherwise "section".',
+    'Remaster the dance below into clean, consistent, correctly-sectioned form following the 5-format conventions.',
+    'Preserve every move; only improve formatting, naming, counts, foot and section boundaries. Keep tags/restarts/bridges as markers in place.',
+    '',
+    'CURRENT DANCE (text form):',
+    trimmedText,
+    '',
+    'CURRENT STRUCTURED PARSE (rebuild this cleaner):',
     baseJson
   ].join('\n');
 }
