@@ -439,9 +439,62 @@
     };
   }
 
+  async function requestRemaster(dance) {
+    const payload = dance && typeof dance === 'object' ? dance : readEditorSnapshot();
+    if (!payload || typeof payload !== 'object') throw new Error('There is no dance to remaster yet.');
+    const retryableStatuses = new Set([0, 404, 405, 413, 422, 502, 503, 504]);
+    const candidates = getApiBaseCandidates(window.STEPPER_API_BASE);
+    let lastError = null;
+
+    for (const base of candidates) {
+      const endpoint = base + '/api/dance/remaster';
+      try {
+        const resp = await fetch(endpoint, {
+          method: 'POST',
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dance: payload })
+        });
+        const contentType = (resp.headers.get('content-type') || '').toLowerCase();
+        const isJson = contentType.includes('application/json');
+        const data = isJson ? await resp.json().catch(() => null) : null;
+
+        if (resp.ok && data && data.ok) {
+          rememberApiBase(base);
+          return { base, endpoint, data };
+        }
+
+        const bodyPreview = data
+          ? ''
+          : (await resp.text().catch(() => '')).trim().replace(/\s+/g, ' ').slice(0, 120);
+        const message = data && (data.detail || data.error)
+          ? (data.detail || data.error)
+          : `Remaster hit ${endpoint}, but the server responded with ${contentType || 'non-JSON content'}${bodyPreview ? `. Received ${bodyPreview}.` : '.'}`;
+        const error = new Error(message);
+        error.status = resp.status;
+        error.endpoint = endpoint;
+        error.retryable = !isJson || retryableStatuses.has(Number(resp.status));
+        lastError = error;
+        if (error.retryable && base !== candidates[candidates.length - 1]) continue;
+        throw error;
+      } catch (err) {
+        lastError = err;
+        const status = Number(err && err.status || 0);
+        const retryable = Boolean(err && err.retryable)
+          || !status
+          || retryableStatuses.has(status)
+          || /Failed to fetch|NetworkError|Load failed/i.test(String(err && err.message || ''));
+        if (retryable && base !== candidates[candidates.length - 1]) continue;
+        throw err;
+      }
+    }
+
+    throw lastError || new Error('Could not reach the remaster backend.');
+  }
+
   window.StepperPdfImportCore = {
     requestPdfParse,
     requestTextParse,
+    requestRemaster,
     enrichImportedData,
     buildEditorSnapshot,
     writeEditorSnapshot
