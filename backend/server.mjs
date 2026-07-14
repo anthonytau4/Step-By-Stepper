@@ -14,6 +14,8 @@ import {
   normalizeCountNotation,
   classifyDanceFeel,
   countBeatsForStep,
+  classifySectionHeader,
+  classifySectionKind,
   buildCorrectionSystemPrompt,
   buildCorrectionUserPrompt,
   buildRemasterSystemPrompt,
@@ -1563,13 +1565,20 @@ function autoSectionizeSteps(parsedSteps, size) {
   let beatsInSection = 0;
   for (let i = 0; i < steps.length; i += 1) {
     const step = steps[i];
+    const isMarker = !!(step && (step.marker || step.markerType));
+    // A marker that falls between phrases attaches to the just-closed section
+    // instead of starting a lonely marker-only section.
+    if (isMarker && !current && sections.length) {
+      sections[sections.length - 1].steps.push(step);
+      continue;
+    }
     if (!current) {
       current = { id: `pdfsec_${sections.length + 1}`, title: '', kind: 'section', steps: [] };
       sections.push(current);
       beatsInSection = 0;
     }
     current.steps.push(step);
-    if (step && step.marker) continue; // markers ride along but don't advance the count
+    if (isMarker) continue; // markers ride along but don't advance the count
     beatsInSection += countBeatsForStep(step);
     if (beatsInSection >= sectionSize) current = null;
   }
@@ -1577,97 +1586,130 @@ function autoSectionizeSteps(parsedSteps, size) {
 }
 
 function detectPdfSections(lines, parsedSteps, meta = {}, rawText = '') {
-  const sections = [];
-  let current = null;
-  let stepCursor = 0;
-  let sawExplicitSection = false;
-  const sectionSplitPattern = /section/i;
-  const partPattern = /^\s*part/i;
-  const markerPattern = /(tag|restart)s?/i;
-  const stepishPattern = /^(\d|[&])/.test.bind(/^(\d|[&])/);
-  const namedStepPattern = STEP_NAME_PATTERN;
+  const danceFeel = guessDanceFeel(meta, rawText);
+  const phraseCounts = danceFeel === 'Waltz' ? 6 : 8;
+  const stepishPattern = (value) => /^(\d|[&])/.test(String(value || ''));
+  const pureSteps = Array.isArray(parsedSteps) ? parsedSteps.filter((s) => s && !s.marker && !s.markerType) : [];
+  let cursor = 0;
+  const takeStep = (line) => {
+    const step = pureSteps[cursor] || parseStepLine(line, cursor);
+    cursor += 1;
+    return step;
+  };
 
-  function ensureCurrent(kind = 'section', title = '') {
-    if (!current) {
-      current = { id: `pdfsec_${sections.length + 1}`, title: String(title || '').trim(), kind, steps: [] };
-      sections.push(current);
-    }
-    return current;
-  }
-
-  function pushNewSection(kind = 'section', title = '') {
-    current = { id: `pdfsec_${sections.length + 1}`, title: kind === 'part' ? String(title || '').trim() : '', kind, steps: [] };
-    sections.push(current);
-    return current;
-  }
+  /* Buckets: the body (auto-8-count unless explicit headers), any explicit
+     regular sections, and the ending (always peeled out to sit last). Tags,
+     restarts and bridges stay as inline markers wherever they appear. */
+  const bodyItems = [];
+  const explicitSections = [];
+  let endingItems = null;
+  let sawExplicitRegular = false;
+  let target = bodyItems;
 
   for (const rawLine of lines) {
     const line = cleanPdfLine(rawLine);
     if (!line) continue;
 
-    if (markerPattern.test(line)) {
-      ensureCurrent();
-      current.steps.push(buildPdfMarker(line));
-      continue;
+    const header = classifySectionHeader(line);
+    if (header) {
+      if (header.type === 'ending') {
+        if (!endingItems) endingItems = [];
+        target = endingItems;
+        continue;
+      }
+      if (header.type === 'tag' || header.type === 'restart' || header.type === 'bridge') {
+        target.push(buildPdfMarker(line, header.type));
+        continue;
+      }
+      if (header.type === 'part') {
+        const sec = { title: header.label, kind: 'part', steps: [] };
+        explicitSections.push(sec);
+        target = sec.steps;
+        sawExplicitRegular = true;
+        continue;
+      }
+      if (header.type === 'section') {
+        const sec = { title: '', kind: 'section', steps: [] };
+        explicitSections.push(sec);
+        target = sec.steps;
+        sawExplicitRegular = true;
+        continue;
+      }
     }
 
-    if (partPattern.test(line)) {
-      sawExplicitSection = true;
-      pushNewSection('part', line);
-      continue;
-    }
+    if (/\bcounts?\b/i.test(line) && /\bwalls?\b/i.test(line)) continue;
 
-    if (sectionSplitPattern.test(line) && line.length <= 80) {
-      sawExplicitSection = true;
-      pushNewSection('section', '');
-      continue;
-    }
-
-    const stepish = stepishPattern(line) || namedStepPattern.test(line);
+    const stepish = stepishPattern(line) || STEP_NAME_PATTERN.test(line);
     if (!stepish) continue;
-    ensureCurrent();
-    const step = parsedSteps[stepCursor] || parseStepLine(line, stepCursor);
-    if (step) {
-      current.steps.push(step);
-      stepCursor += 1;
-    }
+    const step = takeStep(line);
+    if (step) target.push(step);
   }
 
-  if (!sections.length) {
-    sections.push({ id: 'pdfsec_1', title: '', kind: 'section', steps: Array.isArray(parsedSteps) ? parsedSteps.slice() : [] });
-  } else if (stepCursor < parsedSteps.length) {
-    const tail = sections[sections.length - 1];
-    tail.steps = tail.steps.concat(parsedSteps.slice(stepCursor));
+  let regularSections = [];
+  if (sawExplicitRegular) {
+    if (bodyItems.length) regularSections.push({ title: '', kind: 'section', steps: bodyItems });
+    explicitSections.forEach((sec) => regularSections.push(sec));
+  } else {
+    regularSections = autoSectionizeSteps(bodyItems, phraseCounts).map((sec) => ({ title: '', kind: 'section', steps: sec.steps }));
+  }
+  if (!regularSections.length && !(endingItems && endingItems.length)) {
+    regularSections = [{ title: '', kind: 'section', steps: pureSteps.slice() }];
   }
 
-  const danceFeel = guessDanceFeel(meta, rawText);
-  const phraseCounts = danceFeel === 'Waltz' ? 6 : 8;
-  const explicitSections = sections
-    .map((section, index) => ({
-      id: `pdfsec_${index + 1}`,
-      title: section.kind === 'part' ? String(section.title || '').trim() : '',
-      kind: section.kind || 'section',
-      steps: Array.isArray(section.steps) ? section.steps : []
-    }))
-    .filter((section) => section.steps.length);
+  const finalSections = regularSections.filter((sec) => Array.isArray(sec.steps) && sec.steps.length);
+  if (endingItems && endingItems.length) {
+    finalSections.push({ title: 'Ending', kind: 'ending', steps: endingItems });
+  }
 
-  const normalizedSections = sawExplicitSection
-    ? explicitSections
-    : autoSectionizeSteps(parsedSteps, phraseCounts).map((section, index) => ({ ...section, id: `pdfsec_${index + 1}`, title: '' }));
+  const normalizedSections = finalSections.map((section, index) => ({
+    id: `pdfsec_${index + 1}`,
+    title: section.kind === 'ending' ? 'Ending' : (section.kind === 'part' ? String(section.title || '').trim() : ''),
+    kind: section.kind || 'section',
+    steps: Array.isArray(section.steps) ? section.steps : []
+  })).filter((section) => section.steps.length);
+
+  const countMarkers = (type) => normalizedSections.reduce((sum, section) => sum + section.steps.filter((step) => step && step.markerType === type).length, 0);
   const normalizedPartCount = normalizedSections.filter((section) => section.kind === 'part').length;
-  const sectionCount = normalizedSections.length;
-  const tagCount = normalizedSections.reduce((sum, section) => sum + (Array.isArray(section.steps) ? section.steps.filter((step) => step && step.markerType === 'tag').length : 0), 0);
-  const restartCount = normalizedSections.reduce((sum, section) => sum + (Array.isArray(section.steps) ? section.steps.filter((step) => step && step.markerType === 'restart').length : 0), 0);
+  const endingCount = normalizedSections.filter((section) => section.kind === 'ending').length;
   return {
     sections: normalizedSections,
     partCount: normalizedPartCount,
-    sectionCount,
-    tagCount,
-    restartCount,
+    sectionCount: normalizedSections.length,
+    tagCount: countMarkers('tag'),
+    restartCount: countMarkers('restart'),
+    endingCount,
     danceType: normalizedPartCount > 0 ? 'Part dance' : 'Non part dance',
     danceFeel,
     phraseCounts
   };
+}
+
+/* Re-sectionize a list of sections into clean 8-count phrases while KEEPING
+   any structured sections (named / part / tag / ending) intact, and making
+   sure ending sections always sit last. Used by the AI path so an ending is
+   never flattened back into the numbered body. */
+function resectionizePreservingSpecial(sections, phraseCounts) {
+  const source = Array.isArray(sections) ? sections : [];
+  const out = [];
+  source.forEach((sec) => {
+    const kind = sec && sec.kind ? sec.kind : 'section';
+    const title = String((sec && (sec.title || sec.name)) || '').trim();
+    const steps = Array.isArray(sec && sec.steps) ? sec.steps : [];
+    if (!steps.length) return;
+    if (kind === 'part' || kind === 'ending' || kind === 'tag' || title) {
+      out.push({ title, kind, steps });
+    } else {
+      autoSectionizeSteps(steps, phraseCounts).forEach((chunk) => out.push({ title: '', kind: 'section', steps: chunk.steps }));
+    }
+  });
+  const nonEnding = out.filter((sec) => sec.kind !== 'ending');
+  const ending = out.filter((sec) => sec.kind === 'ending');
+  return nonEnding.concat(ending).map((sec, index) => ({
+    id: `pdfsec_${index + 1}`,
+    title: sec.kind === 'ending' ? 'Ending' : (sec.kind === 'part' ? sec.title : (sec.title || '')),
+    kind: sec.kind,
+    steps: sec.steps
+  }));
 }
 
 function buildPdfImportLog(meta, sectionMeta) {
@@ -1739,7 +1781,7 @@ function parsePdfTextToDance(rawText) {
     if (/^steps?/i.test(line)) { inSteps = true; continue; }
     if (!inSteps && /^(count|counts|wall|walls|level|music|song|choreographer|choreographed by)/i.test(line)) continue;
     if (!inSteps && line === title) continue;
-    if (/^(?:tag|restart|bridge)\b/i.test(line)) { steps.push(buildPdfMarker(line)); inSteps = true; continue; }
+    if (classifySectionHeader(line)) { inSteps = true; continue; } // headers/markers handled in detectPdfSections
     if (/\bcounts?\b/i.test(line) && /\bwalls?\b/i.test(line)) continue;
     const stepish = /^(\d|[&])/.test(line) || STEP_NAME_PATTERN.test(line);
     if (!stepish) continue;
@@ -1748,7 +1790,7 @@ function parsePdfTextToDance(rawText) {
     if (parsed) steps.push(parsed);
   }
   const sectionMeta = detectPdfSections(lines, steps, meta, text);
-  return { ok: true, ...meta, title: meta.title || 'Imported PDF', steps, sections: sectionMeta.sections, importLog: buildPdfImportLog(meta, sectionMeta), danceType: sectionMeta.danceType, danceFeel: sectionMeta.danceFeel, phraseCounts: sectionMeta.phraseCounts, partCount: sectionMeta.partCount, sectionCount: sectionMeta.sectionCount, tagCount: sectionMeta.tagCount, restartCount: sectionMeta.restartCount };
+  return { ok: true, ...meta, title: meta.title || 'Imported PDF', steps, sections: sectionMeta.sections, importLog: buildPdfImportLog(meta, sectionMeta), danceType: sectionMeta.danceType, danceFeel: sectionMeta.danceFeel, phraseCounts: sectionMeta.phraseCounts, partCount: sectionMeta.partCount, sectionCount: sectionMeta.sectionCount, tagCount: sectionMeta.tagCount, restartCount: sectionMeta.restartCount, endingCount: sectionMeta.endingCount };
 }
 
 async function enhanceParsedPdfDance(parsed, rawText, opts = {}) {
@@ -1776,10 +1818,15 @@ async function enhanceParsedPdfDance(parsed, rawText, opts = {}) {
     if (!merged.steps.length) merged.steps = base.steps || [];
     const fallbackSectionMeta = detectPdfSections(String(rawText || '').replace(/\r/g, '').split('\n').map(cleanPdfLine).filter(Boolean), merged.steps, merged, rawText);
     const aiSections = Array.isArray(merged.sections) ? merged.sections : [];
-    merged.sections = aiSections.length ? aiSections.map((section, index) => ({
+    merged.sections = aiSections.length ? aiSections.map((section, index) => {
+      const rawTitle = cleanPdfLine(section && (section.title || section.name) || '');
+      const sectionKind = classifySectionKind(section && section.kind, rawTitle);
+      const sectionTitle = sectionKind === 'ending' ? 'Ending'
+        : (sectionKind === 'part' || sectionKind === 'tag' ? rawTitle : '');
+      return {
       id: `pdfsec_${index + 1}`,
-      title: cleanPdfLine(section && (section.title || section.name) || ''),
-      kind: /^part$/i.test(String(section && section.kind || '')) || /^part\b/i.test(String(section && (section.title || section.name) || '')) ? 'part' : 'section',
+      title: sectionTitle,
+      kind: sectionKind,
       steps: Array.isArray(section && section.steps) ? section.steps.map((step, stepIndex) => {
         if (step && (step.marker || step.markerType)) {
           return buildPdfMarker(step.rawLine || step.description || step.name || '', step.markerType || 'marker');
@@ -1792,18 +1839,20 @@ async function enhanceParsedPdfDance(parsed, rawText, opts = {}) {
           foot: inferFootFromPdfText(step && (step.description || step.name || step.foot) || '') || 'Either'
         };
       }).filter(step => step.description) : []
-    })) : fallbackSectionMeta.sections;
+    }; }) : fallbackSectionMeta.sections;
     merged.partCount = Number.isFinite(Number(merged.partCount)) ? Number(merged.partCount) : merged.sections.filter(section => section.kind === 'part').length;
     merged.sectionCount = Number.isFinite(Number(merged.sectionCount)) ? Number(merged.sectionCount) : merged.sections.length;
     merged.danceType = String(merged.danceType || (merged.partCount > 0 ? 'Part dance' : 'Non part dance')).trim() || 'Non part dance';
     merged.danceFeel = String(merged.danceFeel || fallbackSectionMeta.danceFeel || '').trim() || '8-count';
     merged.phraseCounts = Number.isFinite(Number(merged.phraseCounts)) ? Number(merged.phraseCounts) : Number(fallbackSectionMeta.phraseCounts || (merged.danceFeel === 'Waltz' ? 6 : 8));
-    if (!merged.partCount) {
-      merged.sections = autoSectionizeSteps(merged.steps, merged.phraseCounts).map((section, index) => ({ ...section, id: `pdfsec_${index + 1}`, title: '' }));
-      merged.sectionCount = merged.sections.length;
-      merged.partCount = merged.sections.filter(section => section.kind === 'part').length;
-      merged.danceType = merged.partCount > 0 ? 'Part dance' : 'Non part dance';
-    }
+    // Re-split plain sections into 8-count phrases but keep named/part/tag/
+    // ending sections intact (and keep any ending last), so an Ending is never
+    // flattened back into the numbered body.
+    merged.sections = resectionizePreservingSpecial(merged.sections, merged.phraseCounts);
+    merged.sectionCount = merged.sections.length;
+    merged.partCount = merged.sections.filter(section => section.kind === 'part').length;
+    merged.endingCount = merged.sections.filter(section => section.kind === 'ending').length;
+    merged.danceType = merged.partCount > 0 ? 'Part dance' : 'Non part dance';
     merged.tagCount = Number.isFinite(Number(merged.tagCount)) ? Number(merged.tagCount) : merged.sections.reduce((sum, section) => sum + (Array.isArray(section.steps) ? section.steps.filter((step) => step && step.markerType === 'tag').length : 0), 0);
     merged.restartCount = Number.isFinite(Number(merged.restartCount)) ? Number(merged.restartCount) : merged.sections.reduce((sum, section) => sum + (Array.isArray(section.steps) ? section.steps.filter((step) => step && step.markerType === 'restart').length : 0), 0);
     merged.importLog = Object.assign({}, buildPdfImportLog(merged, { danceType: merged.danceType, danceFeel: merged.danceFeel, phraseCounts: merged.phraseCounts, partCount: merged.partCount, sectionCount: merged.sectionCount, tagCount: merged.tagCount, restartCount: merged.restartCount }), merged.importLog || {});

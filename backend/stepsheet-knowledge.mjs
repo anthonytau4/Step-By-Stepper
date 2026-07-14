@@ -177,6 +177,35 @@ export function phraseCountsForFeel(feel) {
   return String(feel || '').trim().toLowerCase() === 'waltz' ? 6 : 8;
 }
 
+/* ── Section / marker header detection ──────────────────────────────────
+ * Recognise the header lines that name a block on a stepsheet so tags,
+ * restarts, bridges and — importantly — the ENDING land in the right place
+ * instead of being swept into a numbered section. Returns { type, label }
+ * or null. Only fires on short, header-like lines (never on a step line). */
+export function classifySectionHeader(line) {
+  var raw = String(line || '').trim();
+  if (!raw) return null;
+  if (/^[&\d]/.test(raw)) return null;      // starts with a count -> it's a step
+  if (raw.length > 50) return null;          // too long to be a header
+  if (/^(?:ending|the\s+ending|final(?:e)?|big\s*finish|to\s*finish|to\s*end)\b/i.test(raw)) return { type: 'ending', label: 'Ending' };
+  if (/^tags?\b/i.test(raw)) return { type: 'tag', label: 'Tag' };
+  if (/^restarts?\b/i.test(raw)) return { type: 'restart', label: 'Restart' };
+  if (/^bridge\b/i.test(raw)) return { type: 'bridge', label: 'Bridge' };
+  if (/^part\b/i.test(raw)) return { type: 'part', label: titleCaseWords(raw) };
+  if (/\bsection\b/i.test(raw)) return { type: 'section', label: '' };
+  return null;
+}
+
+/** Normalise an AI/section kind + title into one of our known kinds. */
+export function classifySectionKind(rawKind, rawTitle) {
+  var k = String(rawKind || '').trim().toLowerCase();
+  var t = String(rawTitle || '').trim().toLowerCase();
+  if (k === 'ending' || /^(?:ending|the ending|final(?:e)?|big finish)\b/.test(t)) return 'ending';
+  if (k === 'tag' || /^tags?\b/.test(t)) return 'tag';
+  if (k === 'part' || /^part\b/.test(t)) return 'part';
+  return 'section';
+}
+
 /**
  * Estimate how many counts a single step spans from its count label, so
  * sections can be split by accumulated beats rather than by an absolute
@@ -224,9 +253,13 @@ export const STEPSHEET_LAYOUT_GUIDE = `HOW A LINE-DANCE STEPSHEET IS LAID OUT (t
 
 4. TAGS, RESTARTS & BRIDGES:
    - "Tag" = extra counts danced at a set point. "Restart" = begin the dance again from the top before finishing the wall. "Bridge" = a short linking section.
-   - Often written inline or as their own line: "Restart here on walls 3 and 6", "Tag (4 counts): ...". Keep them as markers in order, do not turn them into normal steps.
+   - Often written inline or as their own line: "Restart here on walls 3 and 6", "Tag (4 counts): ...". Keep them as markers/sections in order, do not turn them into normal numbered sections.
 
-5. WHAT TO IGNORE:
+5. ENDING (a.k.a. Final / Big Finish):
+   - A short closing sequence danced ONCE at the very end of the song, after the last wall. Sheets label it "Ending", "Final", "Finale" or "Big Finish".
+   - It is its own section and must ALWAYS come LAST. Give it the section title "Ending" with kind "ending" — never fold it into a numbered section (e.g. do not output it as "Section 5").
+
+6. WHAT TO IGNORE:
    - Page numbers, website URLs/footers, "Have fun!", contact details, and repeated running headers.`;
 
 /**
@@ -311,6 +344,7 @@ export function buildCorrectionUserPrompt({ base, rawText, maxTextChars = 24000,
     '  - "count"/"counts" at the top level (metadata) is the dance TOTAL count, not a single step.',
     '  - Split the steps into sections of one 8-count phrase each (6 counts for a waltz) unless the sheet gives explicit section/part labels.',
     '  - Preserve tags, restarts and bridges as markers in order: { marker: true, markerType: "tag"|"restart"|"bridge", description }.',
+    '  - If the sheet has an Ending / Final / Big Finish, output it as the LAST section with title "Ending" and kind "ending" — never as a numbered section.',
     '  - Drop page numbers, URLs, footers and running headers.',
     '',
     'REFERENCE EXAMPLES:',
@@ -341,7 +375,8 @@ REMASTERING RULES (apply regardless of the original format):
 - Give every step a concise Title-Case move name plus a clean, full description.
 - Normalise counts ("1 - 2" -> "1-2", "1&2" -> "1 & 2") and set foot (R/L/Both/Either) from the wording.
 - Re-split into correct 8-count phrases (6 for a waltz) when the sections are uneven, unless the dance is clearly a named-part dance (then keep the parts).
-- Keep Tags, Restarts and Bridges as markers in their original positions.`;
+- Keep Tags, Restarts and Bridges as markers in their original positions.
+- If there is an Ending / Final / Big Finish, keep it as the LAST section titled "Ending" (kind "ending"); never renumber it into the body.`;
 
 export function buildRemasterSystemPrompt() {
   return [
