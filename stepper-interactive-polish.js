@@ -28,6 +28,7 @@
     style.id = 'stepper-interactive-polish-style';
     style.textContent = [
       ':root{--sp-x:50vw;--sp-y:30vh;}',
+      ':where(button,input:not([type="checkbox"]):not([type="radio"]),textarea,select,dialog,[role="dialog"],[role="menu"],[role="listbox"],#print-sheet,[class*="rounded-"]:not(input[type="checkbox"]):not(input[type="radio"]):not(img):not(svg),[class*="stepper-"][class*="-box"],[class*="stepper-"][class*="-pill"]){border-radius:0!important;}',
       '#stepper-play-glow{position:fixed;inset:0;z-index:2147480000;pointer-events:none;opacity:.12;background:radial-gradient(360px circle at var(--sp-x) var(--sp-y),rgba(99,102,241,.22),transparent 72%);transition:opacity .3s ease;}',
       'body.stepper-studio-spark #stepper-play-glow{opacity:.38;background:radial-gradient(360px circle at var(--sp-x) var(--sp-y),rgba(129,140,248,.3),transparent 72%),radial-gradient(520px circle at calc(100vw - var(--sp-x)) 24%,rgba(236,72,153,.12),transparent 74%);}',
       '#stepper-play-dock{--sp-bg:rgba(255,255,255,.97);--sp-bg-2:#f8fafc;--sp-text:#111827;--sp-muted:#64748b;--sp-line:rgba(15,23,42,.14);--sp-accent:#4f46e5;--sp-accent-2:#7c3aed;position:fixed;left:max(14px,env(safe-area-inset-left));bottom:max(14px,env(safe-area-inset-bottom));z-index:2147482000;font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif;color:var(--sp-text);}',
