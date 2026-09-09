@@ -3,6 +3,7 @@
   window.__stepperRoutePathsInstalled = true;
 
   const ROUTE_STORAGE_KEY = 'stepperRouteBootstrap';
+  const rootPath = new URL('.', document.currentScript.src).pathname.replace(/\/$/, '');
 
   const ROUTES = {
     editor: '/editor/',
@@ -42,6 +43,7 @@
     '/settings/': 'settings',
     '/music': 'music',
     '/music/': 'music',
+    '/music/index.html': 'music',
     '/templates': 'templates',
     '/templates/': 'templates',
     '/tips': 'tips',
@@ -122,7 +124,7 @@
   }
 
   function canonicalPathFor(routeName){
-    return ROUTES[routeName] || ROUTES.editor;
+    return rootPath + (ROUTES[routeName] || ROUTES.editor);
   }
 
   function setCanonicalPath(routeName, replace){
@@ -243,30 +245,28 @@
   }
 
   function boot(){
-    /* On every page load / reload, always navigate to the editor (main page) */
-    reflectRouteState('editor');
-    setCanonicalPath('editor', true);
+    const requested = currentRouteFromPath() || 'editor';
+    reflectRouteState(requested);
     startWatching();
-    bindButtons();
     let tries = 0;
-    const timer = window.setInterval(() => {
-      tries += 1;
+    const apply = () => {
       bindButtons();
-      const build = getRouteButton('editor');
-      if (build && !build.__stepperBootClicked) {
-        build.__stepperBootClicked = true;
-        applyingRoute = true;
-        try { build.click(); } finally { window.setTimeout(() => { applyingRoute = false; }, 50); }
-      }
-      if ((build && tries > 2) || tries > 40) window.clearInterval(timer);
-    }, 250);
+      const button = getRouteButton(requested);
+      if (!button) return false;
+      setCanonicalPath(requested, true);
+      return clickRoute(requested);
+    };
+    if (apply()) return;
+    const timer = window.setInterval(() => {
+      if (apply() || ++tries > 80) window.clearInterval(timer);
+    }, 100);
   }
 
   window.__stepperRoutePaths = {
     go: function(routeName, opts){
       return goToRoute(routeName, !!(opts && opts.replace));
     },
-    paths: Object.assign({}, ROUTES),
+    paths: Object.fromEntries(Object.keys(ROUTES).map(name => [name, canonicalPathFor(name)])),
     current: function(){
       return currentRouteFromPath() || 'editor';
     }

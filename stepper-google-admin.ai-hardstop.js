@@ -327,7 +327,7 @@
       name: String(step && step.name || 'Custom Step').trim() || 'Custom Step',
       description: String(step && (step.description || step.desc) || '').trim(),
       foot: String(step && step.foot || '').trim(),
-      weight: true,
+      weight: step && step.weight !== undefined ? step.weight : !/^(touch|kick|point|scuff|brush|hitch|hold)\b/i.test(step && step.name || ''),
       showNote: !!(step && step.note),
       note: String(step && step.note || '').trim()
     };
@@ -338,12 +338,12 @@
   }
 
   function calculateCountSpan(step){
-    var cl = compactWhitespace(step && (step.count || step.counts) || '');
-    var nums = (cl.match(/\d+/g) || []).map(Number).filter(Number.isFinite);
-    return nums.length >= 2 ? Math.max(1, nums[nums.length - 1] - nums[0] + 1) : (nums.length === 1 ? nums[0] : 1);
+    const label = String(step && (step.count || step.counts) || '1').trim();
+    // Helper/glossary entries use a standalone number as a duration.
+    return /^\d+$/.test(label) ? Number(label) : (window.StepperDance.countInfo(label)?.span || 1);
   }
 
-  /* ── Split a section at a specific step index ── */
+
   function splitSectionAtStep(sectionIndex, stepIndex) {
     var data = ensureAppData();
     if (!Array.isArray(data.sections)) return;
@@ -718,20 +718,15 @@
   }
 
   function getLocalExpectedStartFoot(){
-    const data = readAppData();
-    const sections = Array.isArray(data && data.sections) ? data.sections : [];
-    let lastWeightFoot = '';
-    sections.forEach((section) => {
-      const steps = Array.isArray(section && section.steps) ? section.steps : [];
-      steps.forEach((step) => {
-        if (!step || typeof step !== 'object') return;
-        if (step.weight === false) return;
-        const foot = compactWhitespace(step.foot || '').toUpperCase();
-        if (foot === 'R' || foot === 'L') lastWeightFoot = foot;
-      });
-    });
-    return flipLocalFoot(lastWeightFoot);
+    const tools = window.__stepperDanceTools;
+    const data = tools.read();
+    const target = tools.selectedTarget();
+    const report = window.StepperDance.validate(data, tools.phrasing());
+    const anchor = target && report.trace.find(item => item.sectionId === target.sectionId && item.tagId === (target.tagId || null) && item.step.id === (target.beforeStepId || target.afterStepId));
+    const weight = anchor ? (target.beforeStepId ? anchor.before : anchor.after) : target ? window.StepperDance.initialWeight(data) : report.endWeight;
+    return window.StepperDance.other(weight) || window.StepperDance.foot(data.meta?.startFoot) || 'R';
   }
+
 
   function parseLocalRepeatedWalk(body){
     const source = normalizeLocalMotionText(body);
@@ -861,7 +856,10 @@
     const repeatedWalk = parseLocalRepeatedWalk(source);
     if (repeatedWalk) return Number(repeatedWalk.repeats || 0) || 1;
     if (/rock\s+back(?:,|\s+)recover/.test(source)) return 2;
-    if (/\b(?:coaster|sailor|shuffle|triple step|triple|chasse|kick ball change|mambo)\b/.test(source)) return 3;
+    if (/\bkick ball change\b/.test(source)) return 2;
+    if (/\b(?:grapevine|vine)\b/.test(source)) return 3;
+    if (/\b(?:touch|kick|point|brush|scuff|hitch|hold)\b/.test(source) && !/\b(?:step|rock|cross)\b/.test(source)) return 0;
+    if (/\b(?:coaster|sailor|shuffle|triple step|triple|chasse|mambo)\b/.test(source)) return 3;
     if (/\b(?:grapevine|vine|jazz box|rumba box|monterey|charleston)\b/.test(source)) return 4;
     if (/\b(?:step touch|side touch|touch side|heel touch|toe touch|tap touch)\b/.test(source)) return 1;
     if (/\bpivot\b/.test(source)) return 2;
@@ -983,6 +981,8 @@
   }
 
   function inferLocalStepDescription(body, count, startFoot){
+    const explicit = window.StepperDance.namedActions({ name:body, foot:startFoot || getLocalExpectedStartFoot() });
+    if (explicit) return explicit.join(', ') + '.';
     const source = normalizeLocalMotionText(body);
     const repeatedWalk = parseLocalRepeatedWalk(source);
     if (repeatedWalk) {
@@ -1143,60 +1143,21 @@
   }
 
   function applyHelperPlanToWorksheet(plan){
-    if (!plan || !Array.isArray(plan.steps) || !plan.steps.length) return { applied: false, message: '' };
-    const sectionSize = _getDanceStyleCountLimit();
-    let data = ensureAppData();
-    const forceFresh = !!(plan && plan.resetDance);
-    if ((forceFresh || shouldStartFreshWorksheet(plan.prompt)) && !currentWorksheetHasSteps()) {
-      data = createBlankAppData();
-    }
-    if (!data.meta || typeof data.meta !== 'object') data.meta = createBlankAppData().meta;
-    if (!Array.isArray(data.sections)) data.sections = [];
-    if (!data.sections.length) data.sections.push({ id:createLocalId('section'), name:'Section 1', steps:[] });
-    if (plan.meta && typeof plan.meta === 'object') {
-      if (plan.meta.title) data.meta.title = plan.meta.title;
-      if (plan.meta.counts) data.meta.counts = plan.meta.counts;
-      if (plan.meta.walls) data.meta.walls = plan.meta.walls;
-      if (plan.meta.type) data.meta.type = plan.meta.type;
-      if (plan.meta.level) data.meta.level = plan.meta.level;
-    }
-    let target = data.sections[data.sections.length - 1];
-    const wantsNewSection = !!(plan && plan.createSection) || /\b(new section|add a section|another section|new part|add a part)\b/i.test(String(plan.prompt || ''));
-    if (!target || wantsNewSection) {
-      target = { id:createLocalId('section'), name:`Section ${data.sections.length + 1}`, steps:[] };
-      data.sections.push(target);
-    }
-    if (!Array.isArray(target.steps)) target.steps = [];
-    /* ── Count existing steps to know when to create new section ── */
-    let countAccum = 0;
-    target.steps.forEach(function(step){
-      if (!step || step.type !== 'step') return;
-      countAccum += calculateCountSpan(step);
-    });
-    plan.steps.forEach(function(step){
-      var span = calculateCountSpan(step);
-      if (plan.steps.length > sectionSize && countAccum > 0 && countAccum + span > sectionSize) {
-        target = { id:createLocalId('section'), name:'Section ' + (data.sections.length + 1), steps:[] };
-        data.sections.push(target);
-        countAccum = 0;
-      }
-      target.steps.push(buildGlossaryApplyStep(step));
-      countAccum += span;
-    });
-    writeAppData(data);
-    updateSavedSignature('');
-    renderPages();
-    openBuildWorksheet();
-    const customCount = plan.steps.filter((step) => !step.fromGlossary).length;
-    const summary = plan.steps.slice(0, 6).map((step) => step.name).join(', ');
-    const bits = [`Done. I added ${plan.steps.length} step${plan.steps.length === 1 ? '' : 's'}.`];
-    if (plan.meta && plan.meta.title) bits.push(`Dance name set to ${plan.meta.title}.`);
-    if (plan.meta && plan.meta.counts) bits.push(`Counts set to ${plan.meta.counts}.`);
-    if (plan.meta && plan.meta.walls) bits.push(`Walls set to ${plan.meta.walls}.`);
-    if (summary) bits.push(`Added: ${summary}${plan.steps.length > 6 ? ', …' : '.'}`);
-    if (customCount) bits.push(`${customCount} of those step${customCount === 1 ? ' was' : 's were'} added as custom worksheet step${customCount === 1 ? '' : 's'} rather than glossary matches.`);
-    return { applied: true, message: bits.join(' ') };
+    if (!plan || !Array.isArray(plan.steps) || !plan.steps.length) return { applied:false, message:'No steps were supplied.' };
+    try {
+      const result = window.__stepperDanceTools.addSteps(plan.steps, {
+        meta: plan.meta,
+        target: plan.target,
+        revision: plan.revision,
+        createSection: !!plan.createSection || /\b(new section|another section|new part)\b/i.test(plan.prompt || '')
+      });
+      updateSavedSignature('');
+      renderPages();
+      openBuildWorksheet();
+      return result;
+    } catch (error) { return { applied:false, message:error.message || 'The steps could not be added.' }; }
   }
+
 
   function buildHelperFollowUp(plan){
     const needs = Array.isArray(plan && plan.needs) ? plan.needs : [];
@@ -1308,70 +1269,20 @@
       return { handled: true, message: 'I want to make sure I get this right. ' + (vagueNames ? 'The step ' + vagueNames + ' isn\'t specific enough for me to match confidently.' : 'That step isn\'t specific enough.') + ' Could you describe the footwork, direction, or give a standard name? For example: "vine right", "rock back recover", "coaster step", or describe it like "step right, cross behind, step right, touch".', applied: false };
     }
     /* ── Show confirmation preview instead of applying immediately ── */
-    state.chatPending = { type:'worksheet-confirm', prompt: mergedPrompt, meta: meta, steps: steps, createSection: !!(pending && pending.createSection) };
+    state.chatPending = { type:'worksheet-confirm', prompt: mergedPrompt, meta: meta, steps: steps, target: window.__stepperDanceTools.selectedTarget(), revision: window.__stepperDanceTools.revision(), createSection: !!(pending && pending.createSection) };
     const preview = buildStepPreviewMessage(steps, meta);
     return { handled: true, message: preview, applied: false, showConfirmButtons: true };
   }
 
-  function applyConfirmedHelperPlan(pending){
-    if (!pending || !Array.isArray(pending.steps) || !pending.steps.length) return { applied: false, message: '' };
-    /* ── Smart section splitting: respects 8-count / waltz ── */
-    const sectionSize = _getDanceStyleCountLimit();
-    let data = ensureAppData();
-    const forceFresh = !!(pending.resetDance);
-    if ((forceFresh || shouldStartFreshWorksheet(pending.prompt)) && !currentWorksheetHasSteps()) {
-      data = createBlankAppData();
-    }
-    if (!data.meta || typeof data.meta !== 'object') data.meta = createBlankAppData().meta;
-    if (!Array.isArray(data.sections)) data.sections = [];
-    if (!data.sections.length) data.sections.push({ id:createLocalId('section'), name:'Section 1', steps:[] });
-    if (pending.meta && typeof pending.meta === 'object') {
-      if (pending.meta.title) data.meta.title = pending.meta.title;
-      if (pending.meta.counts) data.meta.counts = pending.meta.counts;
-      if (pending.meta.walls) data.meta.walls = pending.meta.walls;
-      if (pending.meta.type) data.meta.type = pending.meta.type;
-      if (pending.meta.level) data.meta.level = pending.meta.level;
-    }
-    let target = data.sections[data.sections.length - 1];
-    const wantsNewSection = !!(pending.createSection) || /\b(new section|add a section|another section|new part|add a part)\b/i.test(String(pending.prompt || ''));
-    if (!target || wantsNewSection) {
-      target = { id:createLocalId('section'), name:'Section ' + (data.sections.length + 1), steps:[] };
-      data.sections.push(target);
-    }
-    if (!Array.isArray(target.steps)) target.steps = [];
-    /* ── Count existing steps to know when to create new section ── */
-    let countAccum = 0;
-    target.steps.forEach(function(step){
-      if (!step || step.type !== 'step') return;
-      countAccum += calculateCountSpan(step);
-    });
-    pending.steps.forEach(function(step){
-      var span = calculateCountSpan(step);
-      if (pending.steps.length > sectionSize && countAccum > 0 && countAccum + span > sectionSize) {
-        target = { id:createLocalId('section'), name:'Section ' + (data.sections.length + 1), steps:[] };
-        data.sections.push(target);
-        countAccum = 0;
-      }
-      target.steps.push(buildGlossaryApplyStep(step));
-      countAccum += span;
-    });
-    writeAppData(data);
-    updateSavedSignature('');
-    renderPages();
-    openBuildWorksheet();
-    var customCount = pending.steps.filter(function(step){ return !step.fromGlossary; }).length;
-    var summary = pending.steps.slice(0, 6).map(function(step){ return step.name; }).join(', ');
-    var bits = ['Done. I added ' + pending.steps.length + ' step' + (pending.steps.length === 1 ? '' : 's') + '.'];
-    if (pending.meta && pending.meta.title) bits.push('Dance name set to ' + pending.meta.title + '.');
-    if (pending.meta && pending.meta.counts) bits.push('Counts set to ' + pending.meta.counts + '.');
-    if (pending.meta && pending.meta.walls) bits.push('Walls set to ' + pending.meta.walls + '.');
-    if (summary) bits.push('Added: ' + summary + (pending.steps.length > 6 ? ', …' : '.'));
-    if (customCount) bits.push(customCount + ' of those step' + (customCount === 1 ? ' was' : 's were') + ' added as custom worksheet step' + (customCount === 1 ? '' : 's') + ' rather than glossary matches.');
-    return { applied: true, message: bits.join(' ') };
+  function applyConfirmedHelperPlan(plan){
+    return applyHelperPlanToWorksheet(plan);
   }
+
 
   function tryHandleSiteHelperLocally(question){
     const prompt = compactWhitespace(question);
+    if (/\b(help me|fix|repair)\b/i.test(prompt) && /\b(help me|weight|foot|feet|impossible|dance|sheet|flow|counts)\b/i.test(prompt)) { openBuildWorksheet(); return window.__stepperDanceTools.help(); }
+    if (/\b(check|validate)\b/i.test(prompt) && /\b(dance|sheet|weight|foot|feet|flow)\b/i.test(prompt)) return { handled:true, message:window.__stepperDanceTools.summary() };
     const hasPendingBuild = !!(state.chatPending && state.chatPending.type === 'worksheet-build');
     const hasPendingConfirm = !!(state.chatPending && state.chatPending.type === 'worksheet-confirm');
     if (!prompt) return null;
@@ -1891,7 +1802,7 @@
       createSection: true
     };
     var result = _applyStepsWithSmartSections(plan);
-    return { handled: true, message: '🔥 **Generated a 10/10 flow ' + (style === 'waltz' ? 'waltz' : '8-count') + ' section!**\n\n' + result.message + '\n\nSay "generate another random section" to keep building!' };
+    return { handled: true, message: '🔥 **Generated a ' + (style === 'waltz' ? 'waltz' : '8-count') + ' section!**\n\n' + result.message + '\n\nSay "generate another random section" to keep building!' };
   }
 
   function _parseStepSpan(countLabel){
@@ -1909,51 +1820,10 @@
 
   /* ── Smart section splitter that respects 8-count / waltz ── */
   function _applyStepsWithSmartSections(plan){
-    var countLimit = _getDanceStyleCountLimit();
-    var data = ensureAppData();
-    if (!data.meta || typeof data.meta !== 'object') data.meta = createBlankAppData().meta;
-    if (!Array.isArray(data.sections)) data.sections = [];
-    if (!data.sections.length) data.sections.push({ id: createLocalId('section'), name: 'Section 1', steps: [] });
-    if (plan.meta && typeof plan.meta === 'object') {
-      if (plan.meta.title) data.meta.title = plan.meta.title;
-      if (plan.meta.counts) data.meta.counts = plan.meta.counts;
-      if (plan.meta.walls) data.meta.walls = plan.meta.walls;
-      if (plan.meta.type) data.meta.type = plan.meta.type;
-      if (plan.meta.level) data.meta.level = plan.meta.level;
-    }
-    var target = data.sections[data.sections.length - 1];
-    var wantsNew = !!(plan.createSection) || /\b(new section|add a section|another section)\b/i.test(String(plan.prompt || ''));
-    if (!target || wantsNew) {
-      target = { id: createLocalId('section'), name: 'Section ' + (data.sections.length + 1), steps: [] };
-      data.sections.push(target);
-    }
-    if (!Array.isArray(target.steps)) target.steps = [];
-    var countAccum = 0;
-    target.steps.forEach(function(step){
-      if (!step || step.type !== 'step') return;
-      countAccum += calculateCountSpan(step);
-    });
-    var steps = Array.isArray(plan.steps) ? plan.steps : [];
-    steps.forEach(function(step){
-      var span = calculateCountSpan(step);
-      /* Auto-split into new section when count limit exceeded */
-      if (countAccum > 0 && countAccum + span > countLimit) {
-        target = { id: createLocalId('section'), name: 'Section ' + (data.sections.length + 1), steps: [] };
-        data.sections.push(target);
-        countAccum = 0;
-      }
-      target.steps.push(buildGlossaryApplyStep(step));
-      countAccum += span;
-    });
-    writeAppData(data);
-    updateSavedSignature('');
-    renderPages();
-    openBuildWorksheet();
-    var summary = steps.slice(0, 6).map(function(s){ return s.name; }).join(', ');
-    return { applied: true, message: 'Added ' + steps.length + ' step' + (steps.length === 1 ? '' : 's') + (summary ? ': ' + summary : '') + '.' };
+    return applyHelperPlanToWorksheet(plan);
   }
 
-  /* ── Add a step to the worksheet from the helper ── */
+
   function _quickAddStepToWorksheet(stepText){
     var parts = stepText.split(/[,;|]/).map(function(s){ return s.trim(); }).filter(Boolean);
     var stepName = parts[0] || stepText;
@@ -2036,12 +1906,15 @@
     /* ── Confirmation is handled locally, skip backend ── */
     if (hasPendingConfirm) return tryHandleSiteHelperLocally(prompt);
     if (!(hasPendingBuild || looksLikeDanceBuildPrompt(prompt))) return null;
+    const editTarget = window.__stepperDanceTools.selectedTarget();
+    const editRevision = window.__stepperDanceTools.revision();
     try {
       const data = await authFetch('/api/ai/worksheet-builder', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt,
+          insertionPoint: editTarget,
           history: (state.chatMessages || []).slice(-8).map((message) => ({ role: message.role, text: message.text })),
           pending: state.chatPending,
           dance: buildCurrentDanceEntry(),
@@ -2057,8 +1930,10 @@
           steps: Array.isArray(data.steps) ? data.steps : [],
           resetDance: !!data.resetDance,
           createSection: !!data.createSection,
+          target: editTarget,
+          revision: editRevision,
         });
-        return { handled: true, message: applied.message || String(data.reply || 'Done.').trim(), applied: true };
+        return { handled: true, message: applied.message || String(data.reply || 'Done.').trim(), applied: !!applied.applied };
       }
       return { handled: true, message: String((data && data.reply) || 'Tell me the dance name, counts, walls, and the step pattern you want added.').trim(), applied: false };
     } catch (_error) {
@@ -2079,64 +1954,28 @@
   }
 
   function autoGenerateCountsForWorksheet(){
-    const data = ensureAppData();
-    if (!data.meta || typeof data.meta !== 'object') data.meta = createBlankAppData().meta;
-    if (!Array.isArray(data.sections)) data.sections = [];
-    let sectionCounter = 0;
-    data.sections.forEach((section) => {
-      const steps = Array.isArray(section && section.steps) ? section.steps : [];
-      if (!steps.length) return;
-      sectionCounter += 1;
-      const labels = buildSectionCountLabels(steps.length);
-      steps.forEach((step, index) => {
-        if (!step || typeof step !== 'object') return;
-        step.count = String(labels[index] || `${index + 1}`).trim();
-      });
-    });
-    const totalCounts = Math.max(8, sectionCounter * 8);
-    data.meta.counts = String(totalCounts);
-    writeAppData(data);
+    const data = window.StepperDance.clone(ensureAppData());
+    window.StepperDance.renumber(data);
+    const report = window.StepperDance.validate(data);
+    data.meta.counts = String(report.totalCounts);
+    window.__stepperDanceTools.commit(data);
     updateSavedSignature('');
     renderPages(true);
     openBuildWorksheet();
-    return { totalCounts, sections: sectionCounter };
+    return { totalCounts:report.totalCounts, sections:data.sections.length };
   }
 
+
   function applyGeneratedCountLines(countLines, totalCounts){
-    const data = ensureAppData();
-    if (!data.meta || typeof data.meta !== 'object') data.meta = createBlankAppData().meta;
-    if (!Array.isArray(data.sections)) data.sections = [];
-    const lines = Array.isArray(countLines) ? countLines : [];
-    const flatSteps = [];
-    data.sections.forEach((section) => {
-      const steps = Array.isArray(section && section.steps) ? section.steps : [];
-      steps.forEach((step) => { if (step && typeof step === 'object') flatSteps.push(step); });
-    });
-    flatSteps.forEach((step, index) => {
-      const label = String(lines[index] || '').trim();
-      if (label) step.count = label;
-    });
-    if (String(totalCounts || '').trim()) data.meta.counts = String(totalCounts).trim();
-    writeAppData(data);
-    updateSavedSignature('');
-    renderPages();
-    openBuildWorksheet();
-    return true;
+    // AI positions must not replace the author's syncopated timing with evenly
+    // divided rows. The shared engine repositions the existing rhythms.
+    return autoGenerateCountsForWorksheet();
   }
 
   function applyStepToCurrentWorksheet(step){
-    const data = ensureAppData();
-    if (!data.meta || typeof data.meta !== 'object') data.meta = createBlankAppData().meta;
-    if (!Array.isArray(data.sections)) data.sections = [];
-    if (!data.sections.length) data.sections.push({ id:createLocalId('section'), name:'Section 1', steps:[] });
-    const target = data.sections[data.sections.length - 1];
-    if (!Array.isArray(target.steps)) target.steps = [];
-    target.steps.push(buildGlossaryApplyStep(step));
-    writeAppData(data);
-    updateSavedSignature('');
-    renderPages();
-    openBuildWorksheet();
-    return true;
+    const result = applyHelperPlanToWorksheet({ steps:[step] });
+    if (!result.applied) alert(result.message);
+    return !!result.applied;
   }
 
 
@@ -2146,6 +1985,7 @@
   let __stepperDecisionAudioApprove = null;
   let __stepperDecisionAudioDeny = null;
   let __stepperDecisionAudioUnlocked = false;
+
 
   function resolveDecisionSoundSrc(src){
     try {
@@ -3762,6 +3602,7 @@
       description,
       count: String(item.count || item.counts || '1').trim() || '1',
       foot: String(item.foot || '').trim(),
+      weight: typeof item.weight === 'boolean' ? item.weight : undefined,
       note: String(item.reason || item.note || '').trim()
     };
   }
@@ -3807,9 +3648,13 @@
     } catch (error) {
       state.aiDance.result = { mode, text: error.message || 'AI dance tool failed.', score: null, suggestions: [], countLines: [], totalCounts: '' };
       if (mode === 'counts') {
-        const local = autoGenerateCountsForWorksheet();
-        state.aiDance.result.text = `AI count generation had a wobble, so the site generated worksheet counts locally and set the dance to ${local.totalCounts} counts.`;
-        state.aiDance.result.totalCounts = String(local.totalCounts);
+        try {
+          const local = autoGenerateCountsForWorksheet();
+          state.aiDance.result.text = `Updated the count positions while preserving the rhythms (${local.totalCounts} counts).`;
+          state.aiDance.result.totalCounts = String(local.totalCounts);
+        } catch (countError) {
+          state.aiDance.result.text = countError.message;
+        }
       }
     } finally {
       state.aiDance.busy = false;
@@ -6398,6 +6243,9 @@ Premium: ${payload.context.isPremium ? 'yes' : 'no'}
 Online count: ${payload.context.onlineCount}
 Current dance title: ${payload.context.currentDanceTitle || 'none'}
 Current dance has unsaved changes: ${payload.context.hasUnsavedChanges ? 'yes' : 'no'}
+Worksheet (including foot and weight): ${JSON.stringify(payload.context.worksheet || {})}
+Insertion point: ${JSON.stringify(payload.context.insertionPoint || {})}
+Dance check: ${payload.context.danceCheck || ''}
 Conversation so far:
 ${historyText}
 
@@ -6466,7 +6314,11 @@ Newest user question: ${question}`;
         isPremium: isPremiumSession(),
         onlineCount: (state.presence && state.presence.onlineCount) || 0,
         currentDanceTitle: appData && appData.meta ? String(appData.meta.title || '').trim() : '',
-        hasUnsavedChanges: hasUnsavedChanges()
+        hasUnsavedChanges: hasUnsavedChanges(),
+        worksheet: appData,
+        phrasing: window.__stepperDanceTools.phrasing(),
+        insertionPoint: window.__stepperDanceTools.selectedTarget(),
+        danceCheck: window.__stepperDanceTools.summary()
       }
     };
     try {
@@ -6491,22 +6343,26 @@ Newest user question: ${question}`;
             text = 'Build or load a dance first, then ask me to judge it or add glossary-style ideas.';
           } else {
             try {
+              const suggestionRevision = window.__stepperDanceTools.revision();
+              const suggestionTarget = window.__stepperDanceTools.selectedTarget();
               const danceData = await authFetch('/api/ai/dance-tools', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   mode: danceToolMode,
                   prompt,
+                  insertionPoint: window.__stepperDanceTools.selectedTarget(),
                   dance,
                   approvedGlossary: (state.glossaryApproved || []).slice(0, 120)
                 })
               });
               const score = Number(danceData && danceData.flowScore || 0) || null;
               const suggestions = Array.isArray(danceData && danceData.suggestions) ? danceData.suggestions.map(normalizeAiSuggestion).filter(Boolean) : [];
+              if (danceToolMode === 'add' && suggestions.length) state.chatPending = { type:'worksheet-confirm', prompt, steps:suggestions, target:suggestionTarget, revision:suggestionRevision };
               const suggestionText = suggestions.length
                 ? '\n\nSuggestions:\n' + suggestions.slice(0, 3).map((item, index) => `${index + 1}. ${item.name || 'Suggestion'}${item.count ? ` (${item.count})` : ''}${item.foot ? ` [${item.foot}]` : ''} — ${item.description || item.reason || 'No extra description.'}`).join('\n')
                 : '';
-              text = `${String(danceData && danceData.text || '').trim() || (danceToolMode === 'add' ? 'I added some glossary-style improvement ideas for this worksheet.' : 'I judged the worksheet for flowability.')}${score ? `\n\nFlowability score: ${score}/10` : ''}${suggestionText}`.trim();
+              text = `${String(danceData && danceData.text || '').trim() || (danceToolMode === 'add' ? 'I prepared additions for your sheet. Use Approve to insert them.' : 'I judged the worksheet for flowability.')}${score ? `\n\nFlowability score: ${score}/10` : ''}${suggestionText}`.trim();
             } catch (error) {
               helperError = error;
             }

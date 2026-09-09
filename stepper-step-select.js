@@ -347,60 +347,40 @@
    */
   function mapDomSteps() {
     var main = document.querySelector('main');
-    if (!main) return null;
-
-    var sectionEls = [];
-    var rows = [];
-
-    // Sections are the top-level bordered containers inside main.
-    // They typically have .rounded-3xl or .rounded-2xl with a border or shadow.
-    var candidates = main.querySelectorAll(
-      '.rounded-3xl, .rounded-2xl, [class*="border"][class*="rounded"]'
-    );
-
-    // Deduplicate: keep only outermost section containers that are direct-ish children of main
-    var seen = new Set();
-    var sectionNodes = [];
-    for (var i = 0; i < candidates.length; i++) {
-      var node = candidates[i];
-      // Walk up to ensure no ancestor is also a candidate (pick outermost)
-      var dominated = false;
-      for (var p = node.parentElement; p && p !== main; p = p.parentElement) {
-        if (seen.has(p)) { dominated = true; break; }
-      }
-      if (!dominated) {
-        sectionNodes.push(node);
-        seen.add(node);
-      }
-    }
-
-    // For each section, find step rows.  Step rows are the repeated child divs
-    // that represent individual steps – typically inside a space-y container.
-    for (var si = 0; si < sectionNodes.length; si++) {
-      var sec = sectionNodes[si];
-      sectionEls.push(sec);
-      var stepRows = [];
-
-      // Look for a space-y container holding individual step rows
-      var container = sec.querySelector('[class*="space-y"]') || sec;
-      var children = container.children;
-      for (var ri = 0; ri < children.length; ri++) {
-        var row = children[ri];
-        // Skip obvious non-step elements (buttons, headings, inputs used as section title)
-        var tag = row.tagName;
-        if (tag === 'BUTTON' || tag === 'H1' || tag === 'H2' || tag === 'H3') continue;
-        if (row.querySelector('input[placeholder*="Section"]')) continue;
-        // Must have some visible content or child inputs to be a step row
-        if (row.offsetHeight < 8) continue;
-
-        row.setAttribute('data-section-idx', si);
-        row.setAttribute('data-step-idx', stepRows.length);
-        ensureDragHandle(row, si, stepRows.length);
-        stepRows.push(row);
-      }
-      rows.push(stepRows);
-    }
-
+    var data = readData();
+    if (!main || !data || !window.StepperDance) return null;
+    var headings = Array.from(main.querySelectorAll('input[placeholder="Section Title..."], input[placeholder="Part Title (Optional)..."]'));
+    var positions = window.StepperDance.locations(data);
+    var rows = [], sectionEls = [];
+    headings.forEach(function (heading, index) {
+      var location = positions[index];
+      if (!location) return;
+      var section = heading.parentElement.parentElement;
+      var container = section.children[1];
+      if (!container) return;
+      section.dataset.danceSectionId = location.section.id;
+      section.dataset.danceTagId = location.tagId || '';
+      var stepRows = Array.from(container.children).filter(function (row) {
+        return !!row.querySelector('input[placeholder="Move Name"], button[title="Remove Marker"]');
+      });
+      // Fail closed if the rendered worksheet is between React updates.
+      if (stepRows.length !== (location.section.steps || []).length) return;
+      stepRows.forEach(function (row, ri) {
+        var step = location.section.steps[ri];
+        row.dataset.danceSectionId = location.section.id;
+        row.dataset.danceTagId = location.tagId || '';
+        row.dataset.danceStepId = step.id;
+        if (!location.tagId) {
+          row.setAttribute('data-section-idx', location.sectionIndex);
+          row.setAttribute('data-step-idx', ri);
+        } else {
+          row.removeAttribute('data-section-idx');
+          row.removeAttribute('data-step-idx');
+        }
+        ensureDragHandle(row, location.sectionIndex, ri);
+      });
+      if (!location.tagId) { rows[location.sectionIndex] = stepRows; sectionEls[location.sectionIndex] = section; }
+    });
     domMap = { rows: rows, sectionEls: sectionEls };
     return domMap;
   }
@@ -424,11 +404,15 @@
     if (!row || !row.querySelector) return;
     var handle = row.querySelector('.stepper-step-dragger');
     if (!handle) {
-      handle = document.createElement('div');
+      handle = document.createElement('button');
+      handle.type = 'button';
       handle.className = 'stepper-step-dragger';
       handle.textContent = '⋮⋮';
-      handle.setAttribute('title', 'Drag step');
-      handle.setAttribute('draggable', 'true');
+      handle.setAttribute('title', 'Drag to move. Use Up or Down while focused.');
+      handle.setAttribute('aria-label', 'Move step ' + (ri + 1));
+      handle.setAttribute('draggable', 'false');
+      handle.style.cssText = 'width:36px;height:40px;border-radius:0;opacity:.85;touch-action:none;font-size:18px;';
+      row.style.paddingLeft = '46px';
       row.insertBefore(handle, row.firstChild);
     }
     handle.setAttribute('data-drag-sec', String(si));
@@ -707,29 +691,19 @@
   }
 
   function moveStep(fromSec, fromIdx, toSec, toIdx) {
-    var data = readData();
-    if (!data) return false;
-    var secs = getSections(data);
-    var srcSec = secs[fromSec];
-    var dstSec = secs[toSec];
-    if (!srcSec || !Array.isArray(srcSec.steps) || !dstSec || !Array.isArray(dstSec.steps)) return false;
-    if (fromIdx < 0 || fromIdx >= srcSec.steps.length) return false;
-    if (toIdx < 0) toIdx = 0;
-    if (toIdx > dstSec.steps.length) toIdx = dstSec.steps.length;
-
-    snapshot();
-    var moved = srcSec.steps.splice(fromIdx, 1)[0];
-    if (fromSec === toSec && fromIdx < toIdx) toIdx--;
-    moved.count = 'x';
-    if (typeof moved.counts === 'string') moved.counts = 'x';
-    dstSec.steps.splice(toIdx, 0, moved);
-
-    setSections(data, secs);
-    writeData(data);
-    selectedSteps = [{ sectionIndex: toSec, stepIndex: toIdx }];
-    scheduleRemap();
-    showToast('Step moved');
-    return true;
+    var data = readData(), secs = getSections(data);
+    if (!secs[fromSec]?.steps[fromIdx] || !secs[toSec]) return false;
+    try {
+      var result = window.StepperDance.move(data,
+        { sectionId:secs[fromSec].id, stepId:secs[fromSec].steps[fromIdx].id },
+        { sectionId:secs[toSec].id, beforeStepId:secs[toSec].steps[toIdx]?.id });
+      snapshot();
+      window.__stepperDanceTools.commit(result);
+      clearSelection();
+      scheduleRemap();
+      showToast('Step moved. Counts updated.');
+      return true;
+    } catch (error) { showToast(error.message); return false; }
   }
 
   /* ═══════════════════════ Insert Operations ═════════════════════════════ */
@@ -1257,54 +1231,119 @@
     // Keyboard shortcuts
     document.addEventListener('keydown', handleKeydown, true);
 
-    document.addEventListener('dragstart', function (e) {
-      var handle = e.target && e.target.closest ? e.target.closest('.stepper-step-dragger') : null;
-      if (!handle) return;
-      var sec = parseInt(handle.getAttribute('data-drag-sec'), 10);
-      var step = parseInt(handle.getAttribute('data-drag-step'), 10);
-      if (isNaN(sec) || isNaN(step)) return;
-      dragState.from = { sectionIndex: sec, stepIndex: step };
-      dragState.dragging = true;
-      try { e.dataTransfer.effectAllowed = 'move'; } catch (_) {}
-      document.documentElement.style.overflow = 'hidden';
-      document.body.style.overflow = 'hidden';
-    }, true);
-
-    document.addEventListener('dragover', function (e) {
-      if (!dragState.dragging) return;
-      var row = e.target && e.target.closest ? e.target.closest('[data-section-idx]') : null;
-      if (!row) return;
-      e.preventDefault();
-      clearDropTargets();
-      row.setAttribute('data-step-drop-target', 'true');
-      try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
-    }, true);
-
-    document.addEventListener('drop', function (e) {
-      if (!dragState.dragging || !dragState.from) return;
-      var row = e.target && e.target.closest ? e.target.closest('[data-section-idx]') : null;
-      clearDropTargets();
+    var pointer = null, scrollFrame = null;
+    function rowPosition(row) {
+      return { sectionId:row.dataset.danceSectionId, tagId:row.dataset.danceTagId || null, stepId:row.dataset.danceStepId };
+    }
+    function destinationAt(x, y) {
+      var element = document.elementFromPoint(x, y);
+      var row = element?.closest('[data-dance-step-id]');
+      var container = element?.closest('[data-dance-section-id]');
+      if (!container || !container.closest('main')) return null;
+      var pos = rowPosition(container);
+      var section = window.StepperDance.locate(readData(), pos)?.section;
+      if (!section) return null;
       if (row) {
-        e.preventDefault();
-        var toSec = parseInt(row.getAttribute('data-section-idx'), 10);
-        var toStep = parseInt(row.getAttribute('data-step-idx'), 10);
-        if (!isNaN(toSec) && !isNaN(toStep)) {
-          moveStep(dragState.from.sectionIndex, dragState.from.stepIndex, toSec, toStep);
-          dragState.justDropped = true;
-        }
+        var index = section.steps.findIndex(step => step.id === row.dataset.danceStepId);
+        var rect = row.getBoundingClientRect();
+        var after = y >= rect.top + rect.height / 2;
+        pos.beforeStepId = section.steps[index + (after ? 1 : 0)]?.id;
+        row.dataset.stepDropTarget = 'true';
+        row.style.borderTop = after ? '' : '3px solid #6366f1';
+        row.style.borderBottom = after ? '3px solid #6366f1' : '';
+      } else {
+        container.dataset.stepDropTarget = 'true';
       }
-      dragState.dragging = false;
-      dragState.from = null;
-      document.documentElement.style.overflow = '';
-      document.body.style.overflow = '';
+      return pos;
+    }
+    function clearMarks() {
+      document.querySelectorAll('[data-step-drop-target]').forEach(function (row) {
+        row.style.borderTop = ''; row.style.borderBottom = '';
+        row.removeAttribute('data-step-drop-target');
+      });
+    }
+    function stopPointer() {
+      if (scrollFrame) cancelAnimationFrame(scrollFrame);
+      scrollFrame = null;
+      pointer = null;
+      clearMarks();
+    }
+    function autoScroll() {
+      if (!pointer?.active) return;
+      var y = pointer.y, h = window.innerHeight;
+      if (y < 65) window.scrollBy(0, -12);
+      else if (y > h - 65) window.scrollBy(0, 12);
+      clearMarks();
+      pointer.destination = destinationAt(pointer.x, y);
+      scrollFrame = requestAnimationFrame(autoScroll);
+    }
+    document.addEventListener('pointerdown', function (event) {
+      var handle = event.target.closest?.('.stepper-step-dragger');
+      if (!handle || event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      handle.focus();
+      var row = handle.closest('[data-dance-step-id]');
+      pointer = { source:rowPosition(row), x:event.clientX, y:event.clientY, startX:event.clientX, startY:event.clientY, pointerId:event.pointerId, revision:window.__stepperDanceTools.revision(), active:false };
     }, true);
-
-    document.addEventListener('dragend', function () {
-      clearDropTargets();
-      dragState.dragging = false;
-      dragState.from = null;
-      document.documentElement.style.overflow = '';
-      document.body.style.overflow = '';
+    // The legacy row long-press menu must not start underneath a drag handle.
+    ['touchstart', 'mousedown'].forEach(function (type) {
+      document.addEventListener(type, function (event) {
+        if (event.target.closest?.('.stepper-step-dragger')) event.stopPropagation();
+      }, true);
+    });
+    document.addEventListener('pointermove', function (event) {
+      if (!pointer || pointer.pointerId !== event.pointerId) return;
+      pointer.x = event.clientX; pointer.y = event.clientY;
+      if (!pointer.active && Math.hypot(pointer.x-pointer.startX, pointer.y-pointer.startY) > 6) {
+        pointer.active = true;
+        autoScroll();
+      }
+      if (pointer.active) event.preventDefault();
+    }, { capture:true, passive:false });
+    document.addEventListener('pointerup', function (event) {
+      if (!pointer || pointer.pointerId !== event.pointerId) return;
+      var active = pointer.active, from = pointer.source, revision = pointer.revision;
+      clearMarks();
+      var destination = active ? destinationAt(event.clientX, event.clientY) : null;
+      stopPointer();
+      if (!destination) return;
+      try {
+        var data = window.StepperDance.move(readData(), from, destination);
+        window.__stepperDanceTools.commit(data, revision);
+        clearSelection(); scheduleRemap();
+        dragState.justDropped = true;
+        setTimeout(function () { dragState.justDropped = false; }, 200);
+        showToast('Step moved. Counts updated.');
+      } catch (error) { showToast(error.message); }
+    }, true);
+    document.addEventListener('pointercancel', stopPointer, true);
+    window.addEventListener('blur', stopPointer);
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') { stopPointer(); return; }
+      var handle = event.target.closest?.('.stepper-step-dragger');
+      if (!handle || !['ArrowUp', 'ArrowDown'].includes(event.key)) return;
+      event.preventDefault(); event.stopPropagation();
+      var data = readData(), source = rowPosition(handle.closest('[data-dance-step-id]'));
+      var all = window.StepperDance.locations(data);
+      var si = all.findIndex(item => item.section.id === source.sectionId && (item.tagId || null) === source.tagId);
+      var list = all[si].section.steps;
+      var index = list.findIndex(step => step.id === source.stepId);
+      var up = event.key === 'ArrowUp';
+      var destination = { sectionId:source.sectionId, tagId:source.tagId };
+      if ((up && index === 0) || (!up && index === list.length - 1)) {
+        var adjacent = all[si + (up ? -1 : 1)];
+        if (!adjacent) return;
+        destination = { sectionId:adjacent.section.id, tagId:adjacent.tagId, beforeStepId:up ? undefined : adjacent.section.steps[0]?.id };
+      } else destination.beforeStepId = list[index + (up ? -1 : 2)]?.id;
+      try {
+        window.__stepperDanceTools.commit(window.StepperDance.move(data, source, destination));
+        clearSelection(); scheduleRemap();
+        setTimeout(function () {
+          Array.from(document.querySelectorAll('[data-dance-step-id]')).find(row => row.dataset.danceStepId === source.stepId)?.querySelector('.stepper-step-dragger')?.focus();
+        }, 260);
+        showToast('Step moved. Counts updated.');
+      } catch (error) { showToast(error.message); }
     }, true);
 
     // Initial DOM mapping (retry until main exists)
@@ -1350,6 +1389,8 @@
     formatUnderline:     formatUnderline,
     formatStrikethrough: formatStrikethrough,
     clearFormatting:     clearFormatting,
+    moveStep:            moveStep,
+    mapDomSteps:         mapDomSteps,
     getSelection:        function () { return selectedSteps; },
     hasSelection:        function () { return selectedSteps.length > 0; },
     showToast:           showToast
