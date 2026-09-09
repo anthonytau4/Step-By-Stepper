@@ -112,3 +112,21 @@ test('all deployed editor entrypoints load the engine, UI, music and undo', () =
     }
   }
 });
+
+test('all deployed entrypoints expose the same tab bundle and virtual routes have fallbacks', () => {
+  const rootSources = [...fs.readFileSync(path.join(root, 'index.html'), 'utf8').matchAll(/<script[^>]*src="([^\"]+)"/g)]
+    .map(match => path.basename(match[1].split('?')[0]));
+  const expected = new Set(rootSources);
+  for (const entry of ['editor/index.html','sheet/index.html','featured-choreo/index.html','my-saved-dances/index.html','whats-new/index.html']) {
+    const sources = [...fs.readFileSync(path.join(root, entry), 'utf8').matchAll(/<script[^>]*src="([^\"]+)"/g)]
+      .map(match => path.basename(match[1].split('?')[0]));
+    assert.deepEqual(new Set(sources), expected, entry + ' tab bundle drifted from the main entrypoint');
+  }
+  for (const [route, title] of [['friends','Friends'],['glossary','Glossary'],['pdf-import','PDF Import'],['settings','Settings'],['templates','Templates'],['tips','Tips']]) {
+    const shim = path.join(root, route, 'index.html');
+    assert(fs.existsSync(shim), route + ' route fallback is missing');
+    const html = fs.readFileSync(shim, 'utf8');
+    assert.match(html, new RegExp('stepperRoute=' + route.replace('-', ''), 'i'), route + ' fallback does not select its tab');
+    assert.match(html, new RegExp('Step by Stepper · ' + title));
+  }
+});
