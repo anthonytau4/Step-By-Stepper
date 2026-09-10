@@ -1,3 +1,5 @@
+import StepperDance from '../stepper-dance-engine.js';
+import { runWorksheetProcess } from './worksheet-runner.mjs';
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -1325,24 +1327,13 @@ function normalizeGlossaryStepPayload(step, owner = {}) {
 }
 
 function serializeDanceForAi(dance = {}) {
-  const title = String(dance?.title || '').trim() || 'Untitled Dance';
-  const choreographer = String(dance?.choreographer || '').trim() || 'Uncredited';
-  const meta = `Title: ${title}
-Choreographer: ${choreographer}
-Level: ${String(dance?.level || '').trim()}
-Counts: ${String(dance?.counts || '').trim()}
-Walls: ${String(dance?.walls || '').trim()}`;
-  const sections = Array.isArray(dance?.snapshot?.data?.sections) ? dance.snapshot.data.sections : [];
-  const sectionText = sections.slice(0, 10).map((section, index) => {
-    const lines = (Array.isArray(section?.steps) ? section.steps : []).slice(0, 16).map((step) => {
-      return [String(step?.count || step?.counts || '').trim(), String(step?.name || '').trim(), String(step?.description || step?.desc || '').trim()].filter(Boolean).join(' - ');
-    }).filter(Boolean).join('\n');
-    return `Section ${index + 1}: ${String(section?.name || '').trim() || `Section ${index + 1}`}
-${lines}`;
-  }).join('\n\n');
-  return `${meta}
-
-${sectionText}`.trim();
+  const data = dance.snapshot?.data || { meta: {}, sections: [], tags: [] };
+  const phrasing = dance.snapshot?.phrasedTools || {};
+  const check = StepperDance.validate(data, phrasing);
+  return JSON.stringify({ worksheet: data, phrasing, weightAndCountCheck: {
+    issues: check.issues, endWeight: check.endWeight, firstFoot: check.firstFoot,
+    totalCounts: check.totalCounts
+  } });
 }
 
 function parseJsonFromAiText(text) {
@@ -1382,32 +1373,18 @@ async function runWorksheetBuilderPython(payload = {}) {
   }
   const pythonBin = String(process.env.PYTHON_BIN || 'python3').trim() || 'python3';
   const scriptPath = path.join(__dirname, 'ai_step_helper.py');
-  const { stdout } = await execFileAsync(pythonBin, [scriptPath], {
-    input: JSON.stringify(payload || {}),
-    maxBuffer: 5 * 1024 * 1024,
-    timeout: 12000,
-  });
-  return JSON.parse(String(stdout || '{}'));
+  return runWorksheetProcess(scriptPath, payload, pythonBin);
 }
 
 function buildFallbackCountLines(dance) {
-  const sections = Array.isArray(dance?.snapshot?.data?.sections) ? dance.snapshot.data.sections : [];
-  const lines = [];
-  let sectionCount = 0;
-  for (const section of sections) {
-    const steps = Array.isArray(section?.steps) ? section.steps : [];
-    if (!steps.length) continue;
-    sectionCount += 1;
-    const total = Math.max(1, steps.length);
-    for (let i = 0; i < total; i += 1) {
-      const start = Math.floor((i * 8) / total) + 1;
-      const end = Math.floor((((i + 1) * 8) - 1) / total) + 1;
-      lines.push(start === end ? String(start) : `${start}-${end}`);
-    }
+  const data = StepperDance.clone(dance?.snapshot?.data || { meta:{}, sections:[], tags:[] });
+  try {
+    StepperDance.renumber(data);
+    return { countLines:(data.sections || []).flatMap(section => (section.steps || []).filter(StepperDance.isStep).map(step => step.count)), totalCounts:String(StepperDance.validate(data).totalCounts) };
+  } catch (_) {
+    return { countLines:[], totalCounts:'' };
   }
-  return { countLines: lines, totalCounts: String(Math.max(8, sectionCount * 8 || 8)) };
 }
-
 
 
 function decodeBase64Pdf(value) {
@@ -1864,34 +1841,13 @@ async function enhanceParsedPdfDance(parsed, rawText, opts = {}) {
   }
 }
 function fallbackDanceTool(mode, dance, prompt) {
-  const sections = Array.isArray(dance?.snapshot?.data?.sections) ? dance.snapshot.data.sections : [];
-  const stepCount = sections.reduce((sum, section) => sum + (Array.isArray(section?.steps) ? section.steps.length : 0), 0);
-  if (mode === 'add') {
-    return {
-      text: `I could not get a clean AI tool reply, so here is a safe fallback. Add one smoother travelling step near the end of the current worksheet and keep the count simple so the flow stays readable. ${prompt ? `You asked for: ${prompt}` : ''}`.trim(),
-      flowScore: null,
-      suggestions: [{ name: 'Travelling Brush Step', description: 'Step forward with control, brush the free foot through, then settle into the next travelling action so the phrase breathes more cleanly.', count: '7&8', foot: 'Right', reason: 'Fallback glossary-style add-on while the AI response was messy.' }],
-      countLines: [],
-      totalCounts: ''
-    };
-  }
-  if (mode === 'counts') {
-    const generated = buildFallbackCountLines(dance);
-    return {
-      text: 'I generated worksheet counts in 8-count blocks and set the dance total for you.',
-      flowScore: null,
-      suggestions: [],
-      countLines: generated.countLines,
-      totalCounts: generated.totalCounts
-    };
-  }
-  const score = Math.max(5, Math.min(9, stepCount ? Math.round(Math.min(10, 5 + stepCount / 12)) : 5));
+  const data = dance.snapshot?.data || { meta:{}, sections:[], tags:[] };
+  const report = StepperDance.validate(data, dance.snapshot?.phrasedTools);
+  const generated = mode === 'counts' ? buildFallbackCountLines(dance) : { countLines:[], totalCounts:'' };
+  const detail = report.issues.map(issue => (issue.count ? 'Count ' + issue.count + ': ' : '') + issue.message).join('\n');
   return {
-    text: 'Fallback judging result: the worksheet structure is readable, but tighten any overcrowded phrases and keep repeated travelling patterns balanced so the dance feels smoother to teach and dance.',
-    flowScore: score,
-    suggestions: [],
-    countLines: [],
-    totalCounts: ''
+    text: (mode === 'add' ? 'The AI could not prepare an addition. Your sheet has not changed.\n' : '') + (detail || 'No count or weight conflicts found in the described footwork.') + (mode === 'counts' && generated.countLines.length ? '\nPrepared count positions while preserving the existing rhythms.' : ''),
+    flowScore:null, suggestions:[], ...generated
   };
 }
 
@@ -3428,6 +3384,13 @@ app.post('/api/ai/worksheet-builder', requireGoogleUser, async (req, res) => {
           count: item.count,
           foot: item.foot,
         }));
+    if (dance?.snapshot?.data) {
+      const check = StepperDance.validate(dance.snapshot.data, dance.snapshot.phrasedTools);
+      const insertion = req.body?.insertionPoint;
+      const anchor = insertion && check.trace.find(item => item.sectionId === insertion.sectionId && item.tagId === (insertion.tagId || null) && item.step.id === (insertion.beforeStepId || insertion.afterStepId));
+      const weight = anchor ? (insertion.beforeStepId ? anchor.before : anchor.after) : insertion ? StepperDance.initialWeight(dance.snapshot.data) : check.endWeight;
+      dance.expectedStartFoot = StepperDance.other(weight) || '';
+    }
     const result = await runWorksheetBuilderPython({ prompt, history, pending, dance, approvedGlossary: glossary });
     if (!result || typeof result !== 'object') {
       return res.status(502).json({ ok:false, error:'Worksheet builder returned no usable data.' });
@@ -3454,6 +3417,8 @@ app.post('/api/ai/dance-tools', requireGoogleUser, async (req, res) => {
       : 'You are an expert line-dance judge. Score the dance for flowability and teaching clarity. Return strict JSON with keys text, flowScore, suggestions, countLines, totalCounts. flowScore is 1-10. suggestions can be empty or contain tidy-up suggestions with name, description, count, foot, reason. Avoid markdown.');
   const userPrompt = `Mode: ${mode}
 User request: ${prompt || '(none)'}
+Rules: Track the supporting foot through every action, all sections, tags, restarts and the actual phrase order. A touch/kick/brush does not transfer weight; a hop may move the supporting foot. Preserve syncopation and beat duration. The opening moving foot must be free at a repeat. Do not declare ambiguous footwork possible or award a passing score when deterministic checks report conflicts. Suggestions are proposals and have not been inserted. Do not claim a worksheet write.
+Insertion point: ${JSON.stringify(req.body?.insertionPoint || null)}
 
 Current dance:
 ${danceText}
@@ -3472,6 +3437,7 @@ ${approved.map(item => `- ${item.name} [${item.foot}] ${item.counts}: ${item.des
       description: String(item?.description || item?.desc || '').trim(),
       count: String(item?.count || item?.counts || '1').trim(),
       foot: String(item?.foot || '').trim(),
+      weight: typeof item?.weight === 'boolean' ? item.weight : undefined,
       reason: String(item?.reason || item?.note || '').trim()
     })).filter(item => item.name || item.description) : [];
     res.json({ ok:true, provider: ai.provider, text: String(parsed.text || '').trim() || fallbackDanceTool(mode, dance, prompt).text, flowScore: Number(parsed.flowScore || 0) || null, suggestions, countLines: Array.isArray(parsed.countLines) ? parsed.countLines.map(item => String(item || '').trim()).filter(Boolean) : [], totalCounts: String(parsed.totalCounts || '').trim() });
@@ -3520,6 +3486,10 @@ Total steps: ${context.totalSteps || 0}
 Has unsaved changes: ${context.hasUnsavedChanges ? 'yes' : 'no'}
 Is phrased dance: ${context.isPhrased ? 'yes' : 'no'}
 Community glossary count: ${context.glossaryCount || (Array.isArray(db.approvedGlossarySteps) ? db.approvedGlossarySteps.length : 0)}
+Current worksheet: ${JSON.stringify(context.worksheet || {})}
+Phrase order: ${JSON.stringify(context.phrasing || {})}
+Insertion point: ${JSON.stringify(context.insertionPoint || null)}
+Known dance checks: ${String(context.danceCheck || '')}
 Conversation so far:
 ${trimmedHistory.map(item => `${item.role}: ${item.text}`).join('\n') || '(none)'}
 Newest user question: ${prompt}`;

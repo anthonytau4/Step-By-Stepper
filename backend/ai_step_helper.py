@@ -113,6 +113,9 @@ def current_meta(dance: Optional[dict]) -> Dict[str, str]:
 
 
 def expected_start_foot(dance: Optional[dict]) -> str:
+    checked = truthy_text((dance or {}).get('expectedStartFoot')).upper()
+    if checked in {'R', 'L'}:
+        return checked
     data = (((dance or {}).get('snapshot') or {}).get('data') or {})
     sections = data.get('sections') if isinstance(data.get('sections'), list) else []
     last_weight_foot = ''
@@ -401,6 +404,21 @@ def phrase_to_instruction(phrase: str, start_foot: str = '') -> str:
 def infer_step_description(body: str, count: str, start_foot: str = '') -> str:
     text = normalize_motion_text(body)
     lowered = text.lower()
+    explicit_foot = re.search(r'\b(right|left)\b', lowered)
+    first = ('R' if explicit_foot.group(1) == 'right' else 'L') if explicit_foot else start_foot
+    if first in {'R', 'L'} and not re.search(r'\d|turn|rolling', lowered):
+        r, l = ('Right', 'Left') if first == 'R' else ('Left', 'Right')
+        if re.search(r'\b(?:grapevine|vine)\b', lowered):
+            return f'Step {r} to side, cross {l} behind {r}, step {r} to side, touch {l} beside {r}.'
+        if 'coaster' in lowered:
+            return f'Step {r} back, step {l} beside {r}, step {r} forward.'
+        if 'kick ball change' in lowered:
+            return f'Kick {r} forward, step {r} ball beside {l}, step {l} in place.'
+        if 'sailor' in lowered:
+            return f'Cross {r} behind {l}, step {l} to side, step {r} to side.'
+        if 'rock' in lowered and 'recover' in lowered:
+            direction = 'back' if 'back' in lowered else 'forward'
+            return f'Rock {r} {direction}, recover {l}.'
     repeated_walk = parse_repeated_walk(text)
     if repeated_walk:
         sentence = build_walk_step_sequence(repeated_walk['repeats'], repeated_walk['direction'], start_foot)
@@ -450,7 +468,13 @@ def weight_change_count(body: str, count_label: str = '') -> int:
         return int(repeated_walk['repeats'])
     if re.search(r'rock\s+back(?:,|\s+)recover', text):
         return 2
-    if re.search(r'\b(?:coaster|sailor|shuffle|triple step|triple|chasse|kick ball change|mambo)\b', text):
+    if re.search(r'\bkick ball change\b', text):
+        return 2
+    if re.search(r'\b(?:grapevine|vine)\b', text):
+        return 3
+    if re.match(r'^(?:touch|kick|point|brush|scuff|hitch|hold)\b', text) and not re.search(r'\b(?:step|rock|cross)\b', text):
+        return 0
+    if re.search(r'\b(?:coaster|sailor|shuffle|triple step|triple|chasse|mambo)\b', text):
         return 3
     if re.search(r'\b(?:grapevine|vine|jazz box|rumba box|monterey|charleston)\b', text):
         return 4
